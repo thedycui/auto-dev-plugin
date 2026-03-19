@@ -1,0 +1,160 @@
+/**
+ * auto-dev MCP Server — Type Definitions
+ *
+ * All runtime schemas are defined with Zod v4.
+ * TypeScript interfaces are inferred from schemas via `z.infer<>`.
+ */
+import { z } from "zod/v4";
+export declare const ModeSchema: z.ZodEnum<{
+    full: "full";
+    quick: "quick";
+}>;
+export declare const PhaseStatusSchema: z.ZodEnum<{
+    IN_PROGRESS: "IN_PROGRESS";
+    PASS: "PASS";
+    NEEDS_REVISION: "NEEDS_REVISION";
+    BLOCKED: "BLOCKED";
+    COMPLETED: "COMPLETED";
+}>;
+export declare const OnConflictSchema: z.ZodEnum<{
+    resume: "resume";
+    overwrite: "overwrite";
+}>;
+export declare const StackInfoSchema: z.ZodObject<{
+    language: z.ZodString;
+    buildCmd: z.ZodString;
+    testCmd: z.ZodString;
+    langChecklist: z.ZodString;
+}, z.core.$strip>;
+export type StackInfo = z.infer<typeof StackInfoSchema>;
+export declare const GitInfoSchema: z.ZodObject<{
+    currentBranch: z.ZodString;
+    isDirty: z.ZodBoolean;
+    diffStat: z.ZodString;
+}, z.core.$strip>;
+export type GitInfo = z.infer<typeof GitInfoSchema>;
+export declare const LessonEntrySchema: z.ZodObject<{
+    phase: z.ZodNumber;
+    category: z.ZodString;
+    lesson: z.ZodString;
+    context: z.ZodOptional<z.ZodString>;
+    timestamp: z.ZodString;
+}, z.core.$strip>;
+export type LessonEntry = z.infer<typeof LessonEntrySchema>;
+export declare const StateJsonSchema: z.ZodObject<{
+    topic: z.ZodString;
+    mode: z.ZodEnum<{
+        full: "full";
+        quick: "quick";
+    }>;
+    phase: z.ZodNumber;
+    task: z.ZodOptional<z.ZodNumber>;
+    iteration: z.ZodOptional<z.ZodNumber>;
+    status: z.ZodEnum<{
+        IN_PROGRESS: "IN_PROGRESS";
+        PASS: "PASS";
+        NEEDS_REVISION: "NEEDS_REVISION";
+        BLOCKED: "BLOCKED";
+        COMPLETED: "COMPLETED";
+    }>;
+    stack: z.ZodObject<{
+        language: z.ZodString;
+        buildCmd: z.ZodString;
+        testCmd: z.ZodString;
+        langChecklist: z.ZodString;
+    }, z.core.$strip>;
+    outputDir: z.ZodString;
+    projectRoot: z.ZodString;
+    dirty: z.ZodOptional<z.ZodBoolean>;
+    interactive: z.ZodOptional<z.ZodBoolean>;
+    dryRun: z.ZodOptional<z.ZodBoolean>;
+    startedAt: z.ZodString;
+    updatedAt: z.ZodString;
+}, z.core.$strip>;
+export type StateJson = z.infer<typeof StateJsonSchema>;
+export declare const InitInputSchema: z.ZodObject<{
+    projectRoot: z.ZodString;
+    topic: z.ZodString;
+    mode: z.ZodEnum<{
+        full: "full";
+        quick: "quick";
+    }>;
+    startPhase: z.ZodOptional<z.ZodNumber>;
+    interactive: z.ZodOptional<z.ZodBoolean>;
+    dryRun: z.ZodOptional<z.ZodBoolean>;
+    onConflict: z.ZodOptional<z.ZodEnum<{
+        resume: "resume";
+        overwrite: "overwrite";
+    }>>;
+}, z.core.$strip>;
+export type InitInput = z.infer<typeof InitInputSchema>;
+export declare const InitOutputSchema: z.ZodObject<{
+    outputDir: z.ZodString;
+    stateFile: z.ZodString;
+    resumed: z.ZodBoolean;
+    stack: z.ZodObject<{
+        language: z.ZodString;
+        buildCmd: z.ZodString;
+        testCmd: z.ZodString;
+        langChecklist: z.ZodString;
+    }, z.core.$strip>;
+    git: z.ZodObject<{
+        currentBranch: z.ZodString;
+        isDirty: z.ZodBoolean;
+        diffStat: z.ZodString;
+    }, z.core.$strip>;
+    variables: z.ZodRecord<z.ZodString, z.ZodString>;
+}, z.core.$strip>;
+export type InitOutput = z.infer<typeof InitOutputSchema>;
+export declare const RenderInputSchema: z.ZodObject<{
+    promptFile: z.ZodString;
+    variables: z.ZodRecord<z.ZodString, z.ZodString>;
+    extraContext: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export type RenderInput = z.infer<typeof RenderInputSchema>;
+export declare const RenderOutputSchema: z.ZodObject<{
+    renderedPrompt: z.ZodString;
+    warnings: z.ZodArray<z.ZodString>;
+}, z.core.$strip>;
+export type RenderOutput = z.infer<typeof RenderOutputSchema>;
+export declare const CheckpointInputSchema: z.ZodObject<{
+    phase: z.ZodNumber;
+    task: z.ZodOptional<z.ZodNumber>;
+    status: z.ZodEnum<{
+        IN_PROGRESS: "IN_PROGRESS";
+        PASS: "PASS";
+        NEEDS_REVISION: "NEEDS_REVISION";
+        BLOCKED: "BLOCKED";
+        COMPLETED: "COMPLETED";
+    }>;
+    summary: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export type CheckpointInput = z.infer<typeof CheckpointInputSchema>;
+export declare const DiffCheckInputSchema: z.ZodObject<{
+    expectedFiles: z.ZodArray<z.ZodString>;
+    baseCommit: z.ZodString;
+}, z.core.$strip>;
+export type DiffCheckInput = z.infer<typeof DiffCheckInputSchema>;
+export declare const DiffCheckOutputSchema: z.ZodObject<{
+    actualFiles: z.ZodArray<z.ZodString>;
+    expectedButMissing: z.ZodArray<z.ZodString>;
+    unexpectedChanges: z.ZodArray<z.ZodString>;
+    diffStat: z.ZodString;
+    isClean: z.ZodBoolean;
+}, z.core.$strip>;
+export type DiffCheckOutput = z.infer<typeof DiffCheckOutputSchema>;
+export declare const PreflightInputSchema: z.ZodObject<{
+    projectRoot: z.ZodString;
+    topic: z.ZodString;
+    phase: z.ZodNumber;
+}, z.core.$strip>;
+export type PreflightInput = z.infer<typeof PreflightInputSchema>;
+export declare const PreflightOutputSchema: z.ZodObject<{
+    ready: z.ZodBoolean;
+    checks: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        passed: z.ZodBoolean;
+        message: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type PreflightOutput = z.infer<typeof PreflightOutputSchema>;
