@@ -57,9 +57,11 @@ server.tool(
     topic: z.string(),
     mode: z.enum(["full", "quick"]),
     startPhase: z.number().optional(),
+    interactive: z.boolean().optional(),
+    dryRun: z.boolean().optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
   },
-  async ({ projectRoot, topic, mode, startPhase, onConflict }) => {
+  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -100,6 +102,14 @@ server.tool(
     const stack = await sm.detectStack();
     const git = await new GitManager(projectRoot).getStatus();
     await sm.init(mode, stack, startPhase);
+
+    // Persist behavior flags to state
+    const behaviorUpdates: Record<string, unknown> = {};
+    if (interactive) behaviorUpdates["interactive"] = true;
+    if (dryRun) behaviorUpdates["dryRun"] = true;
+    if (Object.keys(behaviorUpdates).length > 0) {
+      await sm.atomicUpdate(behaviorUpdates);
+    }
 
     const state = sm.getFullState();
     return textResult({
@@ -156,6 +166,8 @@ server.tool(
       iteration: z.number().optional(),
       status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]).optional(),
       dirty: z.boolean().optional(),
+      interactive: z.boolean().optional(),
+      dryRun: z.boolean().optional(),
     }),
   },
   async ({ projectRoot, topic, updates }) => {
@@ -292,6 +304,7 @@ server.tool(
     if (phase >= 2) await fileCheck("design_md", join(outputDir, "design.md"));
     if (phase >= 3) await fileCheck("plan_md", join(outputDir, "plan.md"));
     if (phase >= 5) await fileCheck("code_review_md", join(outputDir, "code-review.md"));
+    if (phase >= 6) await fileCheck("e2e_test_results_md", join(outputDir, "e2e-test-results.md"));
 
     const ready = checks.every((c) => c.passed);
     return textResult({ ready, checks });
