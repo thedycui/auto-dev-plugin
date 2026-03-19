@@ -11,4 +11,7 @@ Parse the user's arguments to determine:
 - If `--resume` is given: resume from last checkpoint
 - If `--skip-design` is given with a plan file: start from Phase 3
 - If `--phase N` is given: start from Phase N
+- If `--dry-run` is given: only run Phase 1-2 (design + plan), then stop
+- If `--interactive` is given: enable interactive mode (confirmations, user prompts for git dirty state)
+- Default: fully automatic, zero confirmation
 - Otherwise: start from Phase 1 DESIGN with the description as input
