@@ -375,6 +375,38 @@ auto-dev-plugin/
 └── README.md
 ```
 
+## 更新
+
+当插件发布新版本后，团队成员按以下步骤更新：
+
+```bash
+# 1. 刷新 marketplace（拉取最新版本信息）
+/plugin marketplace update auto-dev-local
+
+# 2. 打开 Plugin 管理界面
+/plugin
+# → 切到 "Installed" 标签
+# → 选择 auto-dev
+# → 点击 "Update now"
+
+# 3. 生效
+/reload-plugins
+```
+
+**注意**：Claude Code 通过 `plugin.json` 和 `marketplace.json` 中的 `version` 字段判断是否有新版本。如果版本号未变，会提示 "already at the latest version"。
+
+### 发布新版本（维护者）
+
+```bash
+# 1. 修改代码
+# 2. 同步更新两处版本号（必须一致）：
+#    - .claude-plugin/plugin.json    → "version": "5.2.0"
+#    - .claude-plugin/marketplace.json → "version": "5.2.0"
+# 3. 如有 TypeScript 改动：cd mcp && npm run build
+# 4. 提交并推送
+git add -A && git commit -m "release: v5.2.0" && git push origin master
+```
+
 ## 从 v4 Skill 迁移
 
 如果你之前使用的是纯 Skill 版本（v4）：
