@@ -32,7 +32,7 @@ function defaultSkillsDir(): string {
 
 function textResult(data: unknown): { content: Array<{ type: "text"; text: string }> } {
   return {
-    content: [{ type: "text" as const, text: typeof data === "string" ? data : JSON.stringify(data, null, 2) }],
+    content: [{ type: "text" as const, text: typeof data === "string" ? data : JSON.stringify(data) }],
   };
 }
 
@@ -69,29 +69,22 @@ server.tool(
       if (!onConflict) {
         return textResult({
           error: "OUTPUT_DIR_EXISTS",
-          message: `Directory docs/auto-dev/${topic} already exists. Call again with onConflict='resume' or 'overwrite'.`,
-          existingState: await sm.tryReadState(),
+          message: `docs/auto-dev/${topic} exists. Use onConflict='resume' or 'overwrite'.`,
         });
       }
       if (onConflict === "resume") {
         const state = await sm.loadAndValidate();
-        const git = await new GitManager(projectRoot).getStatus();
         return textResult({
           outputDir: sm.outputDir,
-          stateFile: sm.stateFilePath,
           resumed: true,
-          stack: state.stack,
-          git,
-          variables: {
-            project_root: state.projectRoot,
-            output_dir: sm.outputDir,
-            topic: state.topic,
-            language: state.stack.language,
-            build_cmd: state.stack.buildCmd,
-            test_cmd: state.stack.testCmd,
-            lang_checklist: state.stack.langChecklist,
-            mode: state.mode,
-          },
+          topic: state.topic,
+          mode: state.mode,
+          phase: state.phase,
+          status: state.status,
+          language: state.stack.language,
+          buildCmd: state.stack.buildCmd,
+          testCmd: state.stack.testCmd,
+          langChecklist: state.stack.langChecklist,
         });
       }
       if (onConflict === "overwrite") {
@@ -114,20 +107,15 @@ server.tool(
     const state = sm.getFullState();
     return textResult({
       outputDir: sm.outputDir,
-      stateFile: sm.stateFilePath,
       resumed: false,
-      stack,
-      git,
-      variables: {
-        project_root: state.projectRoot,
-        output_dir: sm.outputDir,
-        topic: state.topic,
-        language: stack.language,
-        build_cmd: stack.buildCmd,
-        test_cmd: stack.testCmd,
-        lang_checklist: stack.langChecklist,
-        mode: state.mode,
-      },
+      topic: state.topic,
+      mode: state.mode,
+      language: stack.language,
+      buildCmd: stack.buildCmd,
+      testCmd: stack.testCmd,
+      langChecklist: stack.langChecklist,
+      branch: git.currentBranch,
+      dirty: git.isDirty,
     });
   },
 );
@@ -173,7 +161,7 @@ server.tool(
   async ({ projectRoot, topic, updates }) => {
     const sm = new StateManager(projectRoot, topic);
     await sm.atomicUpdate(updates);
-    return textResult(sm.getFullState());
+    return textResult({ ok: true, updated: Object.keys(updates) });
   },
 );
 
@@ -233,7 +221,7 @@ server.tool(
       await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
 
-    return textResult({ success: true, checkpoint: line });
+    return textResult({ ok: true });
   },
 );
 

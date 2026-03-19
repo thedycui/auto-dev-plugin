@@ -26,7 +26,7 @@ function defaultSkillsDir() {
 }
 function textResult(data) {
     return {
-        content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data, null, 2) }],
+        content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data) }],
     };
 }
 // ---------------------------------------------------------------------------
@@ -54,29 +54,22 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         if (!onConflict) {
             return textResult({
                 error: "OUTPUT_DIR_EXISTS",
-                message: `Directory docs/auto-dev/${topic} already exists. Call again with onConflict='resume' or 'overwrite'.`,
-                existingState: await sm.tryReadState(),
+                message: `docs/auto-dev/${topic} exists. Use onConflict='resume' or 'overwrite'.`,
             });
         }
         if (onConflict === "resume") {
             const state = await sm.loadAndValidate();
-            const git = await new GitManager(projectRoot).getStatus();
             return textResult({
                 outputDir: sm.outputDir,
-                stateFile: sm.stateFilePath,
                 resumed: true,
-                stack: state.stack,
-                git,
-                variables: {
-                    project_root: state.projectRoot,
-                    output_dir: sm.outputDir,
-                    topic: state.topic,
-                    language: state.stack.language,
-                    build_cmd: state.stack.buildCmd,
-                    test_cmd: state.stack.testCmd,
-                    lang_checklist: state.stack.langChecklist,
-                    mode: state.mode,
-                },
+                topic: state.topic,
+                mode: state.mode,
+                phase: state.phase,
+                status: state.status,
+                language: state.stack.language,
+                buildCmd: state.stack.buildCmd,
+                testCmd: state.stack.testCmd,
+                langChecklist: state.stack.langChecklist,
             });
         }
         if (onConflict === "overwrite") {
@@ -98,20 +91,15 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     const state = sm.getFullState();
     return textResult({
         outputDir: sm.outputDir,
-        stateFile: sm.stateFilePath,
         resumed: false,
-        stack,
-        git,
-        variables: {
-            project_root: state.projectRoot,
-            output_dir: sm.outputDir,
-            topic: state.topic,
-            language: stack.language,
-            build_cmd: stack.buildCmd,
-            test_cmd: stack.testCmd,
-            lang_checklist: stack.langChecklist,
-            mode: state.mode,
-        },
+        topic: state.topic,
+        mode: state.mode,
+        language: stack.language,
+        buildCmd: stack.buildCmd,
+        testCmd: stack.testCmd,
+        langChecklist: stack.langChecklist,
+        branch: git.currentBranch,
+        dirty: git.isDirty,
     });
 });
 // ===========================================================================
@@ -143,7 +131,7 @@ server.tool("auto_dev_state_update", "Update state fields (phase, task, iteratio
 }, async ({ projectRoot, topic, updates }) => {
     const sm = new StateManager(projectRoot, topic);
     await sm.atomicUpdate(updates);
-    return textResult(sm.getFullState());
+    return textResult({ ok: true, updated: Object.keys(updates) });
 });
 // ===========================================================================
 // 4. auto_dev_checkpoint
@@ -194,7 +182,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
         await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
-    return textResult({ success: true, checkpoint: line });
+    return textResult({ ok: true });
 });
 // ===========================================================================
 // 5. auto_dev_render
