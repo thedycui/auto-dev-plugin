@@ -84,6 +84,10 @@ export const StateJsonSchema = z.object({
   // Dirty flag — set when progress-log was written but state.json update failed
   dirty: z.boolean().optional(),
 
+  // Behavior flags
+  interactive: z.boolean().optional(),  // --interactive mode (default: false = fully automatic)
+  dryRun: z.boolean().optional(),       // --dry-run mode (only Phase 1-2)
+
   // Timestamps
   startedAt: z.string(),
   updatedAt: z.string(),
@@ -100,7 +104,8 @@ export const InitInputSchema = z.object({
   topic: z.string(),
   mode: ModeSchema,
   startPhase: z.number().int().optional(),
-  noConfirm: z.boolean().optional(),
+  interactive: z.boolean().optional(),   // --interactive mode (replaces noConfirm)
+  dryRun: z.boolean().optional(),        // --dry-run: only Phase 1-2
   onConflict: OnConflictSchema.optional(),
 });
 
