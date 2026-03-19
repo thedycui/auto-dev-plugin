@@ -7,7 +7,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod/v4";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readFile, writeFile, stat } from "node:fs/promises";
 
 import { StateManager } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
@@ -20,7 +22,7 @@ import { LessonsManager } from "./lessons-manager.js";
 
 /** Resolve the plugin root directory (two levels up from mcp/src/). */
 function pluginRoot(): string {
-  return resolve(dirname(import.meta.url.replace("file://", "")), "..", "..");
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 /** Default skills directory inside the plugin. */
@@ -71,7 +73,24 @@ server.tool(
       }
       if (onConflict === "resume") {
         const state = await sm.loadAndValidate();
-        return textResult({ ...state, resumed: true });
+        const git = await new GitManager(projectRoot).getStatus();
+        return textResult({
+          outputDir: sm.outputDir,
+          stateFile: sm.stateFilePath,
+          resumed: true,
+          stack: state.stack,
+          git,
+          variables: {
+            project_root: state.projectRoot,
+            output_dir: sm.outputDir,
+            topic: state.topic,
+            language: state.stack.language,
+            build_cmd: state.stack.buildCmd,
+            test_cmd: state.stack.testCmd,
+            lang_checklist: state.stack.langChecklist,
+            mode: state.mode,
+          },
+        });
       }
       if (onConflict === "overwrite") {
         await sm.backupExistingDir();
@@ -131,7 +150,13 @@ server.tool(
   {
     projectRoot: z.string(),
     topic: z.string(),
-    updates: z.record(z.string(), z.unknown()),
+    updates: z.object({
+      phase: z.number().optional(),
+      task: z.number().optional(),
+      iteration: z.number().optional(),
+      status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]).optional(),
+      dirty: z.boolean().optional(),
+    }),
   },
   async ({ projectRoot, topic, updates }) => {
     const sm = new StateManager(projectRoot, topic);
@@ -175,10 +200,14 @@ server.tool(
       await sm.atomicUpdate(stateUpdates);
     } catch (err) {
       // progress-log written but state.json failed → mark dirty
+      // Direct write to mark dirty — do not go through atomicUpdate
       try {
-        await sm.atomicUpdate({ ...stateUpdates, dirty: true });
+        const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+        current.dirty = true;
+        current.updatedAt = new Date().toISOString();
+        await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
       } catch {
-        // Even dirty write failed — leave state.json.tmp for recovery
+        // Last resort: state.json.tmp preserved for manual recovery
       }
       return textResult({
         error: "STATE_UPDATE_FAILED",
@@ -189,9 +218,7 @@ server.tool(
     // 3. Create BLOCKED.md if status is BLOCKED
     if (status === "BLOCKED") {
       const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
-      const { writeFile } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      await writeFile(join(sm.outputDir, "BLOCKED.md"), blockedContent, "utf-8");
+      await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
 
     return textResult({ success: true, checkpoint: line });
@@ -232,8 +259,6 @@ server.tool(
   },
   async ({ projectRoot, topic, phase }) => {
     const sm = new StateManager(projectRoot, topic);
-    const { stat } = await import("node:fs/promises");
-    const { join } = await import("node:path");
 
     const checks: Array<{ name: string; passed: boolean; message?: string }> = [];
 
@@ -246,10 +271,11 @@ server.tool(
       checks.push({ name: "git_status", passed: false, message: "Not a git repository or git error" });
     }
 
+    const outputExists = await sm.outputDirExists();
     checks.push({
       name: "progress_log_writable",
-      passed: await sm.outputDirExists(),
-      message: await sm.outputDirExists() ? "Output dir exists" : "Output dir missing — run auto_dev_init first",
+      passed: outputExists,
+      message: outputExists ? "Output dir exists" : "Output dir missing — run auto_dev_init first",
     });
 
     // Phase-specific checks

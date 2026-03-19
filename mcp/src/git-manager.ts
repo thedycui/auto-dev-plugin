@@ -10,10 +10,18 @@ import { execFile } from "node:child_process";
 import type { GitInfo, DiffCheckOutput } from "./types.js";
 
 export class GitManager {
+  private static COMMIT_REF_RE = /^[a-zA-Z0-9_\-./~^@{}]+$/;
+
   private readonly cwd: string;
 
   constructor(cwd: string) {
     this.cwd = cwd;
+  }
+
+  private validateRef(ref: string): void {
+    if (!GitManager.COMMIT_REF_RE.test(ref) || ref.startsWith("-")) {
+      throw new Error(`Invalid git ref: ${ref}`);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -46,10 +54,13 @@ export class GitManager {
     expectedFiles: string[],
     baseCommit: string,
   ): Promise<DiffCheckOutput> {
+    this.validateRef(baseCommit);
+
     const nameOnlyOutput = await this.execGit(
       "diff",
       "--name-only",
       `${baseCommit}..HEAD`,
+      "--",
     );
     const actualFiles = nameOnlyOutput
       .trim()
@@ -63,7 +74,7 @@ export class GitManager {
     const unexpectedChanges = actualFiles.filter((f) => !expectedSet.has(f));
 
     const diffStat = (
-      await this.execGit("diff", "--stat", `${baseCommit}..HEAD`)
+      await this.execGit("diff", "--stat", `${baseCommit}..HEAD`, "--")
     ).trim();
 
     const isClean =
@@ -89,6 +100,8 @@ export class GitManager {
     baseCommit: string,
     files?: string[],
   ): Promise<{ rolledBack: string[]; message: string }> {
+    this.validateRef(baseCommit);
+
     let targetFiles: string[];
 
     if (files && files.length > 0) {

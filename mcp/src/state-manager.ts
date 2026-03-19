@@ -8,8 +8,9 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 
-import { readFile, writeFile, rename, mkdir, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, stat } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { StateJsonSchema } from "./types.js";
 import type { StateJson, StackInfo } from "./types.js";
@@ -34,7 +35,7 @@ const STACK_DETECTION: Array<{ file: string; stackFile: string }> = [
 /** Directories to search for stacks/*.md (in priority order). */
 function stackSearchPaths(): string[] {
   // __dirname resolves to mcp/src at compile-time; the plugin root is two levels up.
-  const pluginRoot = resolve(dirname(import.meta.url.replace("file://", "")), "..", "..");
+  const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
   return [
     join(pluginRoot, "skills", "auto-dev", "stacks"),
     join(homedir(), ".claude", "skills", "auto-dev", "stacks"),
@@ -110,11 +111,13 @@ export class StateManager {
     return fileExists(this.outputDir);
   }
 
-  /** Try to read and parse state.json. Returns null on any failure. */
+  /** Try to read and parse state.json. Returns null on any failure or validation error. */
   async tryReadState(): Promise<StateJson | null> {
     try {
       const raw = await readFile(this.stateFilePath, "utf-8");
-      return JSON.parse(raw) as StateJson;
+      const parsed = JSON.parse(raw);
+      const result = StateJsonSchema.safeParse(parsed);
+      return result.success ? result.data : null;
     } catch {
       return null;
     }
@@ -405,7 +408,7 @@ export class StateManager {
     );
   }
 
-  /** Append content to progress-log.md. */
+  /** Append content to progress-log.md (atomic via write-to-temp-then-rename). */
   async appendToProgressLog(content: string): Promise<void> {
     let existing: string;
     try {
@@ -416,13 +419,6 @@ export class StateManager {
       );
     }
 
-    const updated = existing + content;
-    try {
-      await writeFile(this.progressLogPath, updated, "utf-8");
-    } catch (err) {
-      throw new Error(
-        `Failed to write progress-log at ${this.progressLogPath}: ${(err as Error).message}`,
-      );
-    }
+    await this.atomicWrite(this.progressLogPath, existing + content);
   }
 }
