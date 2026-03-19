@@ -1,0 +1,74 @@
+# Phase 4: Full Code Review
+
+## Task
+
+对本次 auto-dev 的全部代码变更进行深度审查。
+
+**Topic**: {topic}
+**Language**: {language}
+**Project Root**: {project_root}
+**Design Doc**: {output_dir}/design.md
+**Plan Doc**: {output_dir}/plan.md
+
+## Review Scope
+
+审查从 Phase 3 以来的所有代码变更，重点关注跨任务的集成问题。
+
+## Review Checklist
+
+<!-- requires: code-review-common -->
+<!-- requires: {lang_checklist} -->
+
+## Must-Execute Rules
+
+### Rule 1: Caller-Side Review
+当新代码实现接口方法或返回对象被已有代码消费时，必须追踪消费方的完整处理路径：
+1. 识别所有调用方/消费方（grep 接口方法名、返回类型的字段 getter）
+2. 追踪返回值的每个字段在下游如何被使用
+3. 验证已有消费方能正确处理新代码返回的值
+
+> 不只审"生产者"，必须审"消费者"。
+
+### Rule 2: Dormant Path Detection
+识别新功能依赖的已有代码路径是否曾在生产环境被执行过：
+1. 列出新功能依赖的所有已有代码路径
+2. 对每条路径标注：已验证（生产在用）/ 未验证（代码存在但从未执行）
+3. 未验证路径标为 P1 风险
+
+> "代码存在" 不等于 "代码验证过"，首次激活的路径是最高风险。
+
+## Cross-Task Focus
+
+- 组件间 API 接口匹配（生产者和消费者一致）
+- 数据模型与设计一致
+- 没有设计中未提到的"额外功能"
+- 跨任务的数据流和错误传播
+
+## Output Format
+
+将审查结果写入 `{output_dir}/code-review.md`，格式：
+
+```markdown
+# Code Review: {topic}
+
+## P0 (阻塞性问题)
+- [问题描述] → [修复建议] → [涉及文件]
+
+## P1 (重要问题)
+- [问题描述] → [修复建议] → [涉及文件]
+
+## P2 (优化建议)
+- [建议描述]
+
+## Dormant Path Analysis
+| 代码路径 | 状态 | 风险等级 |
+|---------|------|---------|
+| ... | 已验证/未验证 | P1/P2 |
+
+## 结论
+PASS / NEEDS_FIX
+```
+
+- P0/P1 必须给出具体修复建议和涉及文件
+- 只检查与本次变更相关的 checklist 项
+- 不 bikeshed
