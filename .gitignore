@@ -1,5 +1,6 @@
 node_modules/
 dist/
+mcp/dist/
 *.js
 *.d.ts
 *.js.map
