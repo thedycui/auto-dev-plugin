@@ -1,0 +1,11 @@
+{
+  "name": "auto-dev",
+  "description": "Intelligent development automation plugin that provides guided workflows, context-aware code generation, and best-practice enforcement for full-stack projects",
+  "version": "5.0.0",
+  "author": {
+    "name": "Auto Dev Team"
+  },
+  "tags": ["development", "automation", "workflow", "code-generation"],
+  "category": "development",
+  "local": true
+}
