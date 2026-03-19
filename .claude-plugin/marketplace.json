@@ -1,11 +1,14 @@
 {
-  "name": "auto-dev",
-  "description": "Intelligent development automation plugin that provides guided workflows, context-aware code generation, and best-practice enforcement for full-stack projects",
-  "version": "5.0.0",
-  "author": {
+  "name": "auto-dev-local",
+  "owner": {
     "name": "Auto Dev Team"
   },
-  "tags": ["development", "automation", "workflow", "code-generation"],
-  "category": "development",
-  "local": true
+  "plugins": [
+    {
+      "name": "auto-dev",
+      "source": "./",
+      "version": "5.1.0",
+      "description": "自治开发循环 — 从设计到验收的全自动闭环"
+    }
+  ]
 }
