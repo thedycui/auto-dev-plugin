@@ -60,6 +60,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         if (onConflict === "resume") {
             const state = await sm.loadAndValidate();
             return textResult({
+                projectRoot: state.projectRoot,
                 outputDir: sm.outputDir,
                 resumed: true,
                 topic: state.topic,
@@ -90,6 +91,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     }
     const state = sm.getFullState();
     return textResult({
+        projectRoot: state.projectRoot,
         outputDir: sm.outputDir,
         resumed: false,
         topic: state.topic,

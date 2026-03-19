@@ -75,6 +75,7 @@ server.tool(
       if (onConflict === "resume") {
         const state = await sm.loadAndValidate();
         return textResult({
+          projectRoot: state.projectRoot,
           outputDir: sm.outputDir,
           resumed: true,
           topic: state.topic,
@@ -106,6 +107,7 @@ server.tool(
 
     const state = sm.getFullState();
     return textResult({
+      projectRoot: state.projectRoot,
       outputDir: sm.outputDir,
       resumed: false,
       topic: state.topic,
