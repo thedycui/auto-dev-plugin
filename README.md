@@ -12,42 +12,221 @@ auto-dev 是一个 Claude Code Plugin，将「自治开发循环」从纯 Skill 
 默认全自动，零确认 — auto-dev 的第一性原理
 ```
 
-### 六阶段流程
+## 完整流程详解
+
+### 流程全景图
 
 ```
-Phase 1: DESIGN    架构师产出设计文档（含验收标准 AC-N）
-Phase 2: PLAN      Tech Lead 产出实施计划
-Phase 3: EXECUTE   开发者逐任务实现
-Phase 4: VERIFY    编译 + 测试 + 整体代码审查
-Phase 5: E2E TEST  端到端测试设计与实现
-Phase 6: ACCEPTANCE 对照验收标准逐条验证
+用户输入 /auto-dev "功能描述"
+         │
+         ▼
+┌─ Phase 1: DESIGN ─────────────────────────────────────┐
+│  Architect Agent 探索代码库 → 产出 design.md           │
+│  (含方案对比、数据模型、验收标准 AC-N)                   │
+│  Reviewer Agent 审查 → P0/P1? → 修复 → 重审(max 3轮)  │
+└────────────────────────────────────────────────────────┘
+         │ PASS
+         ▼
+┌─ Phase 2: PLAN ───────────────────────────────────────┐
+│  Tech Lead Agent 拆解任务 → 产出 plan.md               │
+│  (含依赖关系、文件清单、复杂度评估)                      │
+│  Reviewer Agent 审查 → P0/P1? → 修复 → 重审(max 3轮)  │
+└────────────────────────────────────────────────────────┘
+         │ PASS
+         ▼
+┌─ Phase 3: EXECUTE ────────────────────────────────────┐
+│  对 plan.md 中每个任务：                                │
+│    Developer Agent 实现 → git commit                   │
+│    diff_check 校验变更范围                              │
+│    Reviewer Agent 快速审查                              │
+│    NEEDS_FIX → 修复(max 2次) → 仍失败 → rollback + 跳过│
+└────────────────────────────────────────────────────────┘
+         │ 全部任务完成
+         ▼
+┌─ Phase 4: VERIFY ─────────────────────────────────────┐
+│  Step 1: 编译 {build_cmd} → 失败则 bug-analyzer 修复   │
+│  Step 2: 测试 {test_cmd} → 失败则 bug-analyzer 修复    │
+│  Step 3: Reviewer Agent 整体代码审查                    │
+│          (聚焦跨任务问题：接口一致性、全局状态、安全)     │
+└────────────────────────────────────────────────────────┘
+         │ PASS
+         ▼
+┌─ Phase 5: E2E TEST ──────────────────────────────────┐
+│  Test Architect Agent 设计测试用例                      │
+│  Reviewer Agent 审查覆盖度                             │
+│  Developer Agent 实现测试                              │
+│  运行测试 → 失败则 bug-analyzer + fix + 重跑           │
+└────────────────────────────────────────────────────────┘
+         │ PASS
+         ▼
+┌─ Phase 6: ACCEPTANCE ────────────────────────────────┐
+│  Acceptance Validator Agent 从 design.md 提取 AC-N     │
+│  逐条验证：代码审查 + 测试验证 + 运行验证               │
+│  产出 acceptance-report.md                             │
+│  FAIL → Developer 修复 → 重新验收(max 2次)             │
+└────────────────────────────────────────────────────────┘
+         │ PASS
+         ▼
+    ✅ COMPLETED
+    输出统计摘要 + 下一步选项
 ```
+
+### 各阶段详细说明
+
+#### Phase 1: DESIGN（设计）
+
+**目标**：产出架构设计文档，含验收标准。
+
+- **执行者**：`auto-dev-architect` Agent（资深架构师角色）
+- **产出**：`design.md`
+  - 方案对比（至少 2 个方案）
+  - 数据模型设计
+  - 接口定义
+  - 迁移路径和回滚方案
+  - **验收标准（AC-N）**：每个核心功能点的可验证条件
+- **审查**：`auto-dev-reviewer` Agent 按 `design-review.md` checklist 审查
+  - 检查功能完备性、方案选型、可靠性、安全性、验收标准质量
+  - P0/P1 问题必须修复，最多 3 轮迭代
+- **MCP 工具**：`auto_dev_preflight` → `auto_dev_render` → `auto_dev_checkpoint`
+
+#### Phase 2: PLAN（计划）
+
+**目标**：将设计拆解为可执行的任务列表。
+
+- **执行者**：`auto-dev-architect` Agent（Tech Lead 角色）
+- **产出**：`plan.md`
+  - 任务列表（编号、描述、涉及文件、依赖关系）
+  - 复杂度评估（S/M/L）
+  - 执行顺序（拓扑排序）
+  - 并行可能性标注
+- **审查**：`auto-dev-reviewer` Agent 按 `plan-review.md` checklist 审查
+  - 检查功能覆盖度、依赖关系、验证方式
+- **`--dry-run` 模式**：到这里就停止，只产出设计 + 计划
+
+#### Phase 3: EXECUTE（执行）
+
+**目标**：逐任务实现代码。
+
+- **执行者**：`auto-dev-developer` Agent（每个任务独立调用）
+- **每个任务的循环**：
+  1. 记录 `task_start_commit`
+  2. Developer Agent 实现代码
+  3. `git add + commit`
+  4. `auto_dev_diff_check` 校验：实际变更 vs 计划预期文件
+  5. Reviewer Agent 快速审查（haiku 模型，节省成本）
+  6. NEEDS_FIX → 修复 → 再审查（最多 2 次）
+  7. 仍失败 → `auto_dev_git_rollback` 精确回滚 → BLOCKED → 继续下一任务
+- **变更规模策略**：
+  - 1-3 个任务：轻量审查
+  - 4-10 个任务：标准流程
+  - 11+ 个任务：每 5 个任务插入编译检查
+
+#### Phase 4: VERIFY（验证）
+
+**目标**：确保代码可编译、测试通过、无跨任务问题。
+
+- **Step 1 编译**：执行 `{build_cmd}`，失败则 `bug-analyzer` Agent 分析 + Developer 修复（max 3 次）
+- **Step 2 测试**：执行 `{test_cmd}`，失败则同上
+- **Step 3 整体审查**：`auto-dev-reviewer` Agent 做深度审查
+  - 与 Phase 3 的任务级审查不同，聚焦 **跨任务问题**
+  - 接口一致性、全局状态管理、端到端安全/性能
+
+#### Phase 5: E2E TEST（端到端测试）
+
+**目标**：设计并实现端到端测试用例。
+
+- **Test Architect Agent** 设计测试用例（等价类划分、边界值分析）
+- **Reviewer Agent** 审查覆盖度
+- **Developer Agent** 实现测试代码
+- 运行测试 → 失败则修复 → 重跑
+
+#### Phase 6: ACCEPTANCE（验收）
+
+**目标**：对照 design.md 中的验收标准（AC-N），逐条验证。
+
+- **执行者**：`auto-dev-acceptance-validator` Agent
+- **验证方式**（按优先级）：
+  1. 代码验证：读源码确认功能已实现
+  2. 测试验证：确认有对应测试且通过
+  3. 运行验证：构造输入实际运行验证输出
+- **产出**：`acceptance-report.md`
+
+  | AC | 描述 | 验证方式 | 结果 | 证据 |
+  |----|------|---------|------|------|
+  | AC-1 | 传入空列表返回 400 | 单元测试 | PASS | XxxTest.testEmpty() |
+  | AC-2 | 100 条数据 < 3s | 无性能测试 | SKIP | 需要集成环境 |
+
+- **判定规则**：
+  - PASS：所有 AC 为 PASS 或 SKIP（无 FAIL）
+  - FAIL：有 FAIL → Developer 修复 → 重新验收（max 2 次）
+  - BLOCKED：修复后仍 FAIL
+
+### 异常处理
+
+| 场景 | 行为 |
+|------|------|
+| 3 次迭代仍有 P0 | 生成 BLOCKED.md + 停止 |
+| Subagent 超时 | 重试 1 次（timeout x 1.5）→ 仍超时则 BLOCKED |
+| 任务 BLOCKED | git 精确回滚该任务 → 跳过 → 继续下一任务 |
+| 编译/测试失败 | bug-analyzer 分析 + 修复 → 重试（max 3 次） |
+| design.md 无验收标准 | 跳过 Phase 6，记录日志 |
+
+### 状态持久化与断点恢复
+
+每个关键节点写入 CHECKPOINT 标记：
+```html
+<!-- CHECKPOINT phase=3 task=5 status=PASS timestamp=2026-03-19T15:15:00 -->
+```
+
+`--resume` 时自动解析最后一个 CHECKPOINT，从断点继续。state.json 记录完整状态，支持原子写入和 dirty 恢复。
 
 ## 安装
 
-```bash
-# 1. 克隆到 Claude Code 插件目录
-cp -r auto-dev-plugin ~/.claude/plugins/auto-dev
+### 一键安装（推荐）
 
-# 2. 安装依赖并编译 MCP Server
-cd ~/.claude/plugins/auto-dev/mcp
+在 Claude Code 中执行：
+
+```
+/plugin marketplace add https://code.iflytek.com/dycui/auto-dev-plugin.git
+/plugin install auto-dev@auto-dev-local
+/reload-plugins
+```
+
+无需手动 clone、无需 npm install、无需编译。
+
+### 手动安装
+
+如果一键安装不可用：
+
+```bash
+# 1. 克隆仓库
+git clone https://code.iflytek.com/dycui/auto-dev-plugin.git ~/.claude/plugins/auto-dev-plugin
+
+# 2. 在 Claude Code 中注册
+/plugin marketplace add ~/.claude/plugins/auto-dev-plugin
+/plugin install auto-dev@auto-dev-local
+/reload-plugins
+```
+
+### 从源码构建（开发者）
+
+```bash
+git clone https://code.iflytek.com/dycui/auto-dev-plugin.git
+cd auto-dev-plugin/mcp
 npm install
 npm run build
-
-# 3. 验证
-# 启动 Claude Code，输入 /auto-dev 确认可用
 ```
 
 ## 使用
 
 ```bash
-# 从零开始（全自动）
+# 从零开始（全自动，6 个阶段全跑）
 /auto-dev "实现用户登录功能"
 
-# 已有设计文档
+# 已有设计文档，从审查开始
 /auto-dev @design.md
 
-# 已有计划，跳过设计
+# 已有计划，跳过设计直接执行
 /auto-dev @plan.md --skip-design
 
 # 小改动，跳过设计和计划
@@ -56,7 +235,7 @@ npm run build
 # 只产出设计和计划，不实现
 /auto-dev --dry-run "重构支付模块"
 
-# 断点恢复
+# 断点恢复（从上次中断的地方继续）
 /auto-dev --resume
 
 # 交互模式（Phase 1 后等确认、git dirty 询问用户）
@@ -65,6 +244,19 @@ npm run build
 # 指定从某个阶段开始
 /auto-dev --phase 4
 ```
+
+### 参数说明
+
+| 参数 | 说明 |
+|------|------|
+| `"描述"` | 功能描述，从 Phase 1 开始 |
+| `@file.md` | 已有设计/计划文档 |
+| `--quick` | 快速模式，跳过设计和计划 |
+| `--dry-run` | 只设计不实现（Phase 1-2） |
+| `--resume` | 从上次断点恢复 |
+| `--interactive` | 启用交互确认模式 |
+| `--skip-design` | 跳过设计，直接从计划执行 |
+| `--phase N` | 从指定阶段开始（1-6） |
 
 ## 架构
 
@@ -112,56 +304,11 @@ npm run build
 
 | Agent | 角色 | 使用阶段 |
 |-------|------|---------|
-| `auto-dev-architect` | 资深架构师，产出设计文档 + 验收标准 | Phase 1 |
+| `auto-dev-architect` | 资深架构师，产出设计文档 + 验收标准 | Phase 1, 2 |
 | `auto-dev-reviewer` | 审查专家（设计/计划/代码/测试） | Phase 1-5 |
 | `auto-dev-developer` | 高级开发者，逐任务实现 | Phase 3, 6 |
 | `auto-dev-test-architect` | 测试架构师，设计 E2E 用例 | Phase 5 |
 | `auto-dev-acceptance-validator` | 验收专家，逐条验证 AC | Phase 6 |
-
-## 目录结构
-
-```
-auto-dev-plugin/
-├── .claude-plugin/
-│   ├── plugin.json              # Plugin manifest
-│   └── marketplace.json         # 本地开发元数据
-├── agents/                      # Agent 定义
-│   ├── auto-dev-architect.md
-│   ├── auto-dev-reviewer.md
-│   ├── auto-dev-developer.md
-│   ├── auto-dev-test-architect.md
-│   └── auto-dev-acceptance-validator.md
-├── commands/
-│   └── auto-dev.md              # /auto-dev 命令入口
-├── hooks/
-│   ├── hooks.json               # Hook 事件配置
-│   └── post-agent.sh            # SubagentStop 提醒脚本
-├── mcp/                         # MCP Server
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts             # 入口 + 10 个工具注册
-│       ├── state-manager.ts     # 状态管理（原子写入）
-│       ├── template-renderer.ts # 模板渲染
-│       ├── git-manager.ts       # Git 操作（rollback + diffCheck）
-│       ├── lessons-manager.ts   # 元学习
-│       └── types.ts             # 类型定义 + Zod schema
-├── skills/
-│   └── auto-dev/
-│       ├── SKILL.md             # 流程编排指令（~90 行）
-│       ├── checklists/          # 审查清单
-│       │   ├── design-review.md
-│       │   ├── plan-review.md
-│       │   ├── code-review-common.md
-│       │   ├── code-review-java8.md
-│       │   └── code-review-typescript.md
-│       └── stacks/              # 技术栈配置
-│           ├── java-maven.md
-│           ├── java-gradle.md
-│           ├── node-npm.md
-│           └── python.md
-└── README.md
-```
 
 ## 运行时产出
 
@@ -177,7 +324,7 @@ docs/auto-dev/<topic>/
 ├── code-review.md         # 整体代码审查报告
 ├── e2e-test-cases.md      # E2E 测试用例
 ├── e2e-test-results.md    # E2E 测试结果
-├── acceptance-report.md   # 验收报告
+├── acceptance-report.md   # 验收报告（Phase 6）
 └── BLOCKED.md             # 阻塞记录（仅阻塞时生成）
 ```
 
@@ -189,6 +336,44 @@ docs/auto-dev/<topic>/
 | Java (Gradle) | build.gradle | gradle build -q | gradle test -q |
 | Node.js (npm) | package.json | npm run build | npm test |
 | Python | pyproject.toml / requirements.txt | - | pytest |
+
+## 目录结构
+
+```
+auto-dev-plugin/
+├── .claude-plugin/
+│   ├── plugin.json              # Plugin manifest
+│   └── marketplace.json         # Marketplace 定义
+├── agents/                      # Agent 定义（自动发现）
+│   ├── auto-dev-architect.md
+│   ├── auto-dev-reviewer.md
+│   ├── auto-dev-developer.md
+│   ├── auto-dev-test-architect.md
+│   └── auto-dev-acceptance-validator.md
+├── commands/                    # 命令定义（自动发现）
+│   └── auto-dev.md
+├── hooks/                       # Hook 配置（自动发现）
+│   ├── hooks.json
+│   └── post-agent.sh
+├── mcp/                         # MCP Server
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── dist/                    # 编译产物（已提交，免构建）
+│   ├── node_modules/            # 依赖（已提交，免安装）
+│   └── src/
+│       ├── index.ts             # 入口 + 10 个工具注册
+│       ├── state-manager.ts     # 状态管理（原子写入）
+│       ├── template-renderer.ts # 模板渲染
+│       ├── git-manager.ts       # Git 操作（rollback + diffCheck）
+│       ├── lessons-manager.ts   # 元学习
+│       └── types.ts             # 类型定义 + Zod schema
+├── skills/                      # Skill 定义（自动发现）
+│   └── auto-dev/
+│       ├── SKILL.md             # 流程编排指令（~90 行）
+│       ├── checklists/          # 审查清单
+│       └── stacks/              # 技术栈配置
+└── README.md
+```
 
 ## 从 v4 Skill 迁移
 
