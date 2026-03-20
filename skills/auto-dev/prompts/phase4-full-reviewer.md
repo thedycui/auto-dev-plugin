@@ -10,6 +10,14 @@
 **Design Doc**: {output_dir}/design.md
 **Plan Doc**: {output_dir}/plan.md
 
+## Anti-Laziness Rule
+
+**禁止无证据 PASS**。你的审查结果必须包含：
+- 你执行的每条 Must-Execute Rule 的实际搜索结果（grep 输出、调用方列表）
+- Dormant Path Analysis 表格不能为空（至少列出"无新路径"的判断依据）
+- 如果 PASS：必须写明你审查了多少个文件、多少行变更
+- **空洞的 PASS（没有搜索证据、没有文件列表）视为审查不合格**
+
 ## Review Scope
 
 审查从 Phase 3 以来的所有代码变更，重点关注跨任务的集成问题。
