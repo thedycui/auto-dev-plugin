@@ -3,11 +3,34 @@ name: auto-dev
 description: "自治开发循环 — 从设计到测试通过的全自动闭环。支持自审迭代，最小化人工介入。Use when user says /auto-dev, asks for autonomous development, wants a full dev loop (design -> plan -> implement -> verify -> e2e test), or mentions '自治开发', '自动开发循环', '全自动闭环', 'autonomous dev', 'auto implement'. Also use when user provides a design doc and wants it implemented end-to-end without manual intervention."
 ---
 
-# auto-dev (Plugin-Powered v5.1)
+# auto-dev (Plugin-Powered v5.2)
 
 > 本 skill 由 auto-dev Plugin 的 MCP 工具和 Agent 定义驱动。
 > **默认全自动，零确认** — 这是 auto-dev 的第一性原理。
 > **严禁在非 interactive 模式下暂停等待用户确认、询问"是否继续"、或展示摘要等用户回复。Phase 之间必须直接推进，不停顿。**
+
+## ⚠️ 强制执行规则（最高优先级）
+
+**以下规则不可绕过、不可跳过、不可合理化：**
+
+1. **Phase 必须按顺序执行**：1 → 2 → 3 → 4 → 5 → 6。每个 checkpoint 返回值中包含 `mandate` 字段，必须遵守。
+2. **禁止在未调用 `auto_dev_complete` 的情况下向用户宣称任务完成**。`auto_dev_complete` 会验证所有必需 Phase 是否已 PASS，未通过则拒绝。
+3. **Phase 3 完成 ≠ 任务完成**。代码写完只是中间状态，Phase 4 (验证) 和 Phase 5 (测试) 才是质量保障的核心。
+4. **编译通过 ≠ 验证通过**。Phase 4 要求执行 build_cmd + test_cmd + 全量代码审查。
+
+### 驱动循环
+
+```
+init → preflight(1)
+while phase <= maxPhase:
+    execute_phase(phase)
+    result = checkpoint(phase, status)    # 返回值包含 mandate
+    遵守 result.mandate                   # 强制下一步
+    phase = result.nextPhase
+auto_dev_complete()                       # 完成门禁
+```
+
+checkpoint 返回的 `mandate` 字段是强制指令，不是建议。如果你发现自己在想"这个 Phase 可以跳过"——停下来，你在合理化。
 
 ## 变量映射
 
@@ -127,8 +150,11 @@ topic: {topic} | branch: {branch} | output: {output_dir}
 
 ## 完成后
 
-1. Claude 读取 state.json + progress-log.md 汇总统计
-2. `auto_dev_checkpoint(status="COMPLETED")`
+1. 调用 `auto_dev_complete(projectRoot, topic)` — **必须调用，这是完成门禁**
+   - 工具会验证所有必需 Phase 是否已 PASS
+   - 如果有未通过的 Phase → 返回 error，列出缺失的 Phase → **必须补齐**
+   - 全部通过 → 返回 canComplete=true，自动标记 COMPLETED
+2. 只有 `auto_dev_complete` 返回成功后，才能向用户宣称任务完成
 3. 提示下一步：
    a. /commit — 整理 commit 历史
    b. git merge 到测试分支

@@ -13,6 +13,7 @@ import { StateManager } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
+import { computeNextDirective, validateCompletion } from "./phase-enforcer.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -147,7 +148,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     summary: z.string().optional(),
 }, async ({ projectRoot, topic, phase, task, status, summary }) => {
     const sm = new StateManager(projectRoot, topic);
-    await sm.loadAndValidate();
+    const state = await sm.loadAndValidate();
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
         return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
@@ -184,7 +185,9 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
         await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
-    return textResult({ ok: true });
+    // 4. Compute next phase directive — forces Claude to continue to next phase
+    const nextDirective = computeNextDirective(phase, status, state);
+    return textResult({ ok: true, ...nextDirective });
 });
 // ===========================================================================
 // 5. auto_dev_render
@@ -299,6 +302,50 @@ server.tool("auto_dev_lessons_get", "Get historical lessons for a specific phase
     const lessons = new LessonsManager(sm.outputDir);
     const entries = await lessons.get(phase, category);
     return textResult(entries);
+});
+// ===========================================================================
+// 11. auto_dev_complete (Phase Completion Gate)
+// ===========================================================================
+server.tool("auto_dev_complete", "Completion gate: validates ALL required phases have PASS status before allowing the session to be declared complete. MUST be called before telling the user that auto-dev is finished. Will REJECT if any phase was skipped.", {
+    projectRoot: z.string(),
+    topic: z.string(),
+}, async ({ projectRoot, topic }) => {
+    const sm = new StateManager(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+    // Read progress-log to find all passed phases
+    const progressLogPath = join(sm.outputDir, "progress-log.md");
+    let progressLogContent = "";
+    try {
+        progressLogContent = await readFile(progressLogPath, "utf-8");
+    }
+    catch {
+        return textResult({
+            error: "PROGRESS_LOG_MISSING",
+            message: "progress-log.md not found. Cannot validate completion.",
+            canComplete: false,
+        });
+    }
+    const validation = validateCompletion(progressLogContent, state.mode, state.dryRun === true);
+    if (!validation.canComplete) {
+        return textResult({
+            error: "INCOMPLETE",
+            canComplete: false,
+            passedPhases: validation.passedPhases,
+            missingPhases: validation.missingPhases,
+            message: validation.message,
+            mandate: "[BLOCKED] " + validation.message + " 禁止向用户宣称任务完成。",
+        });
+    }
+    // All phases passed — mark as COMPLETED
+    const completeLine = sm.getCheckpointLine(state.phase, undefined, "COMPLETED", "All required phases passed. Session complete.");
+    await sm.appendToProgressLog("\n" + completeLine + "\n");
+    await sm.atomicUpdate({ status: "COMPLETED" });
+    return textResult({
+        canComplete: true,
+        passedPhases: validation.passedPhases,
+        message: validation.message,
+        status: "COMPLETED",
+    });
 });
 // ===========================================================================
 // Start server
