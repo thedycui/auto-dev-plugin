@@ -13,7 +13,7 @@ import { StateManager } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles } from "./phase-enforcer.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -185,7 +185,57 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
         await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
-    // 4. Compute next phase directive — forces Claude to continue to next phase
+    // 4. Phase 5/6 artifact validation — prevent skipping tests or acceptance
+    if (phase === 5 && status === "PASS") {
+        // Check for new test files via git
+        let testFileCount = 0;
+        try {
+            const git = new GitManager(projectRoot);
+            const progressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8").catch(() => "");
+            // Extract Phase 3 start commit from progress-log (first Phase 3 checkpoint)
+            const phase3Match = /CHECKPOINT phase=3.*?timestamp=/g.exec(progressLog);
+            // Use git diff to find new files since init
+            const { execFile: execFileAsync } = await import("node:child_process");
+            const diffOutput = await new Promise((resolve, reject) => {
+                execFileAsync("git", ["diff", "--name-only", "--diff-filter=A", "HEAD~20", "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+                    if (err)
+                        resolve("");
+                    else
+                        resolve(stdout);
+                });
+            });
+            const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
+            testFileCount = countTestFiles(newFiles);
+        }
+        catch { /* ignore git errors */ }
+        let resultsContent = null;
+        try {
+            resultsContent = await readFile(join(sm.outputDir, "e2e-test-results.md"), "utf-8");
+        }
+        catch { /* file doesn't exist */ }
+        const phase5Validation = await validatePhase5Artifacts(sm.outputDir, testFileCount, resultsContent);
+        if (!phase5Validation.valid) {
+            return textResult({
+                error: "PHASE5_ARTIFACTS_MISSING",
+                ...phase5Validation,
+            });
+        }
+    }
+    if (phase === 6 && status === "PASS") {
+        let reportContent = null;
+        try {
+            reportContent = await readFile(join(sm.outputDir, "acceptance-report.md"), "utf-8");
+        }
+        catch { /* file doesn't exist */ }
+        const phase6Validation = validatePhase6Artifacts(reportContent);
+        if (!phase6Validation.valid) {
+            return textResult({
+                error: "PHASE6_ARTIFACTS_MISSING",
+                ...phase6Validation,
+            });
+        }
+    }
+    // 5. Compute next phase directive — forces Claude to continue to next phase
     const nextDirective = computeNextDirective(phase, status, state);
     return textResult({ ok: true, ...nextDirective });
 });

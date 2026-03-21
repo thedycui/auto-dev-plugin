@@ -140,3 +140,118 @@ export function validateCompletion(
     message: `不能完成：以下 Phase 未通过: ${missingNames}。必须按顺序执行所有 Phase。`,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 & 6 Artifact Validation
+// ---------------------------------------------------------------------------
+
+export interface PhaseArtifactValidation {
+  valid: boolean;
+  errors: string[];
+  mandate: string;
+}
+
+/**
+ * Phase 5 验证：检查是否有实际的测试产出物。
+ * 防止 Claude 只写测试计划文档而不写测试代码。
+ *
+ * 验证规则：
+ * 1. 必须有新增的测试文件（通过 git diff 检测 *Test.java / *.test.ts 等）
+ * 2. e2e-test-results.md 必须包含实际执行结果（PASS/FAIL），不能只有计划
+ */
+export async function validatePhase5Artifacts(
+  outputDir: string,
+  testFileCount: number,
+  resultsContent: string | null,
+): Promise<PhaseArtifactValidation> {
+  const errors: string[] = [];
+
+  // 1. 检查测试文件
+  if (testFileCount === 0) {
+    errors.push(
+      "未检测到新增的测试文件。必须调用 test-architect agent 设计用例，" +
+      "再调用 developer agent 实现测试代码。不能只写测试计划文档。"
+    );
+  }
+
+  // 2. 检查测试结果文件
+  if (!resultsContent) {
+    errors.push("e2e-test-results.md 不存在。");
+  } else {
+    const hasExecutionResult = /\b(PASS|FAIL|passed|failed|✅|❌|SUCCESS|ERROR)\b/i.test(resultsContent);
+    const hasPendingOnly = /⏳|待执行|待部署|待验证|pending/i.test(resultsContent);
+    if (!hasExecutionResult && hasPendingOnly) {
+      errors.push(
+        "e2e-test-results.md 中只有'待执行'标记，没有实际测试执行结果（PASS/FAIL）。" +
+        "必须执行测试命令并记录结果。如果部分测试需要远程环境，" +
+        "仍然必须写测试代码并标注哪些本地通过、哪些需要部署后验证。"
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      errors,
+      mandate: "[BLOCKED] Phase 5 PASS 被拒绝：" + errors.join(" "),
+    };
+  }
+
+  return { valid: true, errors: [], mandate: "" };
+}
+
+/**
+ * Phase 6 验证：检查验收报告是否存在且有实质内容。
+ * 防止 Claude 以"无 AC 标准"为由跳过验收。
+ *
+ * 验证规则：
+ * 1. acceptance-report.md 必须存在
+ * 2. 报告中必须有至少 1 条验证结果（PASS/FAIL/SKIP/VERIFIED）
+ */
+export function validatePhase6Artifacts(
+  reportContent: string | null,
+): PhaseArtifactValidation {
+  const errors: string[] = [];
+
+  if (!reportContent) {
+    errors.push(
+      "acceptance-report.md 不存在。必须调用 acceptance-validator agent 生成验收报告。" +
+      "即使 design.md 没有显式 AC-N 条目，也必须从设计目标和改动清单中自动提取验收标准。"
+    );
+  } else {
+    const hasVerification = /\b(PASS|FAIL|SKIP|VERIFIED|通过|失败|跳过)\b/i.test(reportContent);
+    if (!hasVerification) {
+      errors.push(
+        "acceptance-report.md 中没有验证结果（PASS/FAIL/SKIP）。" +
+        "报告必须包含逐条验证的结果，不能只有描述性文字。"
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      errors,
+      mandate: "[BLOCKED] Phase 6 PASS 被拒绝：" + errors.join(" "),
+    };
+  }
+
+  return { valid: true, errors: [], mandate: "" };
+}
+
+/**
+ * 检测新增的测试文件数量。
+ * 通过扫描 git diff 输出中的文件名模式判断。
+ */
+export function countTestFiles(diffFileNames: string[]): number {
+  const testPatterns = [
+    /[Tt]est\.(java|py|ts|js|kt|go|rs)$/,
+    /\.test\.(ts|js|tsx|jsx)$/,
+    /\.spec\.(ts|js|tsx|jsx)$/,
+    /_test\.(go|py)$/,
+    /tests?\//i,
+  ];
+  return diffFileNames.filter((f) =>
+    testPatterns.some((p) => p.test(f))
+  ).length;
+}
