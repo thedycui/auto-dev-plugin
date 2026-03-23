@@ -1,7 +1,7 @@
 /**
  * auto-dev MCP Server — Entry point.
  *
- * Registers all 10 MCP tools and starts the stdio transport.
+ * Registers all 11 MCP tools and starts the stdio transport.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
