@@ -133,8 +133,47 @@ server.tool("auto_dev_state_update", "Update state fields (phase, task, iteratio
     }),
 }, async ({ projectRoot, topic, updates }) => {
     const sm = new StateManager(projectRoot, topic);
+    const current = await sm.loadAndValidate();
+    const warnings = [];
+    // Guard 1: 禁止跳过 phase（允许回退，允许同 phase 更新）
+    if (updates.phase !== undefined && updates.phase > current.phase + 1) {
+        return textResult({
+            ok: false,
+            error: "INVALID_TRANSITION",
+            message: `不能从 phase ${current.phase} 跳到 phase ${updates.phase}，最多前进一步。`,
+            current: { phase: current.phase, status: current.status },
+            requested: { phase: updates.phase },
+        });
+    }
+    // Guard 2: Phase 前进时当前 phase 必须是 PASS
+    if (updates.phase !== undefined && updates.phase > current.phase && current.status !== "PASS") {
+        return textResult({
+            ok: false,
+            error: "INVALID_TRANSITION",
+            message: `当前 phase ${current.phase} status=${current.status}，未通过不能前进到 phase ${updates.phase}。请先用 auto_dev_checkpoint 标记 PASS。`,
+            current: { phase: current.phase, status: current.status },
+            requested: { phase: updates.phase },
+        });
+    }
+    // Guard 3: COMPLETED 需要前置状态（IN_PROGRESS 或 PASS）
+    if (updates.status === "COMPLETED" && current.status !== "IN_PROGRESS" && current.status !== "PASS") {
+        return textResult({
+            ok: false,
+            error: "INVALID_TRANSITION",
+            message: `当前 status=${current.status}，不能直接设为 COMPLETED。需先经过 IN_PROGRESS 或 PASS。`,
+            current: { phase: current.phase, status: current.status },
+        });
+    }
+    // Guard 4: 直接设 PASS 时警告（不阻断，但提示应使用 checkpoint）
+    if (updates.status === "PASS") {
+        warnings.push("建议使用 auto_dev_checkpoint 而非 state_update 来标记 PASS，" +
+            "checkpoint 会执行 artifact 验证和 phase-enforcer 逻辑。");
+    }
     await sm.atomicUpdate(updates);
-    return textResult({ ok: true, updated: Object.keys(updates) });
+    const result = { ok: true, updated: Object.keys(updates) };
+    if (warnings.length > 0)
+        result.warnings = warnings;
+    return textResult(result);
 });
 // ===========================================================================
 // 4. auto_dev_checkpoint
