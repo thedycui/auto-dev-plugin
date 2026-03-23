@@ -69,6 +69,10 @@
 - 如果某功能点没有负向/边界测试，必须标注 `-` 并说明原因
 - **测试用例数 < 功能点数 x 2 时**，必须解释为什么覆盖充分
 
+## Review Checklist
+
+<!-- requires: e2e-test-review -->
+
 ## Constraints
 
 - 每个测试用例必须可独立执行
