@@ -10,3 +10,13 @@ dist/
 # MCP server - include dist/ and node_modules/ for zero-build install
 !mcp/dist/
 !mcp/node_modules/
+
+# IDE / editor
+.idea/
+
+# Build artifacts
+*.tgz
+*.bak
+
+# Auto-dev session state (regenerated per session)
+mcp/docs/auto-dev/
