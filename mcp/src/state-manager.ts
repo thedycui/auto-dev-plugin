@@ -55,6 +55,43 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+function parseHeaderField(content: string, field: string): string | null {
+  const regex = new RegExp(`>\\s*${field}:\\s*(.+?)\\s*$`, "m");
+  const match = content.match(regex);
+  return match?.[1] ? match[1].trim() : null;
+}
+
+function parseAllCheckpoints(content: string): Array<{ phase: number; status: string }> {
+  const results: Array<{ phase: number; status: string }> = [];
+  const regex = /<!-- CHECKPOINT phase=(\d+).*?status=(\S+)/g;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    results.push({ phase: parseInt(match[1]!, 10), status: match[2]! });
+  }
+  return results;
+}
+
+export function extractDocSummary(content: string, maxLines: number): string {
+  // 优先查找 ## 概述 或 ## Summary 段落
+  const sectionMatch = content.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/);
+  if (sectionMatch) {
+    return sectionMatch[1]!.trim();
+  }
+  // 找不到概述段落，取前 maxLines 行
+  const lines = content.split("\n");
+  return lines.slice(0, maxLines).join("\n").trim();
+}
+
+export function extractTaskList(content: string): string {
+  const lines = content.split("\n");
+  const taskLines = lines.filter((line) =>
+    /^###\s+Task\s+\d+/.test(line) ||
+    /^-\s+\[[ x]\]\s+Task\s+\d+/i.test(line) ||
+    /^##\s+Task\s+\d+/.test(line)
+  );
+  return taskLines.join("\n").trim();
+}
+
 /**
  * Parse a stacks/*.md file and extract the `## Variables` key-value pairs.
  *
@@ -70,10 +107,10 @@ function parseStackVariables(content: string): Record<string, string> {
   const sectionMatch = content.match(/## Variables\s*\n([\s\S]*?)(?=\n## |\n$|$)/);
   if (!sectionMatch) return vars;
 
-  const lines = sectionMatch[1].split("\n");
+  const lines = sectionMatch[1]!.split("\n");
   for (const line of lines) {
     const m = line.match(/^-\s+(\w+):\s*(.+)$/);
-    if (m) {
+    if (m && m[1] && m[2]) {
       vars[m[1]] = m[2].trim();
     }
   }
@@ -168,6 +205,48 @@ export class StateManager {
 
     this.state = validated;
     return validated;
+  }
+
+  /**
+   * Rebuild state.json from progress-log.md when state.json is corrupted or missing.
+   */
+  async rebuildStateFromProgressLog(): Promise<StateJson> {
+    const content = await readFile(this.progressLogPath, "utf-8");
+
+    // 1. Parse header
+    const startedAt = parseHeaderField(content, "Started") ?? new Date().toISOString();
+    const modeStr = parseHeaderField(content, "Mode") ?? "full";
+    const mode = (modeStr === "quick" ? "quick" : "full") as "full" | "quick";
+
+    // 2. Parse all CHECKPOINTs to get last phase/status
+    const checkpoints = parseAllCheckpoints(content);
+    const last = checkpoints[checkpoints.length - 1];
+    const phase = last?.phase ?? 1;
+    const rawStatus = last?.status ?? "IN_PROGRESS";
+    // [P1-5 fix] Validate status against PhaseStatusSchema, fallback to IN_PROGRESS
+    const validStatuses = ["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"];
+    const status = validStatuses.includes(rawStatus) ? rawStatus : "IN_PROGRESS";
+
+    // 3. Re-detect stack from filesystem
+    const stack = await this.detectStack();
+
+    // 4. Assemble StateJson
+    const rebuilt: StateJson = {
+      topic: this.topic,
+      mode,
+      phase,
+      status: status as StateJson["status"],
+      stack,
+      outputDir: this.outputDir,
+      projectRoot: this.projectRoot,
+      startedAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // 5. Write state.json (no dirty flag — this is a fresh rebuild)
+    await this.atomicWrite(this.stateFilePath, JSON.stringify(rebuilt, null, 2));
+    this.state = rebuilt;
+    return rebuilt;
   }
 
   // -----------------------------------------------------------------------
@@ -387,7 +466,7 @@ export class StateManager {
     }
     if (!lastMatch) return false;
 
-    const attrs = lastMatch[1];
+    const attrs = lastMatch[1] ?? "";
 
     // Parse attributes from the last checkpoint
     const phaseMatch = attrs.match(/phase=(\d+)/);
@@ -395,10 +474,10 @@ export class StateManager {
     const statusMatch = attrs.match(/status=(\S+)/);
     const summaryMatch = attrs.match(/summary="([^"]*)"/);
 
-    const lastPhase = phaseMatch ? parseInt(phaseMatch[1], 10) : null;
-    const lastTask = taskMatch ? parseInt(taskMatch[1], 10) : undefined;
-    const lastStatus = statusMatch ? statusMatch[1] : null;
-    const lastSummary = summaryMatch ? summaryMatch[1] : undefined;
+    const lastPhase = phaseMatch?.[1] ? parseInt(phaseMatch[1], 10) : null;
+    const lastTask = taskMatch?.[1] ? parseInt(taskMatch[1], 10) : undefined;
+    const lastStatus = statusMatch?.[1] ?? null;
+    const lastSummary = summaryMatch?.[1] ?? undefined;
 
     return (
       lastPhase === phase &&

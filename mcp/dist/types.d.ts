@@ -15,6 +15,7 @@ export declare const PhaseStatusSchema: z.ZodEnum<{
     NEEDS_REVISION: "NEEDS_REVISION";
     BLOCKED: "BLOCKED";
     COMPLETED: "COMPLETED";
+    REGRESS: "REGRESS";
 }>;
 export declare const OnConflictSchema: z.ZodEnum<{
     resume: "resume";
@@ -56,6 +57,7 @@ export declare const StateJsonSchema: z.ZodObject<{
         NEEDS_REVISION: "NEEDS_REVISION";
         BLOCKED: "BLOCKED";
         COMPLETED: "COMPLETED";
+        REGRESS: "REGRESS";
     }>;
     stack: z.ZodObject<{
         language: z.ZodString;
@@ -70,6 +72,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     startCommit: z.ZodOptional<z.ZodString>;
+    regressionCount: z.ZodOptional<z.ZodNumber>;
     phaseTimings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         startedAt: z.ZodString;
         completedAt: z.ZodOptional<z.ZodString>;
@@ -138,9 +141,11 @@ export declare const CheckpointInputSchema: z.ZodObject<{
         NEEDS_REVISION: "NEEDS_REVISION";
         BLOCKED: "BLOCKED";
         COMPLETED: "COMPLETED";
+        REGRESS: "REGRESS";
     }>;
     summary: z.ZodOptional<z.ZodString>;
     tokenEstimate: z.ZodOptional<z.ZodNumber>;
+    regressTo: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type CheckpointInput = z.infer<typeof CheckpointInputSchema>;
 export declare const DiffCheckInputSchema: z.ZodObject<{

@@ -16,7 +16,8 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit } from "./phase-enforcer.js";
+import { extractDocSummary, extractTaskList } from "./state-manager.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,7 +99,28 @@ server.tool(
         });
       }
       if (onConflict === "resume") {
-        const state = await sm.loadAndValidate();
+        let state: StateJson;
+        try {
+          state = await sm.loadAndValidate();
+        } catch (err) {
+          const errMsg = (err as Error).message;
+          if (errMsg.includes("dirty")) {
+            // Try clearing dirty flag then re-validate
+            try {
+              const raw = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+              raw.dirty = false;
+              raw.updatedAt = new Date().toISOString();
+              await sm.atomicWrite(sm.stateFilePath, JSON.stringify(raw, null, 2));
+              state = await sm.loadAndValidate();
+            } catch {
+              // dirty fix also failed — degrade to rebuild
+              state = await sm.rebuildStateFromProgressLog();
+            }
+          } else {
+            // state.json corrupted/missing — rebuild from progress-log
+            state = await sm.rebuildStateFromProgressLog();
+          }
+        }
 
         // Parse progress-log for last Phase 3 task (for task-level resume)
         let resumeTask: number | undefined;
@@ -108,8 +130,8 @@ server.tool(
           const taskRegex = /CHECKPOINT phase=3 task=(\d+) status=(\w+)/g;
           let match;
           while ((match = taskRegex.exec(log)) !== null) {
-            resumeTask = parseInt(match[1], 10);
-            resumeTaskStatus = match[2];
+            resumeTask = parseInt(match[1]!, 10);
+            resumeTaskStatus = match[2]!;
           }
         } catch { /* no progress log yet */ }
 
@@ -219,17 +241,60 @@ server.tool(
     topic: z.string(),
     phase: z.number(),
     task: z.number().optional(),
-    status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]),
+    status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"]),
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
+    regressTo: z.number().int().min(1).max(5).optional(),
   },
-  async ({ projectRoot, topic, phase, task, status, summary, tokenEstimate }) => {
+  async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary, tokenEstimate, regressTo }) => {
+    let status: string = rawStatus;
+    let summary: string | undefined = rawSummary;
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
       return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
+    }
+
+    // [P0-1 fix] REGRESS validation BEFORE any state mutation
+    if (status === "REGRESS") {
+      if (!regressTo) {
+        return textResult({ error: "REGRESS requires regressTo parameter" });
+      }
+      if (regressTo >= phase) {
+        return textResult({ error: `regressTo(${regressTo}) must be < current phase(${phase})` });
+      }
+      if ((state.regressionCount ?? 0) >= 2) {
+        return textResult({
+          status: "BLOCKED",
+          mandate: "[BLOCKED] Max regression count (2) reached. Human intervention required.",
+        });
+      }
+    }
+
+    // Iteration limit check for NEEDS_REVISION
+    if (status === "NEEDS_REVISION") {
+      const newIteration = (state.iteration ?? 0) + 1;
+      const iterCheck = checkIterationLimit(phase, newIteration, state.interactive ?? false);
+
+      if (iterCheck.action === "BLOCK") {
+        // [P1-2 fix] Persist iteration even on BLOCK so it's sticky
+        await sm.atomicUpdate({ iteration: newIteration });
+        return textResult({
+          status: "BLOCKED",
+          message: iterCheck.message,
+          mandate: `[BLOCKED] ${iterCheck.message} 请用户决定是否继续。`,
+        });
+      }
+
+      if (iterCheck.action === "FORCE_PASS") {
+        status = "PASS";
+        summary = `[FORCED_PASS: iteration limit exceeded] ${summary ?? ""}`;
+        // Record lesson about forced pass
+        const lessons = new LessonsManager(sm.outputDir);
+        await lessons.add(phase, "iteration-limit", iterCheck.message);
+      }
     }
 
     // 1. Append to progress-log (first, per design: progress-log before state.json)
@@ -239,6 +304,20 @@ server.tool(
     // 2. Update state.json atomically
     const stateUpdates: Record<string, unknown> = { phase, status };
     if (task !== undefined) stateUpdates["task"] = task;
+
+    // Iteration tracking for NEEDS_REVISION (after potential FORCE_PASS override)
+    if (status === "NEEDS_REVISION") {
+      stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
+    } else if (status === "PASS" || status === "COMPLETED") {
+      stateUpdates["iteration"] = 0;
+    }
+
+    // REGRESS state updates (validation already done above)
+    if (status === "REGRESS") {
+      const newRegressionCount = (state.regressionCount ?? 0) + 1;
+      stateUpdates["regressionCount"] = newRegressionCount;
+      stateUpdates["iteration"] = 0;
+    }
 
     // Phase timing tracking
     const timings = { ...(state.phaseTimings ?? {}) };
@@ -342,7 +421,11 @@ server.tool(
     }
 
     // 5. Compute next phase directive — forces Claude to continue to next phase
-    const nextDirective = computeNextDirective(phase, status, state);
+    // [P1-3 fix] Pass updated regressionCount so limit check uses current value
+    const stateForDirective = status === "REGRESS"
+      ? { ...state, regressionCount: (state.regressionCount ?? 0) + 1 }
+      : state;
+    const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
 
     return textResult({ ok: true, ...nextDirective });
   },
@@ -437,7 +520,26 @@ server.tool(
           const gitInfo = await new GitManager(projectRoot).getStatus();
           const variables = buildVariablesFromState(state, gitInfo.currentBranch);
           const renderer = new TemplateRenderer(defaultSkillsDir());
-          const rendered = await renderer.render(mapping.promptFile, variables);
+
+          // Build extraContext for Phase 3+ (inject design.md summary and plan.md task list)
+          let extraContext = "";
+          if (phase >= 3) {
+            try {
+              const designContent = await readFile(join(outputDir, "design.md"), "utf-8");
+              const designSummary = extractDocSummary(designContent, 80);
+              extraContext += `## 设计摘要（自动注入）\n\n${designSummary}\n\n`;
+            } catch { /* design.md not found, skip */ }
+
+            if (phase === 3) {
+              try {
+                const planContent = await readFile(join(outputDir, "plan.md"), "utf-8");
+                const taskList = extractTaskList(planContent);
+                extraContext += `## 任务列表（自动注入）\n\n${taskList}\n\n`;
+              } catch { /* plan.md not found, skip */ }
+            }
+          }
+
+          const rendered = await renderer.render(mapping.promptFile, variables, extraContext || undefined);
           result.suggestedPrompt = rendered.renderedPrompt;
           result.suggestedAgent = mapping.agent;
         } catch { /* prompt file not found or render error, skip */ }

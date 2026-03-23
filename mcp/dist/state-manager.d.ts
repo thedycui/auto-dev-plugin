@@ -8,6 +8,8 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 import type { StateJson, StackInfo } from "./types.js";
+export declare function extractDocSummary(content: string, maxLines: number): string;
+export declare function extractTaskList(content: string): string;
 export declare class StateManager {
     readonly projectRoot: string;
     readonly topic: string;
@@ -26,6 +28,10 @@ export declare class StateManager {
      * Throws with a descriptive message when the file is missing, corrupt, or dirty.
      */
     loadAndValidate(): Promise<StateJson>;
+    /**
+     * Rebuild state.json from progress-log.md when state.json is corrupted or missing.
+     */
+    rebuildStateFromProgressLog(): Promise<StateJson>;
     /** Rename existing output dir to {dir}.bak.{timestamp}. Returns the backup path. */
     backupExistingDir(): Promise<string>;
     /** Scan project root for build files and resolve stack info from stacks/*.md. */

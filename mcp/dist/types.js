@@ -15,6 +15,7 @@ export const PhaseStatusSchema = z.enum([
     "NEEDS_REVISION",
     "BLOCKED",
     "COMPLETED",
+    "REGRESS",
 ]);
 export const OnConflictSchema = z.enum(["resume", "overwrite"]);
 // ---------------------------------------------------------------------------
@@ -67,6 +68,8 @@ export const StateJsonSchema = z.object({
     skipE2e: z.boolean().optional(), // --skip-e2e mode (skip Phase 5)
     // Git baseline for accurate Phase 5 diff
     startCommit: z.string().optional(),
+    // Regression count (max 2 regressions allowed)
+    regressionCount: z.number().int().optional(),
     // Phase-level timing data
     phaseTimings: z.record(z.string(), z.object({
         startedAt: z.string(),
@@ -124,6 +127,7 @@ export const CheckpointInputSchema = z.object({
     status: PhaseStatusSchema,
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
+    regressTo: z.number().int().min(1).max(5).optional(),
 });
 // ---------------------------------------------------------------------------
 // auto_dev_diff_check

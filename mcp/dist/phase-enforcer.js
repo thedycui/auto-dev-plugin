@@ -17,13 +17,86 @@ const PHASE_META = {
 const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6];
 /** quick 模式的必需 Phase */
 const REQUIRED_PHASES_QUICK = [3, 4, 5];
+const MAX_ITERATIONS_PER_PHASE = {
+    1: 3, 2: 3, 3: 2, 4: 3, 5: 3,
+};
+export function checkIterationLimit(phase, currentIteration, isInteractive) {
+    const maxIteration = MAX_ITERATIONS_PER_PHASE[phase];
+    if (maxIteration === undefined) {
+        return {
+            allowed: true,
+            exceeded: false,
+            currentIteration,
+            maxIteration: Infinity,
+            action: "CONTINUE",
+            message: `Phase ${phase} has no iteration limit.`,
+        };
+    }
+    if (currentIteration < maxIteration) {
+        return {
+            allowed: true,
+            exceeded: false,
+            currentIteration,
+            maxIteration,
+            action: "CONTINUE",
+            message: `Iteration ${currentIteration}/${maxIteration} for Phase ${phase}.`,
+        };
+    }
+    if (isInteractive) {
+        return {
+            allowed: false,
+            exceeded: true,
+            currentIteration,
+            maxIteration,
+            action: "BLOCK",
+            message: `Phase ${phase} has reached iteration limit (${currentIteration}/${maxIteration}). User intervention required.`,
+        };
+    }
+    return {
+        allowed: false,
+        exceeded: true,
+        currentIteration,
+        maxIteration,
+        action: "FORCE_PASS",
+        message: `[WARNING] Phase ${phase} exceeded iteration limit (${currentIteration}/${maxIteration}). Force-passing to next phase.`,
+    };
+}
 /**
  * 根据当前 checkpoint 的 phase 和 status，计算下一步强制指令。
  */
-export function computeNextDirective(currentPhase, status, state) {
+export function computeNextDirective(currentPhase, status, state, regressTo) {
     const mode = state.mode;
     const isDryRun = state.dryRun === true;
     const maxPhase = isDryRun ? 2 : 6;
+    // REGRESS 分支必须在守卫之前
+    if (status === "REGRESS") {
+        if (!regressTo || regressTo >= currentPhase) {
+            return {
+                phaseCompleted: false,
+                nextPhase: currentPhase,
+                nextPhaseName: PHASE_META[currentPhase]?.name ?? `Phase ${currentPhase}`,
+                mandate: `[ERROR] regressTo(${regressTo}) 必须小于当前 phase(${currentPhase})。`,
+                canDeclareComplete: false,
+            };
+        }
+        if ((state.regressionCount ?? 0) >= 2) {
+            return {
+                phaseCompleted: false,
+                nextPhase: currentPhase,
+                nextPhaseName: PHASE_META[currentPhase]?.name ?? `Phase ${currentPhase}`,
+                mandate: "[BLOCKED] 已达最大回退次数(2)。需要人工介入决定后续步骤。",
+                canDeclareComplete: false,
+            };
+        }
+        return {
+            phaseCompleted: false,
+            nextPhase: regressTo,
+            nextPhaseName: PHASE_META[regressTo]?.name ?? `Phase ${regressTo}`,
+            mandate: `[REGRESS] Phase ${currentPhase} 要求回退到 Phase ${regressTo} (${PHASE_META[regressTo]?.description ?? ""})。` +
+                ` 调用 auto_dev_preflight(phase=${regressTo}) 重新开始。`,
+            canDeclareComplete: false,
+        };
+    }
     // 非 PASS 状态不推进
     if (status !== "PASS" && status !== "COMPLETED") {
         return {

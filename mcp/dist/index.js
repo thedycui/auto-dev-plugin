@@ -13,7 +13,8 @@ import { StateManager } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit } from "./phase-enforcer.js";
+import { extractDocSummary, extractTaskList } from "./state-manager.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -82,7 +83,31 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
             });
         }
         if (onConflict === "resume") {
-            const state = await sm.loadAndValidate();
+            let state;
+            try {
+                state = await sm.loadAndValidate();
+            }
+            catch (err) {
+                const errMsg = err.message;
+                if (errMsg.includes("dirty")) {
+                    // Try clearing dirty flag then re-validate
+                    try {
+                        const raw = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+                        raw.dirty = false;
+                        raw.updatedAt = new Date().toISOString();
+                        await sm.atomicWrite(sm.stateFilePath, JSON.stringify(raw, null, 2));
+                        state = await sm.loadAndValidate();
+                    }
+                    catch {
+                        // dirty fix also failed — degrade to rebuild
+                        state = await sm.rebuildStateFromProgressLog();
+                    }
+                }
+                else {
+                    // state.json corrupted/missing — rebuild from progress-log
+                    state = await sm.rebuildStateFromProgressLog();
+                }
+            }
             // Parse progress-log for last Phase 3 task (for task-level resume)
             let resumeTask;
             let resumeTaskStatus;
@@ -182,15 +207,37 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     topic: z.string(),
     phase: z.number(),
     task: z.number().optional(),
-    status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]),
+    status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"]),
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
-}, async ({ projectRoot, topic, phase, task, status, summary, tokenEstimate }) => {
+    regressTo: z.number().int().min(1).max(5).optional(),
+}, async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary, tokenEstimate, regressTo }) => {
+    let status = rawStatus;
+    let summary = rawSummary;
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
         return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
+    }
+    // Iteration limit check for NEEDS_REVISION
+    if (status === "NEEDS_REVISION") {
+        const newIteration = (state.iteration ?? 0) + 1;
+        const iterCheck = checkIterationLimit(phase, newIteration, state.interactive ?? false);
+        if (iterCheck.action === "BLOCK") {
+            return textResult({
+                status: "BLOCKED",
+                message: iterCheck.message,
+                mandate: `[BLOCKED] ${iterCheck.message} 请用户决定是否继续。`,
+            });
+        }
+        if (iterCheck.action === "FORCE_PASS") {
+            status = "PASS";
+            summary = `[FORCED_PASS: iteration limit exceeded] ${summary ?? ""}`;
+            // Record lesson about forced pass
+            const lessons = new LessonsManager(sm.outputDir);
+            await lessons.add(phase, "iteration-limit", iterCheck.message);
+        }
     }
     // 1. Append to progress-log (first, per design: progress-log before state.json)
     const line = sm.getCheckpointLine(phase, task, status, summary);
@@ -199,6 +246,21 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     const stateUpdates = { phase, status };
     if (task !== undefined)
         stateUpdates["task"] = task;
+    // Iteration tracking for NEEDS_REVISION (after potential FORCE_PASS override)
+    if (status === "NEEDS_REVISION") {
+        stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
+    }
+    else if (status === "PASS" || status === "COMPLETED") {
+        stateUpdates["iteration"] = 0;
+    }
+    // REGRESS handling
+    if (status === "REGRESS") {
+        if (!regressTo) {
+            return textResult({ error: "REGRESS requires regressTo parameter" });
+        }
+        stateUpdates["regressionCount"] = (state.regressionCount ?? 0) + 1;
+        stateUpdates["iteration"] = 0;
+    }
     // Phase timing tracking
     const timings = { ...(state.phaseTimings ?? {}) };
     const phaseKey = String(phase);
@@ -300,7 +362,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         }
     }
     // 5. Compute next phase directive — forces Claude to continue to next phase
-    const nextDirective = computeNextDirective(phase, status, state);
+    const nextDirective = computeNextDirective(phase, status, state, regressTo);
     return textResult({ ok: true, ...nextDirective });
 });
 // ===========================================================================
@@ -379,7 +441,25 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
                 const gitInfo = await new GitManager(projectRoot).getStatus();
                 const variables = buildVariablesFromState(state, gitInfo.currentBranch);
                 const renderer = new TemplateRenderer(defaultSkillsDir());
-                const rendered = await renderer.render(mapping.promptFile, variables);
+                // Build extraContext for Phase 3+ (inject design.md summary and plan.md task list)
+                let extraContext = "";
+                if (phase >= 3) {
+                    try {
+                        const designContent = await readFile(join(outputDir, "design.md"), "utf-8");
+                        const designSummary = extractDocSummary(designContent, 80);
+                        extraContext += `## 设计摘要（自动注入）\n\n${designSummary}\n\n`;
+                    }
+                    catch { /* design.md not found, skip */ }
+                    if (phase === 3) {
+                        try {
+                            const planContent = await readFile(join(outputDir, "plan.md"), "utf-8");
+                            const taskList = extractTaskList(planContent);
+                            extraContext += `## 任务列表（自动注入）\n\n${taskList}\n\n`;
+                        }
+                        catch { /* plan.md not found, skip */ }
+                    }
+                }
+                const rendered = await renderer.render(mapping.promptFile, variables, extraContext || undefined);
                 result.suggestedPrompt = rendered.renderedPrompt;
                 result.suggestedAgent = mapping.agent;
             }

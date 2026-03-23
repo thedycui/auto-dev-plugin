@@ -47,6 +47,37 @@ async function fileExists(path) {
         return false;
     }
 }
+function parseHeaderField(content, field) {
+    const regex = new RegExp(`>\\s*${field}:\\s*(.+?)\\s*$`, "m");
+    const match = content.match(regex);
+    return match ? match[1].trim() : null;
+}
+function parseAllCheckpoints(content) {
+    const results = [];
+    const regex = /<!-- CHECKPOINT phase=(\d+).*?status=(\S+)/g;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        results.push({ phase: parseInt(match[1], 10), status: match[2] });
+    }
+    return results;
+}
+export function extractDocSummary(content, maxLines) {
+    // 优先查找 ## 概述 或 ## Summary 段落
+    const sectionMatch = content.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |\n*$)/);
+    if (sectionMatch) {
+        return sectionMatch[1].trim();
+    }
+    // 找不到概述段落，取前 maxLines 行
+    const lines = content.split("\n");
+    return lines.slice(0, maxLines).join("\n").trim();
+}
+export function extractTaskList(content) {
+    const lines = content.split("\n");
+    const taskLines = lines.filter((line) => /^###\s+Task\s+\d+/.test(line) ||
+        /^-\s+\[[ x]\]\s+Task\s+\d+/i.test(line) ||
+        /^##\s+Task\s+\d+/.test(line));
+    return taskLines.join("\n").trim();
+}
 /**
  * Parse a stacks/*.md file and extract the `## Variables` key-value pairs.
  *
@@ -142,6 +173,39 @@ export class StateManager {
         }
         this.state = validated;
         return validated;
+    }
+    /**
+     * Rebuild state.json from progress-log.md when state.json is corrupted or missing.
+     */
+    async rebuildStateFromProgressLog() {
+        const content = await readFile(this.progressLogPath, "utf-8");
+        // 1. Parse header
+        const startedAt = parseHeaderField(content, "Started") ?? new Date().toISOString();
+        const modeStr = parseHeaderField(content, "Mode") ?? "full";
+        const mode = (modeStr === "quick" ? "quick" : "full");
+        // 2. Parse all CHECKPOINTs to get last phase/status
+        const checkpoints = parseAllCheckpoints(content);
+        const last = checkpoints[checkpoints.length - 1];
+        const phase = last?.phase ?? 1;
+        const status = last?.status ?? "IN_PROGRESS";
+        // 3. Re-detect stack from filesystem
+        const stack = await this.detectStack();
+        // 4. Assemble StateJson
+        const rebuilt = {
+            topic: this.topic,
+            mode,
+            phase,
+            status: status,
+            stack,
+            outputDir: this.outputDir,
+            projectRoot: this.projectRoot,
+            startedAt,
+            updatedAt: new Date().toISOString(),
+        };
+        // 5. Write state.json (no dirty flag — this is a fresh rebuild)
+        await this.atomicWrite(this.stateFilePath, JSON.stringify(rebuilt, null, 2));
+        this.state = rebuilt;
+        return rebuilt;
     }
     // -----------------------------------------------------------------------
     // Backup
