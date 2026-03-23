@@ -16,6 +16,10 @@ export declare class GitManager {
      */
     getStatus(): Promise<GitInfo>;
     /**
+     * Return the full SHA of the current HEAD commit.
+     */
+    getHeadCommit(): Promise<string>;
+    /**
      * Compare plan-expected files against actual git changes since baseCommit.
      */
     diffCheck(expectedFiles: string[], baseCommit: string): Promise<DiffCheckOutput>;

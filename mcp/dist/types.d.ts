@@ -68,6 +68,17 @@ export declare const StateJsonSchema: z.ZodObject<{
     dirty: z.ZodOptional<z.ZodBoolean>;
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
+    skipE2e: z.ZodOptional<z.ZodBoolean>;
+    startCommit: z.ZodOptional<z.ZodString>;
+    phaseTimings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        startedAt: z.ZodString;
+        completedAt: z.ZodOptional<z.ZodString>;
+        durationMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>>;
+    tokenUsage: z.ZodOptional<z.ZodObject<{
+        total: z.ZodNumber;
+        byPhase: z.ZodRecord<z.ZodString, z.ZodNumber>;
+    }, z.core.$strip>>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -82,6 +93,7 @@ export declare const InitInputSchema: z.ZodObject<{
     startPhase: z.ZodOptional<z.ZodNumber>;
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
+    skipE2e: z.ZodOptional<z.ZodBoolean>;
     onConflict: z.ZodOptional<z.ZodEnum<{
         resume: "resume";
         overwrite: "overwrite";
@@ -128,6 +140,7 @@ export declare const CheckpointInputSchema: z.ZodObject<{
         COMPLETED: "COMPLETED";
     }>;
     summary: z.ZodOptional<z.ZodString>;
+    tokenEstimate: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type CheckpointInput = z.infer<typeof CheckpointInputSchema>;
 export declare const DiffCheckInputSchema: z.ZodObject<{

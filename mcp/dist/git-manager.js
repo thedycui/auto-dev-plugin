@@ -34,6 +34,12 @@ export class GitManager {
         return { currentBranch, isDirty, diffStat };
     }
     /**
+     * Return the full SHA of the current HEAD commit.
+     */
+    async getHeadCommit() {
+        return (await this.execGit("rev-parse", "HEAD")).trim();
+    }
+    /**
      * Compare plan-expected files against actual git changes since baseCommit.
      */
     async diffCheck(expectedFiles, baseCommit) {

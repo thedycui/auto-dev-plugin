@@ -87,6 +87,26 @@ export const StateJsonSchema = z.object({
   // Behavior flags
   interactive: z.boolean().optional(),  // --interactive mode (default: false = fully automatic)
   dryRun: z.boolean().optional(),       // --dry-run mode (only Phase 1-2)
+  skipE2e: z.boolean().optional(),      // --skip-e2e mode (skip Phase 5)
+
+  // Git baseline for accurate Phase 5 diff
+  startCommit: z.string().optional(),
+
+  // Phase-level timing data
+  phaseTimings: z.record(
+    z.string(),
+    z.object({
+      startedAt: z.string(),
+      completedAt: z.string().optional(),
+      durationMs: z.number().optional(),
+    })
+  ).optional(),
+
+  // Token usage tracking
+  tokenUsage: z.object({
+    total: z.number(),
+    byPhase: z.record(z.string(), z.number()),
+  }).optional(),
 
   // Timestamps
   startedAt: z.string(),
@@ -106,6 +126,7 @@ export const InitInputSchema = z.object({
   startPhase: z.number().int().optional(),
   interactive: z.boolean().optional(),   // --interactive mode (replaces noConfirm)
   dryRun: z.boolean().optional(),        // --dry-run: only Phase 1-2
+  skipE2e: z.boolean().optional(),      // --skip-e2e: skip Phase 5
   onConflict: OnConflictSchema.optional(),
 });
 
@@ -150,6 +171,7 @@ export const CheckpointInputSchema = z.object({
   task: z.number().int().optional(),
   status: PhaseStatusSchema,
   summary: z.string().optional(),
+  tokenEstimate: z.number().optional(),
 });
 
 export type CheckpointInput = z.infer<typeof CheckpointInputSchema>;

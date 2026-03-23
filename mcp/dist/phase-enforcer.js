@@ -34,7 +34,10 @@ export function computeNextDirective(currentPhase, status, state) {
             canDeclareComplete: false,
         };
     }
-    const nextPhase = currentPhase + 1;
+    let nextPhase = currentPhase + 1;
+    if (state.skipE2e === true && nextPhase === 5) {
+        nextPhase = 6;
+    }
     // 已到达最大 Phase
     if (nextPhase > maxPhase) {
         return {
@@ -60,12 +63,15 @@ export function computeNextDirective(currentPhase, status, state) {
  * 验证是否所有必需 Phase 都已完成。
  * 通过解析 progress-log.md 中的 CHECKPOINT 注释来判断。
  */
-export function validateCompletion(progressLogContent, mode, isDryRun) {
-    const requiredPhases = isDryRun
+export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e = false) {
+    const basePhases = isDryRun
         ? [1, 2]
         : mode === "quick"
             ? REQUIRED_PHASES_QUICK
             : REQUIRED_PHASES_FULL;
+    const requiredPhases = skipE2e
+        ? basePhases.filter((p) => p !== 5)
+        : basePhases;
     // 从 progress-log 中提取所有 PASS 的 phase
     const passedPhases = new Set();
     const checkpointRegex = /<!-- CHECKPOINT phase=(\d+).*?status=PASS/g;

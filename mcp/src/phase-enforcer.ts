@@ -59,7 +59,10 @@ export function computeNextDirective(
     };
   }
 
-  const nextPhase = currentPhase + 1;
+  let nextPhase = currentPhase + 1;
+  if (state.skipE2e === true && nextPhase === 5) {
+    nextPhase = 6;
+  }
 
   // 已到达最大 Phase
   if (nextPhase > maxPhase) {
@@ -103,12 +106,16 @@ export function validateCompletion(
   progressLogContent: string,
   mode: "full" | "quick",
   isDryRun: boolean,
+  skipE2e: boolean = false,
 ): CompletionValidation {
-  const requiredPhases = isDryRun
+  const basePhases = isDryRun
     ? [1, 2]
     : mode === "quick"
       ? REQUIRED_PHASES_QUICK
       : REQUIRED_PHASES_FULL;
+  const requiredPhases = skipE2e
+    ? basePhases.filter((p) => p !== 5)
+    : basePhases;
 
   // 从 progress-log 中提取所有 PASS 的 phase
   const passedPhases = new Set<number>();

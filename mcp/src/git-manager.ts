@@ -48,6 +48,13 @@ export class GitManager {
   }
 
   /**
+   * Return the full SHA of the current HEAD commit.
+   */
+  async getHeadCommit(): Promise<string> {
+    return (await this.execGit("rev-parse", "HEAD")).trim();
+  }
+
+  /**
    * Compare plan-expected files against actual git changes since baseCommit.
    */
   async diffCheck(

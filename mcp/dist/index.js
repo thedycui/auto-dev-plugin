@@ -30,6 +30,28 @@ function textResult(data) {
         content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data) }],
     };
 }
+function buildVariablesFromState(state, branch) {
+    return {
+        topic: state.topic,
+        language: state.stack.language,
+        build_cmd: state.stack.buildCmd,
+        test_cmd: state.stack.testCmd,
+        lang_checklist: state.stack.langChecklist,
+        output_dir: state.outputDir,
+        project_root: state.projectRoot,
+        branch: branch ?? "unknown",
+    };
+}
+function formatDuration(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0)
+        return `${hours}h ${minutes % 60}m`;
+    if (minutes > 0)
+        return `${minutes}m ${seconds % 60}s`;
+    return `${seconds}s`;
+}
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -47,8 +69,9 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     startPhase: z.number().optional(),
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
+    skipE2e: z.boolean().optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
-}, async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, onConflict }) => {
+}, async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
     // Handle existing directory
     if (await sm.outputDirExists()) {
@@ -60,6 +83,19 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         }
         if (onConflict === "resume") {
             const state = await sm.loadAndValidate();
+            // Parse progress-log for last Phase 3 task (for task-level resume)
+            let resumeTask;
+            let resumeTaskStatus;
+            try {
+                const log = await readFile(sm.progressLogPath, "utf-8");
+                const taskRegex = /CHECKPOINT phase=3 task=(\d+) status=(\w+)/g;
+                let match;
+                while ((match = taskRegex.exec(log)) !== null) {
+                    resumeTask = parseInt(match[1], 10);
+                    resumeTaskStatus = match[2];
+                }
+            }
+            catch { /* no progress log yet */ }
             return textResult({
                 projectRoot: state.projectRoot,
                 outputDir: sm.outputDir,
@@ -72,6 +108,8 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
                 buildCmd: state.stack.buildCmd,
                 testCmd: state.stack.testCmd,
                 langChecklist: state.stack.langChecklist,
+                resumeTask,
+                resumeTaskStatus,
             });
         }
         if (onConflict === "overwrite") {
@@ -79,17 +117,19 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         }
     }
     const stack = await sm.detectStack();
-    const git = await new GitManager(projectRoot).getStatus();
+    const gitManager = new GitManager(projectRoot);
+    const git = await gitManager.getStatus();
+    const startCommit = await gitManager.getHeadCommit();
     await sm.init(mode, stack, startPhase);
-    // Persist behavior flags to state
-    const behaviorUpdates = {};
+    // Persist behavior flags and startCommit to state
+    const behaviorUpdates = { startCommit };
     if (interactive)
         behaviorUpdates["interactive"] = true;
     if (dryRun)
         behaviorUpdates["dryRun"] = true;
-    if (Object.keys(behaviorUpdates).length > 0) {
-        await sm.atomicUpdate(behaviorUpdates);
-    }
+    if (skipE2e)
+        behaviorUpdates["skipE2e"] = true;
+    await sm.atomicUpdate(behaviorUpdates);
     const state = sm.getFullState();
     return textResult({
         projectRoot: state.projectRoot,
@@ -119,61 +159,20 @@ server.tool("auto_dev_state_get", "Read current auto-dev state with schema valid
 // ===========================================================================
 // 3. auto_dev_state_update
 // ===========================================================================
-server.tool("auto_dev_state_update", "Update state fields (phase, task, iteration, etc.) with atomic write.", {
+server.tool("auto_dev_state_update", "Update auxiliary state fields (task, iteration, flags). Phase/status changes MUST go through auto_dev_checkpoint.", {
     projectRoot: z.string(),
     topic: z.string(),
     updates: z.object({
-        phase: z.number().optional(),
         task: z.number().optional(),
         iteration: z.number().optional(),
-        status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]).optional(),
         dirty: z.boolean().optional(),
         interactive: z.boolean().optional(),
         dryRun: z.boolean().optional(),
     }),
 }, async ({ projectRoot, topic, updates }) => {
     const sm = new StateManager(projectRoot, topic);
-    const current = await sm.loadAndValidate();
-    const warnings = [];
-    // Guard 1: 禁止跳过 phase（允许回退，允许同 phase 更新）
-    if (updates.phase !== undefined && updates.phase > current.phase + 1) {
-        return textResult({
-            ok: false,
-            error: "INVALID_TRANSITION",
-            message: `不能从 phase ${current.phase} 跳到 phase ${updates.phase}，最多前进一步。`,
-            current: { phase: current.phase, status: current.status },
-            requested: { phase: updates.phase },
-        });
-    }
-    // Guard 2: Phase 前进时当前 phase 必须是 PASS
-    if (updates.phase !== undefined && updates.phase > current.phase && current.status !== "PASS") {
-        return textResult({
-            ok: false,
-            error: "INVALID_TRANSITION",
-            message: `当前 phase ${current.phase} status=${current.status}，未通过不能前进到 phase ${updates.phase}。请先用 auto_dev_checkpoint 标记 PASS。`,
-            current: { phase: current.phase, status: current.status },
-            requested: { phase: updates.phase },
-        });
-    }
-    // Guard 3: COMPLETED 需要前置状态（IN_PROGRESS 或 PASS）
-    if (updates.status === "COMPLETED" && current.status !== "IN_PROGRESS" && current.status !== "PASS") {
-        return textResult({
-            ok: false,
-            error: "INVALID_TRANSITION",
-            message: `当前 status=${current.status}，不能直接设为 COMPLETED。需先经过 IN_PROGRESS 或 PASS。`,
-            current: { phase: current.phase, status: current.status },
-        });
-    }
-    // Guard 4: 直接设 PASS 时警告（不阻断，但提示应使用 checkpoint）
-    if (updates.status === "PASS") {
-        warnings.push("建议使用 auto_dev_checkpoint 而非 state_update 来标记 PASS，" +
-            "checkpoint 会执行 artifact 验证和 phase-enforcer 逻辑。");
-    }
     await sm.atomicUpdate(updates);
-    const result = { ok: true, updated: Object.keys(updates) };
-    if (warnings.length > 0)
-        result.warnings = warnings;
-    return textResult(result);
+    return textResult({ ok: true, updated: Object.keys(updates) });
 });
 // ===========================================================================
 // 4. auto_dev_checkpoint
@@ -185,7 +184,8 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     task: z.number().optional(),
     status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED"]),
     summary: z.string().optional(),
-}, async ({ projectRoot, topic, phase, task, status, summary }) => {
+    tokenEstimate: z.number().optional(),
+}, async ({ projectRoot, topic, phase, task, status, summary, tokenEstimate }) => {
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
     // Idempotency check
@@ -199,6 +199,30 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     const stateUpdates = { phase, status };
     if (task !== undefined)
         stateUpdates["task"] = task;
+    // Phase timing tracking
+    const timings = { ...(state.phaseTimings ?? {}) };
+    const phaseKey = String(phase);
+    if (status === "IN_PROGRESS") {
+        timings[phaseKey] = { startedAt: new Date().toISOString() };
+    }
+    else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
+        const existing = timings[phaseKey];
+        if (existing?.startedAt) {
+            const now = new Date();
+            existing.completedAt = now.toISOString();
+            existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
+        }
+    }
+    stateUpdates["phaseTimings"] = timings;
+    // Token usage tracking
+    if (tokenEstimate !== undefined) {
+        const usage = { ...(state.tokenUsage ?? { total: 0, byPhase: {} }) };
+        usage.total += tokenEstimate;
+        const pk = String(phase);
+        usage.byPhase = { ...usage.byPhase };
+        usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
+        stateUpdates["tokenUsage"] = usage;
+    }
     try {
         await sm.atomicUpdate(stateUpdates);
     }
@@ -225,7 +249,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
     // 4. Phase 5/6 artifact validation — prevent skipping tests or acceptance
-    if (phase === 5 && status === "PASS") {
+    if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
         // Check for new test files via git
         let testFileCount = 0;
         try {
@@ -236,7 +260,8 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             // Use git diff to find new files since init
             const { execFile: execFileAsync } = await import("node:child_process");
             const diffOutput = await new Promise((resolve, reject) => {
-                execFileAsync("git", ["diff", "--name-only", "--diff-filter=A", "HEAD~20", "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+                const baseCommit = state.startCommit ?? "HEAD~20";
+                execFileAsync("git", ["diff", "--name-only", "--diff-filter=A", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
                     if (err)
                         resolve("");
                     else
@@ -336,7 +361,32 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
     if (phase >= 6)
         await fileCheck("e2e_test_results_md", join(outputDir, "e2e-test-results.md"));
     const ready = checks.every((c) => c.passed);
-    return textResult({ ready, checks });
+    const result = { ready, checks };
+    // Auto-render suggested prompt when ready
+    if (ready) {
+        const phasePromptMap = {
+            1: { promptFile: "phase1-architect", agent: "auto-dev-architect" },
+            2: { promptFile: "phase2-planner", agent: "auto-dev-architect" },
+            3: { promptFile: "phase3-developer", agent: "auto-dev-developer" },
+            4: { promptFile: "phase4-full-reviewer", agent: "auto-dev-reviewer" },
+            5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect" },
+            6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator" },
+        };
+        const mapping = phasePromptMap[phase];
+        if (mapping) {
+            try {
+                const state = await sm.loadAndValidate();
+                const gitInfo = await new GitManager(projectRoot).getStatus();
+                const variables = buildVariablesFromState(state, gitInfo.currentBranch);
+                const renderer = new TemplateRenderer(defaultSkillsDir());
+                const rendered = await renderer.render(mapping.promptFile, variables);
+                result.suggestedPrompt = rendered.renderedPrompt;
+                result.suggestedAgent = mapping.agent;
+            }
+            catch { /* prompt file not found or render error, skip */ }
+        }
+    }
+    return textResult(result);
 });
 // ===========================================================================
 // 7. auto_dev_diff_check
@@ -414,7 +464,7 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
             canComplete: false,
         });
     }
-    const validation = validateCompletion(progressLogContent, state.mode, state.dryRun === true);
+    const validation = validateCompletion(progressLogContent, state.mode, state.dryRun === true, state.skipE2e === true);
     if (!validation.canComplete) {
         return textResult({
             error: "INCOMPLETE",
@@ -429,11 +479,19 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
     const completeLine = sm.getCheckpointLine(state.phase, undefined, "COMPLETED", "All required phases passed. Session complete.");
     await sm.appendToProgressLog("\n" + completeLine + "\n");
     await sm.atomicUpdate({ status: "COMPLETED" });
+    // Timing summary
+    const timingSummary = Object.entries(state.phaseTimings ?? {}).map(([p, t]) => ({
+        phase: parseInt(p),
+        durationMs: t.durationMs,
+        durationStr: t.durationMs ? formatDuration(t.durationMs) : "unknown",
+    }));
     return textResult({
         canComplete: true,
         passedPhases: validation.passedPhases,
         message: validation.message,
         status: "COMPLETED",
+        timingSummary,
+        tokenUsage: state.tokenUsage ?? { total: 0, byPhase: {} },
     });
 });
 // ===========================================================================
