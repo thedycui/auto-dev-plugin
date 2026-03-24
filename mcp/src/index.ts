@@ -162,6 +162,16 @@ server.tool(
     const startCommit = await gitManager.getHeadCommit();
     await sm.init(mode, stack, startPhase);
 
+    // Create a lightweight git tag as rollback anchor (best-effort, non-blocking)
+    try {
+      const { execFile: execFileSync } = await import("node:child_process");
+      await new Promise<void>((resolve) => {
+        const tagName = `auto-dev/${topic}/start`;
+        // Force-create tag in case a previous session left one
+        execFileSync("git", ["tag", "-f", tagName], { cwd: projectRoot }, () => resolve());
+      });
+    } catch { /* git tag failed — non-fatal, continue */ }
+
     // Persist behavior flags and startCommit to state
     const behaviorUpdates: Record<string, unknown> = { startCommit };
     if (interactive) behaviorUpdates["interactive"] = true;
@@ -281,19 +291,14 @@ server.tool(
       if (iterCheck.action === "BLOCK") {
         // [P1-2 fix] Persist iteration even on BLOCK so it's sticky
         await sm.atomicUpdate({ iteration: newIteration });
+        // Record lesson so future phases can learn from this
+        const lessons = new LessonsManager(sm.outputDir);
+        await lessons.add(phase, "iteration-limit", iterCheck.message);
         return textResult({
           status: "BLOCKED",
           message: iterCheck.message,
           mandate: `[BLOCKED] ${iterCheck.message} 请用户决定是否继续。`,
         });
-      }
-
-      if (iterCheck.action === "FORCE_PASS") {
-        status = "PASS";
-        summary = `[FORCED_PASS: iteration limit exceeded] ${summary ?? ""}`;
-        // Record lesson about forced pass
-        const lessons = new LessonsManager(sm.outputDir);
-        await lessons.add(phase, "iteration-limit", iterCheck.message);
       }
     }
 
@@ -382,7 +387,8 @@ server.tool(
         const { execFile: execFileAsync } = await import("node:child_process");
         const diffOutput = await new Promise<string>((resolve, reject) => {
           const baseCommit = state.startCommit ?? "HEAD~20";
-          execFileAsync("git", ["diff", "--name-only", "--diff-filter=A", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+          // --diff-filter=AM: 同时检测新增(A)和修改(M)的测试文件，扩展已有测试也算有效工作
+          execFileAsync("git", ["diff", "--name-only", "--diff-filter=AM", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
             if (err) resolve("");
             else resolve(stdout);
           });
@@ -521,8 +527,23 @@ server.tool(
           const variables = buildVariablesFromState(state, gitInfo.currentBranch);
           const renderer = new TemplateRenderer(defaultSkillsDir());
 
-          // Build extraContext for Phase 3+ (inject design.md summary and plan.md task list)
+          // Build extraContext: lessons + design summary + plan tasks
           let extraContext = "";
+
+          // 1. Inject lessons learned (all phases — avoid repeating past mistakes)
+          try {
+            const lessonsManager = new LessonsManager(sm.outputDir);
+            const lessons = await lessonsManager.get(phase);
+            if (lessons.length > 0) {
+              extraContext += `## 历史教训（自动注入，请在本次执行中避免重蹈覆辙）\n\n`;
+              for (const l of lessons) {
+                extraContext += `- [${l.category}] ${l.lesson}\n`;
+              }
+              extraContext += "\n";
+            }
+          } catch { /* lessons file not found, skip */ }
+
+          // 2. Inject design summary and plan task list for Phase 3+
           if (phase >= 3) {
             try {
               const designContent = await readFile(join(outputDir, "design.md"), "utf-8");
@@ -694,13 +715,50 @@ server.tool(
       durationStr: t.durationMs ? formatDuration(t.durationMs) : "unknown",
     }));
 
+    const tokenUsage = state.tokenUsage ?? { total: 0, byPhase: {} };
+
+    // Generate summary.md
+    try {
+      const PHASE_NAMES: Record<string, string> = {
+        "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE",
+      };
+      const timingRows = timingSummary
+        .map(t => `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? "?"}) | ${t.durationStr} |`)
+        .join("\n");
+      const tokenRows = Object.entries(tokenUsage.byPhase)
+        .map(([p, tok]) => `| Phase ${p} | ~${tok.toLocaleString()} |`)
+        .join("\n");
+
+      const summaryContent =
+        `# auto-dev 完成摘要\n\n` +
+        `**Topic**: ${state.topic}  \n` +
+        `**Mode**: ${state.mode}${state.skipE2e ? " (skip-e2e)" : ""}  \n` +
+        `**Started**: ${state.startedAt}  \n` +
+        `**Completed**: ${new Date().toISOString()}  \n\n` +
+        `## Phase 耗时\n\n` +
+        `| Phase | 耗时 |\n|-------|------|\n${timingRows || "| — | — |"}\n\n` +
+        `## Token 消耗（估算）\n\n` +
+        `| Phase | Token |\n|-------|-------|\n${tokenRows || "| — | — |"}\n` +
+        `| **合计** | **~${tokenUsage.total.toLocaleString()}** |\n\n` +
+        `## 关键产出文件\n\n` +
+        `- \`design.md\` — 架构设计\n` +
+        `- \`plan.md\` — 实施计划\n` +
+        `- \`code-review.md\` — 代码审查报告\n` +
+        (state.skipE2e ? "" : `- \`e2e-test-results.md\` — E2E 测试结果\n`) +
+        `- \`acceptance-report.md\` — 验收报告\n` +
+        `- \`progress-log.md\` — 完整执行日志\n\n` +
+        `> 如需回滚至 init 状态：\`git reset --hard auto-dev/${state.topic}/start\`\n`;
+
+      await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
+    } catch { /* summary.md generation failed — non-fatal */ }
+
     return textResult({
       canComplete: true,
       passedPhases: validation.passedPhases,
       message: validation.message,
       status: "COMPLETED",
       timingSummary,
-      tokenUsage: state.tokenUsage ?? { total: 0, byPhase: {} },
+      tokenUsage,
     });
   },
 );
