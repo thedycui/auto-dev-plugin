@@ -20,9 +20,9 @@ describe("checkIterationLimit", () => {
     expect(result.allowed).toBe(false);
   });
 
-  it("Phase 1, iteration 3, non-interactive -> FORCE_PASS", () => {
+  it("Phase 1, iteration 3, non-interactive -> BLOCK", () => {
     const result = checkIterationLimit(1, 3, false);
-    expect(result.action).toBe("FORCE_PASS");
+    expect(result.action).toBe("BLOCK");
     expect(result.exceeded).toBe(true);
     expect(result.allowed).toBe(false);
   });
@@ -34,9 +34,9 @@ describe("checkIterationLimit", () => {
     expect(result.maxIteration).toBe(3);
   });
 
-  it("Phase 4, iteration 3 -> FORCE_PASS", () => {
+  it("Phase 4, iteration 3 -> BLOCK", () => {
     const result = checkIterationLimit(4, 3, false);
-    expect(result.action).toBe("FORCE_PASS");
+    expect(result.action).toBe("BLOCK");
     expect(result.exceeded).toBe(true);
   });
 

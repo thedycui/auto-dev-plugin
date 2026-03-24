@@ -188,7 +188,7 @@ async function simulateCheckpointHandler(
 // Test Groups
 // ---------------------------------------------------------------------------
 
-describe("E2E Integration: FORCE_PASS Status Propagation (P1-4)", () => {
+describe("E2E Integration: BLOCK on Iteration Limit (P1-4)", () => {
   let sm: StateManager;
 
   beforeEach(async () => {
@@ -200,7 +200,7 @@ describe("E2E Integration: FORCE_PASS Status Propagation (P1-4)", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  it("TC-1.1: NEEDS_REVISION at iteration limit (non-interactive) triggers FORCE_PASS pipeline", async () => {
+  it("TC-1.1: NEEDS_REVISION at iteration limit (non-interactive) triggers BLOCK", async () => {
     // Precondition: phase=4, iteration=2, non-interactive
     await initStateOnDisk(sm, { phase: 4, iteration: 2 });
 
@@ -211,24 +211,11 @@ describe("E2E Integration: FORCE_PASS Status Propagation (P1-4)", () => {
       summary: "Code issues found",
     });
 
-    // Verify no early return (FORCE_PASS overrides, continues pipeline)
-    expect(earlyReturn).toBeUndefined();
-
-    // Verify state.json
-    const finalState = await sm.loadAndValidate();
-    expect(finalState.status).toBe("PASS"); // overwritten from NEEDS_REVISION
-    expect(finalState.iteration).toBe(0);   // reset on PASS
-
-    // Verify progress-log
-    const progressLog = await readFile(sm.progressLogPath, "utf-8");
-    expect(progressLog).toContain("status=PASS");
-    expect(progressLog).toContain("[FORCED_PASS:");
-    expect(progressLog).not.toMatch(/status=NEEDS_REVISION.*FORCED_PASS/); // should be PASS, not NEEDS_REVISION
-
-    // Verify computeNextDirective result
-    expect(result).toHaveProperty("ok", true);
-    expect(result).toHaveProperty("nextPhase", 5);
-    expect(result).toHaveProperty("phaseCompleted", true);
+    // Verify early return with BLOCKED status (FORCE_PASS eliminated in v7.0)
+    expect(earlyReturn).toBe(true);
+    expect(result).toHaveProperty("status", "BLOCKED");
+    // BLOCK has no nextPhase or phaseCompleted — execution stops
+    expect(result).toHaveProperty("message");
   });
 
   it("TC-1.2: NEEDS_REVISION at iteration limit (interactive) BLOCKs and persists iteration", async () => {
