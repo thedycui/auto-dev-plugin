@@ -1,16 +1,23 @@
 {
   "name": "auto-dev",
-  "version": "5.1.1",
+  "version": "7.0.0",
   "description": "Intelligent development automation plugin that provides guided workflows, context-aware code generation, and best-practice enforcement for full-stack projects",
   "author": {
     "name": "Auto Dev Team"
   },
   "license": "MIT",
-  "keywords": ["development", "automation", "workflow", "code-generation"],
+  "keywords": [
+    "development",
+    "automation",
+    "workflow",
+    "code-generation"
+  ],
   "mcpServers": {
     "auto-dev": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/dist/index.js"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp/dist/index.js"
+      ],
       "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }

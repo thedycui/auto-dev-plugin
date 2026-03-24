@@ -42,23 +42,16 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
             message: `Iteration ${currentIteration}/${maxIteration} for Phase ${phase}.`,
         };
     }
-    if (isInteractive) {
-        return {
-            allowed: false,
-            exceeded: true,
-            currentIteration,
-            maxIteration,
-            action: "BLOCK",
-            message: `Phase ${phase} has reached iteration limit (${currentIteration}/${maxIteration}). User intervention required.`,
-        };
-    }
     return {
         allowed: false,
         exceeded: true,
         currentIteration,
         maxIteration,
-        action: "FORCE_PASS",
-        message: `[WARNING] Phase ${phase} exceeded iteration limit (${currentIteration}/${maxIteration}). Force-passing to next phase.`,
+        action: "BLOCK",
+        message: `Phase ${phase} 已达最大迭代次数 (${currentIteration}/${maxIteration})。` +
+            (isInteractive
+                ? " 请人工决定是否继续。"
+                : " 自动模式下不强制通过，需人工介入。建议：调整任务范围或使用 --interactive 模式。"),
     };
 }
 /**
@@ -181,10 +174,10 @@ export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e =
  */
 export async function validatePhase5Artifacts(outputDir, testFileCount, resultsContent) {
     const errors = [];
-    // 1. 检查测试文件
+    // 1. 检查测试文件（新增或修改均算）
     if (testFileCount === 0) {
-        errors.push("未检测到新增的测试文件。必须调用 test-architect agent 设计用例，" +
-            "再调用 developer agent 实现测试代码。不能只写测试计划文档。");
+        errors.push("未检测到新增或修改的测试文件。必须调用 test-architect agent 设计用例，" +
+            "再调用 developer agent 实现或修改测试代码。不能只写测试计划文档。");
     }
     // 2. 检查测试结果文件
     if (!resultsContent) {

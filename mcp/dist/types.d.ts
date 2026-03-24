@@ -35,10 +35,27 @@ export declare const GitInfoSchema: z.ZodObject<{
 }, z.core.$strip>;
 export type GitInfo = z.infer<typeof GitInfoSchema>;
 export declare const LessonEntrySchema: z.ZodObject<{
+    id: z.ZodOptional<z.ZodString>;
     phase: z.ZodNumber;
-    category: z.ZodString;
+    category: z.ZodEnum<{
+        pitfall: "pitfall";
+        highlight: "highlight";
+        process: "process";
+        technical: "technical";
+        pattern: "pattern";
+        "iteration-limit": "iteration-limit";
+    }>;
+    severity: z.ZodOptional<z.ZodEnum<{
+        critical: "critical";
+        important: "important";
+        minor: "minor";
+    }>>;
     lesson: z.ZodString;
     context: z.ZodOptional<z.ZodString>;
+    topic: z.ZodOptional<z.ZodString>;
+    reusable: z.ZodOptional<z.ZodBoolean>;
+    appliedCount: z.ZodOptional<z.ZodNumber>;
+    lastAppliedAt: z.ZodOptional<z.ZodString>;
     timestamp: z.ZodString;
 }, z.core.$strip>;
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
@@ -71,6 +88,8 @@ export declare const StateJsonSchema: z.ZodObject<{
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
+    tdd: z.ZodOptional<z.ZodBoolean>;
+    brainstorm: z.ZodOptional<z.ZodBoolean>;
     startCommit: z.ZodOptional<z.ZodString>;
     regressionCount: z.ZodOptional<z.ZodNumber>;
     phaseTimings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
@@ -97,6 +116,8 @@ export declare const InitInputSchema: z.ZodObject<{
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
+    tdd: z.ZodOptional<z.ZodBoolean>;
+    brainstorm: z.ZodOptional<z.ZodBoolean>;
     onConflict: z.ZodOptional<z.ZodEnum<{
         resume: "resume";
         overwrite: "overwrite";

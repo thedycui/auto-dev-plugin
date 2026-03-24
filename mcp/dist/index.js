@@ -1,7 +1,7 @@
 /**
  * auto-dev MCP Server — Entry point.
  *
- * Registers all 10 MCP tools and starts the stdio transport.
+ * Registers all 11 MCP tools and starts the stdio transport.
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -71,8 +71,10 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
     skipE2e: z.boolean().optional(),
+    tdd: z.boolean().optional(),
+    brainstorm: z.boolean().optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
-}, async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, onConflict }) => {
+}, async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
     // Handle existing directory
     if (await sm.outputDirExists()) {
@@ -146,6 +148,16 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     const git = await gitManager.getStatus();
     const startCommit = await gitManager.getHeadCommit();
     await sm.init(mode, stack, startPhase);
+    // Create a lightweight git tag as rollback anchor (best-effort, non-blocking)
+    try {
+        const { execFile: execFileSync } = await import("node:child_process");
+        await new Promise((resolve) => {
+            const tagName = `auto-dev/${topic}/start`;
+            // Force-create tag in case a previous session left one
+            execFileSync("git", ["tag", "-f", tagName], { cwd: projectRoot }, () => resolve());
+        });
+    }
+    catch { /* git tag failed — non-fatal, continue */ }
     // Persist behavior flags and startCommit to state
     const behaviorUpdates = { startCommit };
     if (interactive)
@@ -154,6 +166,10 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         behaviorUpdates["dryRun"] = true;
     if (skipE2e)
         behaviorUpdates["skipE2e"] = true;
+    if (tdd)
+        behaviorUpdates["tdd"] = true;
+    if (brainstorm)
+        behaviorUpdates["brainstorm"] = true;
     await sm.atomicUpdate(behaviorUpdates);
     const state = sm.getFullState();
     return textResult({
@@ -220,23 +236,36 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
         return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
     }
+    // [P0-1 fix] REGRESS validation BEFORE any state mutation
+    if (status === "REGRESS") {
+        if (!regressTo) {
+            return textResult({ error: "REGRESS requires regressTo parameter" });
+        }
+        if (regressTo >= phase) {
+            return textResult({ error: `regressTo(${regressTo}) must be < current phase(${phase})` });
+        }
+        if ((state.regressionCount ?? 0) >= 2) {
+            return textResult({
+                status: "BLOCKED",
+                mandate: "[BLOCKED] Max regression count (2) reached. Human intervention required.",
+            });
+        }
+    }
     // Iteration limit check for NEEDS_REVISION
     if (status === "NEEDS_REVISION") {
         const newIteration = (state.iteration ?? 0) + 1;
         const iterCheck = checkIterationLimit(phase, newIteration, state.interactive ?? false);
         if (iterCheck.action === "BLOCK") {
+            // [P1-2 fix] Persist iteration even on BLOCK so it's sticky
+            await sm.atomicUpdate({ iteration: newIteration });
+            // Record lesson so future phases can learn from this
+            const lessons = new LessonsManager(sm.outputDir);
+            await lessons.add(phase, "iteration-limit", iterCheck.message);
             return textResult({
                 status: "BLOCKED",
                 message: iterCheck.message,
                 mandate: `[BLOCKED] ${iterCheck.message} 请用户决定是否继续。`,
             });
-        }
-        if (iterCheck.action === "FORCE_PASS") {
-            status = "PASS";
-            summary = `[FORCED_PASS: iteration limit exceeded] ${summary ?? ""}`;
-            // Record lesson about forced pass
-            const lessons = new LessonsManager(sm.outputDir);
-            await lessons.add(phase, "iteration-limit", iterCheck.message);
         }
     }
     // 1. Append to progress-log (first, per design: progress-log before state.json)
@@ -253,12 +282,10 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     else if (status === "PASS" || status === "COMPLETED") {
         stateUpdates["iteration"] = 0;
     }
-    // REGRESS handling
+    // REGRESS state updates (validation already done above)
     if (status === "REGRESS") {
-        if (!regressTo) {
-            return textResult({ error: "REGRESS requires regressTo parameter" });
-        }
-        stateUpdates["regressionCount"] = (state.regressionCount ?? 0) + 1;
+        const newRegressionCount = (state.regressionCount ?? 0) + 1;
+        stateUpdates["regressionCount"] = newRegressionCount;
         stateUpdates["iteration"] = 0;
     }
     // Phase timing tracking
@@ -323,7 +350,8 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             const { execFile: execFileAsync } = await import("node:child_process");
             const diffOutput = await new Promise((resolve, reject) => {
                 const baseCommit = state.startCommit ?? "HEAD~20";
-                execFileAsync("git", ["diff", "--name-only", "--diff-filter=A", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+                // --diff-filter=AM: 同时检测新增(A)和修改(M)的测试文件，扩展已有测试也算有效工作
+                execFileAsync("git", ["diff", "--name-only", "--diff-filter=AM", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
                     if (err)
                         resolve("");
                     else
@@ -362,7 +390,11 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         }
     }
     // 5. Compute next phase directive — forces Claude to continue to next phase
-    const nextDirective = computeNextDirective(phase, status, state, regressTo);
+    // [P1-3 fix] Pass updated regressionCount so limit check uses current value
+    const stateForDirective = status === "REGRESS"
+        ? { ...state, regressionCount: (state.regressionCount ?? 0) + 1 }
+        : state;
+    const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
     return textResult({ ok: true, ...nextDirective });
 });
 // ===========================================================================
@@ -427,6 +459,7 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
     // Auto-render suggested prompt when ready
     if (ready) {
         const phasePromptMap = {
+            0: { promptFile: "phase0-brainstorm", agent: "auto-dev-architect" },
             1: { promptFile: "phase1-architect", agent: "auto-dev-architect" },
             2: { promptFile: "phase2-planner", agent: "auto-dev-architect" },
             3: { promptFile: "phase3-developer", agent: "auto-dev-developer" },
@@ -441,8 +474,46 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
                 const gitInfo = await new GitManager(projectRoot).getStatus();
                 const variables = buildVariablesFromState(state, gitInfo.currentBranch);
                 const renderer = new TemplateRenderer(defaultSkillsDir());
-                // Build extraContext for Phase 3+ (inject design.md summary and plan.md task list)
+                // Build extraContext: lessons + design summary + plan tasks
                 let extraContext = "";
+                // 1. Inject lessons learned (all phases — avoid repeating past mistakes)
+                try {
+                    const lessonsManager = new LessonsManager(sm.outputDir, projectRoot);
+                    const lessons = await lessonsManager.get(phase);
+                    if (lessons.length > 0) {
+                        extraContext += `## 历史教训（自动注入，请在本次执行中避免重蹈覆辙）\n\n`;
+                        for (const l of lessons) {
+                            extraContext += `- [${l.category}] ${l.lesson}\n`;
+                        }
+                        extraContext += "\n";
+                    }
+                }
+                catch { /* lessons file not found, skip */ }
+                // 1b. Inject global lessons (cross-topic reusable experience)
+                try {
+                    const globalLessons = await new LessonsManager(sm.outputDir, projectRoot).getGlobalLessons(10);
+                    if (globalLessons.length > 0) {
+                        extraContext += `## 全局经验（跨项目积累，自动注入）\n\n`;
+                        for (const l of globalLessons) {
+                            extraContext += `- [${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ""}\n`;
+                        }
+                        extraContext += "\n";
+                    }
+                }
+                catch { /* global lessons not found, skip */ }
+                // 1c. Inject brainstorm notes into Phase 1 (if Phase 0 was run)
+                if (phase === 1) {
+                    try {
+                        const brainstormNotes = await readFile(join(outputDir, "brainstorm-notes.md"), "utf-8");
+                        extraContext += `## Brainstorm 结论（Phase 0 产出，自动注入）\n\n${brainstormNotes.slice(0, 2000)}\n\n`;
+                    }
+                    catch { /* no brainstorm notes, skip */ }
+                }
+                // 1d. Inject TDD flag into Phase 3
+                if (phase === 3 && state.tdd) {
+                    extraContext += `## TDD 模式已启用\n\ntdd_mode = "enabled"\n请严格遵循 RED-GREEN-REFACTOR 循环。\n\n`;
+                }
+                // 2. Inject design summary and plan task list for Phase 3+
                 if (phase >= 3) {
                     try {
                         const designContent = await readFile(join(outputDir, "design.md"), "utf-8");
@@ -502,10 +573,12 @@ server.tool("auto_dev_lessons_add", "Record a lesson learned from the current au
     category: z.string(),
     lesson: z.string(),
     context: z.string().optional(),
-}, async ({ projectRoot, topic, phase, category, lesson, context }) => {
+    severity: z.string().optional(),
+    reusable: z.boolean().optional(),
+}, async ({ projectRoot, topic, phase, category, lesson, context, severity, reusable }) => {
     const sm = new StateManager(projectRoot, topic);
     const lessons = new LessonsManager(sm.outputDir);
-    await lessons.add(phase, category, lesson, context);
+    await lessons.add(phase, category, lesson, context, { severity, topic, reusable });
     return textResult({ success: true, message: "Lesson recorded." });
 });
 // ===========================================================================
@@ -555,6 +628,47 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
             mandate: "[BLOCKED] " + validation.message + " 禁止向用户宣称任务完成。",
         });
     }
+    // === Verification gate: run actual build + test ===
+    const buildCmd = state.stack?.buildCmd;
+    const testCmd = state.stack?.testCmd;
+    if (buildCmd) {
+        try {
+            const { execFile } = await import("node:child_process");
+            const buildResult = await new Promise((resolve) => {
+                execFile("sh", ["-c", buildCmd], { cwd: projectRoot, timeout: 120_000 }, (err, _stdout, stderr) => {
+                    resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+                });
+            });
+            if (!buildResult.success) {
+                return textResult({
+                    error: "BUILD_FAILED_AT_COMPLETION",
+                    canComplete: false,
+                    message: `所有 Phase 已 PASS，但最终构建失败。请修复后重新调用 auto_dev_complete。\n${buildResult.stderr}`,
+                    mandate: "[BLOCKED] 构建失败，禁止宣称完成。",
+                });
+            }
+        }
+        catch { /* build command execution failed — non-fatal, continue */ }
+    }
+    if (testCmd) {
+        try {
+            const { execFile } = await import("node:child_process");
+            const testResult = await new Promise((resolve) => {
+                execFile("sh", ["-c", testCmd], { cwd: projectRoot, timeout: 300_000 }, (err, _stdout, stderr) => {
+                    resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+                });
+            });
+            if (!testResult.success) {
+                return textResult({
+                    error: "TESTS_FAILED_AT_COMPLETION",
+                    canComplete: false,
+                    message: `所有 Phase 已 PASS，但最终测试失败。请修复后重新调用 auto_dev_complete。\n${testResult.stderr}`,
+                    mandate: "[BLOCKED] 测试失败，禁止宣称完成。",
+                });
+            }
+        }
+        catch { /* test command execution failed — non-fatal, continue */ }
+    }
     // All phases passed — mark as COMPLETED
     const completeLine = sm.getCheckpointLine(state.phase, undefined, "COMPLETED", "All required phases passed. Session complete.");
     await sm.appendToProgressLog("\n" + completeLine + "\n");
@@ -565,13 +679,47 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
         durationMs: t.durationMs,
         durationStr: t.durationMs ? formatDuration(t.durationMs) : "unknown",
     }));
+    const tokenUsage = state.tokenUsage ?? { total: 0, byPhase: {} };
+    // Generate summary.md
+    try {
+        const PHASE_NAMES = {
+            "0": "BRAINSTORM", "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE",
+        };
+        const timingRows = timingSummary
+            .map(t => `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? "?"}) | ${t.durationStr} |`)
+            .join("\n");
+        const tokenRows = Object.entries(tokenUsage.byPhase)
+            .map(([p, tok]) => `| Phase ${p} | ~${tok.toLocaleString()} |`)
+            .join("\n");
+        const summaryContent = `# auto-dev 完成摘要\n\n` +
+            `**Topic**: ${state.topic}  \n` +
+            `**Mode**: ${state.mode}${state.skipE2e ? " (skip-e2e)" : ""}  \n` +
+            `**Started**: ${state.startedAt}  \n` +
+            `**Completed**: ${new Date().toISOString()}  \n\n` +
+            `## Phase 耗时\n\n` +
+            `| Phase | 耗时 |\n|-------|------|\n${timingRows || "| — | — |"}\n\n` +
+            `## Token 消耗（估算）\n\n` +
+            `| Phase | Token |\n|-------|-------|\n${tokenRows || "| — | — |"}\n` +
+            `| **合计** | **~${tokenUsage.total.toLocaleString()}** |\n\n` +
+            `## 关键产出文件\n\n` +
+            `- \`design.md\` — 架构设计\n` +
+            `- \`plan.md\` — 实施计划\n` +
+            `- \`code-review.md\` — 代码审查报告\n` +
+            (state.skipE2e ? "" : `- \`e2e-test-results.md\` — E2E 测试结果\n`) +
+            `- \`acceptance-report.md\` — 验收报告\n` +
+            `- \`progress-log.md\` — 完整执行日志\n\n` +
+            `> 如需回滚至 init 状态：\`git reset --hard auto-dev/${state.topic}/start\`\n`;
+        await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
+    }
+    catch { /* summary.md generation failed — non-fatal */ }
+    // Lesson promotion is now handled by retrospective (Phase 7)
     return textResult({
         canComplete: true,
         passedPhases: validation.passedPhases,
         message: validation.message,
         status: "COMPLETED",
         timingSummary,
-        tokenUsage: state.tokenUsage ?? { total: 0, byPhase: {} },
+        tokenUsage,
     });
 });
 // ===========================================================================

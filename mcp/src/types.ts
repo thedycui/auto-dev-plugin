@@ -54,10 +54,16 @@ export type GitInfo = z.infer<typeof GitInfoSchema>;
 // ---------------------------------------------------------------------------
 
 export const LessonEntrySchema = z.object({
+  id: z.string().optional(),
   phase: z.number().int(),
-  category: z.string(),
+  category: z.enum(["pitfall", "highlight", "process", "technical", "pattern", "iteration-limit"]),
+  severity: z.enum(["critical", "important", "minor"]).optional(),
   lesson: z.string(),
   context: z.string().optional(),
+  topic: z.string().optional(),
+  reusable: z.boolean().optional(),
+  appliedCount: z.number().int().optional(),
+  lastAppliedAt: z.string().optional(),
   timestamp: z.string(),
 });
 
@@ -89,6 +95,8 @@ export const StateJsonSchema = z.object({
   interactive: z.boolean().optional(),  // --interactive mode (default: false = fully automatic)
   dryRun: z.boolean().optional(),       // --dry-run mode (only Phase 1-2)
   skipE2e: z.boolean().optional(),      // --skip-e2e mode (skip Phase 5)
+  tdd: z.boolean().optional(),          // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
+  brainstorm: z.boolean().optional(),   // --brainstorm mode (Phase 0 enabled)
 
   // Git baseline for accurate Phase 5 diff
   startCommit: z.string().optional(),
@@ -131,6 +139,8 @@ export const InitInputSchema = z.object({
   interactive: z.boolean().optional(),   // --interactive mode (replaces noConfirm)
   dryRun: z.boolean().optional(),        // --dry-run: only Phase 1-2
   skipE2e: z.boolean().optional(),      // --skip-e2e: skip Phase 5
+  tdd: z.boolean().optional(),          // --tdd: RED-GREEN-REFACTOR in Phase 3
+  brainstorm: z.boolean().optional(),   // --brainstorm: enable Phase 0
   onConflict: OnConflictSchema.optional(),
 });
 

@@ -85,9 +85,11 @@ server.tool(
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
     skipE2e: z.boolean().optional(),
+    tdd: z.boolean().optional(),
+    brainstorm: z.boolean().optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
   },
-  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, onConflict }) => {
+  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -177,6 +179,8 @@ server.tool(
     if (interactive) behaviorUpdates["interactive"] = true;
     if (dryRun) behaviorUpdates["dryRun"] = true;
     if (skipE2e) behaviorUpdates["skipE2e"] = true;
+    if (tdd) behaviorUpdates["tdd"] = true;
+    if (brainstorm) behaviorUpdates["brainstorm"] = true;
     await sm.atomicUpdate(behaviorUpdates);
 
     const state = sm.getFullState();
@@ -512,6 +516,7 @@ server.tool(
     // Auto-render suggested prompt when ready
     if (ready) {
       const phasePromptMap: Record<number, { promptFile: string; agent: string }> = {
+        0: { promptFile: "phase0-brainstorm", agent: "auto-dev-architect" },
         1: { promptFile: "phase1-architect", agent: "auto-dev-architect" },
         2: { promptFile: "phase2-planner", agent: "auto-dev-architect" },
         3: { promptFile: "phase3-developer", agent: "auto-dev-developer" },
@@ -532,7 +537,7 @@ server.tool(
 
           // 1. Inject lessons learned (all phases — avoid repeating past mistakes)
           try {
-            const lessonsManager = new LessonsManager(sm.outputDir);
+            const lessonsManager = new LessonsManager(sm.outputDir, projectRoot);
             const lessons = await lessonsManager.get(phase);
             if (lessons.length > 0) {
               extraContext += `## 历史教训（自动注入，请在本次执行中避免重蹈覆辙）\n\n`;
@@ -542,6 +547,31 @@ server.tool(
               extraContext += "\n";
             }
           } catch { /* lessons file not found, skip */ }
+
+          // 1b. Inject global lessons (cross-topic reusable experience)
+          try {
+            const globalLessons = await new LessonsManager(sm.outputDir, projectRoot).getGlobalLessons(10);
+            if (globalLessons.length > 0) {
+              extraContext += `## 全局经验（跨项目积累，自动注入）\n\n`;
+              for (const l of globalLessons) {
+                extraContext += `- [${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ""}\n`;
+              }
+              extraContext += "\n";
+            }
+          } catch { /* global lessons not found, skip */ }
+
+          // 1c. Inject brainstorm notes into Phase 1 (if Phase 0 was run)
+          if (phase === 1) {
+            try {
+              const brainstormNotes = await readFile(join(outputDir, "brainstorm-notes.md"), "utf-8");
+              extraContext += `## Brainstorm 结论（Phase 0 产出，自动注入）\n\n${brainstormNotes.slice(0, 2000)}\n\n`;
+            } catch { /* no brainstorm notes, skip */ }
+          }
+
+          // 1d. Inject TDD flag into Phase 3
+          if (phase === 3 && state.tdd) {
+            extraContext += `## TDD 模式已启用\n\ntdd_mode = "enabled"\n请严格遵循 RED-GREEN-REFACTOR 循环。\n\n`;
+          }
 
           // 2. Inject design summary and plan task list for Phase 3+
           if (phase >= 3) {
@@ -623,11 +653,13 @@ server.tool(
     category: z.string(),
     lesson: z.string(),
     context: z.string().optional(),
+    severity: z.string().optional(),
+    reusable: z.boolean().optional(),
   },
-  async ({ projectRoot, topic, phase, category, lesson, context }) => {
+  async ({ projectRoot, topic, phase, category, lesson, context, severity, reusable }) => {
     const sm = new StateManager(projectRoot, topic);
     const lessons = new LessonsManager(sm.outputDir);
-    await lessons.add(phase, category, lesson, context);
+    await lessons.add(phase, category, lesson, context, { severity, topic, reusable });
     return textResult({ success: true, message: "Lesson recorded." });
   },
 );
@@ -700,6 +732,47 @@ server.tool(
       });
     }
 
+    // === Verification gate: run actual build + test ===
+    const buildCmd = state.stack?.buildCmd;
+    const testCmd = state.stack?.testCmd;
+    if (buildCmd) {
+      try {
+        const { execFile } = await import("node:child_process");
+        const buildResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
+          execFile("sh", ["-c", buildCmd], { cwd: projectRoot, timeout: 120_000 }, (err, _stdout, stderr) => {
+            resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+          });
+        });
+        if (!buildResult.success) {
+          return textResult({
+            error: "BUILD_FAILED_AT_COMPLETION",
+            canComplete: false,
+            message: `所有 Phase 已 PASS，但最终构建失败。请修复后重新调用 auto_dev_complete。\n${buildResult.stderr}`,
+            mandate: "[BLOCKED] 构建失败，禁止宣称完成。",
+          });
+        }
+      } catch { /* build command execution failed — non-fatal, continue */ }
+    }
+    if (testCmd) {
+      try {
+        const { execFile } = await import("node:child_process");
+        const testResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
+          execFile("sh", ["-c", testCmd], { cwd: projectRoot, timeout: 300_000 }, (err, _stdout, stderr) => {
+            resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+          });
+        });
+        if (!testResult.success) {
+          return textResult({
+            error: "TESTS_FAILED_AT_COMPLETION",
+            canComplete: false,
+            message: `所有 Phase 已 PASS，但最终测试失败。请修复后重新调用 auto_dev_complete。\n${testResult.stderr}`,
+            mandate: "[BLOCKED] 测试失败，禁止宣称完成。",
+          });
+        }
+      } catch { /* test command execution failed — non-fatal, continue */ }
+    }
+
+
     // All phases passed — mark as COMPLETED
     const completeLine = sm.getCheckpointLine(
       state.phase, undefined, "COMPLETED",
@@ -720,7 +793,7 @@ server.tool(
     // Generate summary.md
     try {
       const PHASE_NAMES: Record<string, string> = {
-        "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE",
+        "0": "BRAINSTORM", "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE",
       };
       const timingRows = timingSummary
         .map(t => `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? "?"}) | ${t.durationStr} |`)
@@ -751,6 +824,8 @@ server.tool(
 
       await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
     } catch { /* summary.md generation failed — non-fatal */ }
+
+    // Lesson promotion is now handled by retrospective (Phase 7)
 
     return textResult({
       canComplete: true,

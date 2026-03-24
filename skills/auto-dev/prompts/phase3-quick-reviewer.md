@@ -1,3 +1,16 @@
+## 审查分两步（必须按顺序）
+
+### Step 1: Spec 合规性（先做这步）
+- 对照 plan.md 中当前 task 的描述
+- 是否完整实现了 task 要求的所有内容？
+- 是否有多做的（scope creep）？
+- 是否修改了 task 未要求的文件？
+- [TDD 模式] 是否遵循了 RED-GREEN-REFACTOR 顺序？有没有跳过 RED？
+
+→ 如果 Step 1 不通过，直接返回 NEEDS_FIX，不需要做 Step 2
+
+### Step 2: 代码质量（Step 1 通过后再做）
+
 # Phase 3: Quick Code Review
 
 ## Task

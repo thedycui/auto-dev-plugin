@@ -50,7 +50,7 @@ async function fileExists(path) {
 function parseHeaderField(content, field) {
     const regex = new RegExp(`>\\s*${field}:\\s*(.+?)\\s*$`, "m");
     const match = content.match(regex);
-    return match ? match[1].trim() : null;
+    return match?.[1] ? match[1].trim() : null;
 }
 function parseAllCheckpoints(content) {
     const results = [];
@@ -63,7 +63,7 @@ function parseAllCheckpoints(content) {
 }
 export function extractDocSummary(content, maxLines) {
     // 优先查找 ## 概述 或 ## Summary 段落
-    const sectionMatch = content.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |\n*$)/);
+    const sectionMatch = content.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/);
     if (sectionMatch) {
         return sectionMatch[1].trim();
     }
@@ -96,7 +96,7 @@ function parseStackVariables(content) {
     const lines = sectionMatch[1].split("\n");
     for (const line of lines) {
         const m = line.match(/^-\s+(\w+):\s*(.+)$/);
-        if (m) {
+        if (m && m[1] && m[2]) {
             vars[m[1]] = m[2].trim();
         }
     }
@@ -187,7 +187,10 @@ export class StateManager {
         const checkpoints = parseAllCheckpoints(content);
         const last = checkpoints[checkpoints.length - 1];
         const phase = last?.phase ?? 1;
-        const status = last?.status ?? "IN_PROGRESS";
+        const rawStatus = last?.status ?? "IN_PROGRESS";
+        // [P1-5 fix] Validate status against PhaseStatusSchema, fallback to IN_PROGRESS
+        const validStatuses = ["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"];
+        const status = validStatuses.includes(rawStatus) ? rawStatus : "IN_PROGRESS";
         // 3. Re-detect stack from filesystem
         const stack = await this.detectStack();
         // 4. Assemble StateJson
@@ -376,16 +379,16 @@ export class StateManager {
         }
         if (!lastMatch)
             return false;
-        const attrs = lastMatch[1];
+        const attrs = lastMatch[1] ?? "";
         // Parse attributes from the last checkpoint
         const phaseMatch = attrs.match(/phase=(\d+)/);
         const taskMatch = attrs.match(/task=(\d+)/);
         const statusMatch = attrs.match(/status=(\S+)/);
         const summaryMatch = attrs.match(/summary="([^"]*)"/);
-        const lastPhase = phaseMatch ? parseInt(phaseMatch[1], 10) : null;
-        const lastTask = taskMatch ? parseInt(taskMatch[1], 10) : undefined;
-        const lastStatus = statusMatch ? statusMatch[1] : null;
-        const lastSummary = summaryMatch ? summaryMatch[1] : undefined;
+        const lastPhase = phaseMatch?.[1] ? parseInt(phaseMatch[1], 10) : null;
+        const lastTask = taskMatch?.[1] ? parseInt(taskMatch[1], 10) : undefined;
+        const lastStatus = statusMatch?.[1] ?? null;
+        const lastSummary = summaryMatch?.[1] ?? undefined;
         return (lastPhase === phase &&
             lastTask === task &&
             lastStatus === status &&
