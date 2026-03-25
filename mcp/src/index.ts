@@ -18,6 +18,7 @@ import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
 import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit } from "./phase-enforcer.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
+import { runRetrospective } from "./retrospective.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -279,12 +280,8 @@ server.tool(
       if (regressTo >= phase) {
         return textResult({ error: `regressTo(${regressTo}) must be < current phase(${phase})` });
       }
-      if ((state.regressionCount ?? 0) >= 2) {
-        return textResult({
-          status: "BLOCKED",
-          mandate: "[BLOCKED] Max regression count (2) reached. Human intervention required.",
-        });
-      }
+      // Regression limit check consolidated in computeNextDirective (phase-enforcer.ts)
+      // Only pre-check regressTo validity here, not count
     }
 
     // Iteration limit check for NEEDS_REVISION
@@ -378,6 +375,28 @@ server.tool(
       await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
 
+    // 3.8 TDD Iron Law verification — check commit history for RED-GREEN pattern
+    if (phase === 3 && status === "PASS" && state.tdd === true) {
+      try {
+        const { execFile: execFileTdd } = await import("node:child_process");
+        const taskStartCommit = state.startCommit ?? "HEAD~20";
+        const commitLog = await new Promise<string>((resolve) => {
+          execFileTdd("git", ["log", "--oneline", taskStartCommit + "..HEAD"], { cwd: projectRoot }, (err, stdout) => {
+            resolve(err ? "" : (stdout || ""));
+          });
+        });
+        // Check for RED commits (test-first pattern)
+        const hasRedCommit = /RED|red|failing test|add.*test/i.test(commitLog);
+        const hasGreenCommit = /GREEN|green|implement|pass/i.test(commitLog);
+        if (!hasRedCommit && commitLog.trim().length > 0) {
+          // TDD violation: implementation without RED commit
+          const warnings = state.tddWarnings ?? [];
+          warnings.push(`Task ${task ?? "?"}: no RED commit found in history. TDD Iron Law may have been violated.`);
+          await sm.atomicUpdate({ tddWarnings: warnings });
+        }
+      } catch { /* git log failed, skip TDD check */ }
+    }
+
     // 4. Phase 5/6 artifact validation — prevent skipping tests or acceptance
     if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
       // Check for new test files via git
@@ -391,10 +410,17 @@ server.tool(
         const { execFile: execFileAsync } = await import("node:child_process");
         const diffOutput = await new Promise<string>((resolve, reject) => {
           const baseCommit = state.startCommit ?? "HEAD~20";
-          // --diff-filter=AM: 同时检测新增(A)和修改(M)的测试文件，扩展已有测试也算有效工作
+          // --diff-filter=AM: committed/staged test files
           execFileAsync("git", ["diff", "--name-only", "--diff-filter=AM", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
             if (err) resolve("");
-            else resolve(stdout);
+            else {
+              // Also check untracked files (developer may not have git-added yet)
+              execFileAsync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err2, stdout2) => {
+                const committed = stdout || "";
+                const untracked = err2 ? "" : (stdout2 || "");
+                resolve(committed + "\n" + untracked);
+              });
+            }
           });
         });
         const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
@@ -506,7 +532,18 @@ server.tool(
     };
 
     if (phase >= 2) await fileCheck("design_md", join(outputDir, "design.md"));
-    if (phase >= 3) await fileCheck("plan_md", join(outputDir, "plan.md"));
+    if (phase >= 3) {
+      await fileCheck("plan_md", join(outputDir, "plan.md"));
+      // Validate plan contains at least one task marker
+      try {
+        const planContent = await readFile(join(outputDir, "plan.md"), "utf-8");
+        if (!/##\s*Task\s+\d|###\s*Task\s+\d|\d+\./m.test(planContent)) {
+          checks.push({ name: "plan_has_tasks", passed: false, message: "plan.md does not contain recognizable task markers (## Task N or numbered list)" });
+        } else {
+          checks.push({ name: "plan_has_tasks", passed: true, message: "plan.md contains task markers" });
+        }
+      } catch { /* already checked file exists above */ }
+    }
     if (phase >= 5) await fileCheck("code_review_md", join(outputDir, "code-review.md"));
     if (phase >= 6) await fileCheck("e2e_test_results_md", join(outputDir, "e2e-test-results.md"));
 
@@ -560,7 +597,13 @@ server.tool(
             }
           } catch { /* global lessons not found, skip */ }
 
-          // 1c. Inject brainstorm notes into Phase 1 (if Phase 0 was run)
+          // 1c. Inject Phase 3 task-level resume info
+          if (phase === 3 && state.task && state.task > 0) {
+            extraContext += `## 任务恢复信息（自动注入）\n\n`;
+            extraContext += `上次 session 执行到 Task ${state.task}。请从 Task ${state.task + 1} 开始继续，跳过已完成的 Task 1-${state.task}。\n\n`;
+          }
+
+          // 1d. Inject brainstorm notes into Phase 1 (if Phase 0 was run)
           if (phase === 1) {
             try {
               const brainstormNotes = await readFile(join(outputDir, "brainstorm-notes.md"), "utf-8");
@@ -825,7 +868,13 @@ server.tool(
       await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
     } catch { /* summary.md generation failed — non-fatal */ }
 
-    // Lesson promotion is now handled by retrospective (Phase 7)
+    // Phase 7: RETROSPECTIVE — auto-extract lessons for self-evolution
+    let retrospectiveResult: { lessonsExtracted: number; globalPromoted: number; retrospectivePath: string } | null = null;
+    try {
+      retrospectiveResult = await runRetrospective(state, sm.outputDir, projectRoot);
+    } catch (e) {
+      // Retrospective failed — non-fatal, log but don't block completion
+    }
 
     return textResult({
       canComplete: true,
@@ -834,6 +883,7 @@ server.tool(
       status: "COMPLETED",
       timingSummary,
       tokenUsage,
+      retrospective: retrospectiveResult,
     });
   },
 );

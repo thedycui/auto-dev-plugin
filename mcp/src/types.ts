@@ -96,6 +96,7 @@ export const StateJsonSchema = z.object({
   dryRun: z.boolean().optional(),       // --dry-run mode (only Phase 1-2)
   skipE2e: z.boolean().optional(),      // --skip-e2e mode (skip Phase 5)
   tdd: z.boolean().optional(),          // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
+  tddWarnings: z.array(z.string()).optional(),  // TDD violation warnings collected during Phase 3
   brainstorm: z.boolean().optional(),   // --brainstorm mode (Phase 0 enabled)
 
   // Git baseline for accurate Phase 5 diff
@@ -140,6 +141,7 @@ export const InitInputSchema = z.object({
   dryRun: z.boolean().optional(),        // --dry-run: only Phase 1-2
   skipE2e: z.boolean().optional(),      // --skip-e2e: skip Phase 5
   tdd: z.boolean().optional(),          // --tdd: RED-GREEN-REFACTOR in Phase 3
+  tddWarnings: z.array(z.string()).optional(),  // TDD violation warnings collected during Phase 3
   brainstorm: z.boolean().optional(),   // --brainstorm: enable Phase 0
   onConflict: OnConflictSchema.optional(),
 });

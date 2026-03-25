@@ -270,7 +270,7 @@ export async function validatePhase5Artifacts(
   if (!resultsContent) {
     errors.push("e2e-test-results.md 不存在。");
   } else {
-    const hasExecutionResult = /\b(PASS|FAIL|passed|failed|✅|❌|SUCCESS|ERROR)\b/i.test(resultsContent);
+    const hasExecutionResult = /(?:test|测试|用例|case|spec|it\b).*?(?:PASS|FAIL|passed|failed|✅|❌|SUCCESS|ERROR)|(?:PASS|FAIL|✅|❌)\s*[:\-|]/i.test(resultsContent);
     const hasPendingOnly = /⏳|待执行|待部署|待验证|pending/i.test(resultsContent);
     if (!hasExecutionResult && hasPendingOnly) {
       errors.push(

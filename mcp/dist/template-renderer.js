@@ -30,7 +30,7 @@ export class TemplateRenderer {
         content = content.replace(CHECKPOINT_RE, (cp) => {
             const idx = checkpointPlaceholders.length;
             checkpointPlaceholders.push(cp);
-            return `\x00CHECKPOINT_${idx}\x00`;
+            return `__AUTODEV_CHECKPOINT_${idx}_PLACEHOLDER__`;
         });
         // 3. Replace {variable} placeholders FIRST
         //    This must happen before requires parsing so that
@@ -44,7 +44,7 @@ export class TemplateRenderer {
             return original;
         });
         // 4. Restore CHECKPOINT comments
-        content = content.replace(/\x00CHECKPOINT_(\d+)\x00/g, (_, idx) => checkpointPlaceholders[Number(idx)]);
+        content = content.replace(/__AUTODEV_CHECKPOINT_(\d+)_PLACEHOLDER__/g, (_, idx) => checkpointPlaceholders[Number(idx)]);
         // 5. Parse <!-- requires: checklist-name --> and inject checklist content
         //    Now runs AFTER variable substitution, so dynamic checklist names work.
         const requiresMatches = [...content.matchAll(REQUIRES_RE)];

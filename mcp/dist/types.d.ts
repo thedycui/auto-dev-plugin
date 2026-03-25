@@ -89,6 +89,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     tdd: z.ZodOptional<z.ZodBoolean>;
+    tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     brainstorm: z.ZodOptional<z.ZodBoolean>;
     startCommit: z.ZodOptional<z.ZodString>;
     regressionCount: z.ZodOptional<z.ZodNumber>;
@@ -117,6 +118,7 @@ export declare const InitInputSchema: z.ZodObject<{
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     tdd: z.ZodOptional<z.ZodBoolean>;
+    tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     brainstorm: z.ZodOptional<z.ZodBoolean>;
     onConflict: z.ZodOptional<z.ZodEnum<{
         resume: "resume";

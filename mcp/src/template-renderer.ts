@@ -43,7 +43,7 @@ export class TemplateRenderer {
     content = content.replace(CHECKPOINT_RE, (cp) => {
       const idx = checkpointPlaceholders.length;
       checkpointPlaceholders.push(cp);
-      return `\x00CHECKPOINT_${idx}\x00`;
+      return `__AUTODEV_CHECKPOINT_${idx}_PLACEHOLDER__`;
     });
 
     // 3. Replace {variable} placeholders FIRST
@@ -60,7 +60,7 @@ export class TemplateRenderer {
 
     // 4. Restore CHECKPOINT comments
     content = content.replace(
-      /\x00CHECKPOINT_(\d+)\x00/g,
+      /__AUTODEV_CHECKPOINT_(\d+)_PLACEHOLDER__/g,
       (_, idx: string) => checkpointPlaceholders[Number(idx)]!,
     );
 
