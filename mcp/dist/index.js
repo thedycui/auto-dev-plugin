@@ -376,8 +376,9 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     }
     // Phase 5 artifact pre-validation + ACTUAL test execution
     if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
-        // 5a. Check test files exist
+        // 5a. Check test files and implementation files exist
         let testFileCount = 0;
+        let implFileCount = 0;
         try {
             const { execFile: execFileAsync } = await import("node:child_process");
             const diffOutput = await new Promise((resolve) => {
@@ -396,6 +397,10 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             });
             const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
             testFileCount = countTestFiles(newFiles);
+            // Count new implementation files (non-test source files)
+            const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/, /\.go$/, /\.rs$/, /\.kt$/];
+            const testPatterns = [/[Tt]est\.(java|py|ts|js|kt|go|rs)$/, /\.test\.(ts|js|tsx|jsx)$/, /\.spec\.(ts|js|tsx|jsx)$/, /_test\.(go|py)$/, /tests?\//i];
+            implFileCount = newFiles.filter(f => implPatterns.some(p => p.test(f)) && !testPatterns.some(p => p.test(f))).length;
         }
         catch { /* ignore git errors */ }
         let resultsContent = null;
@@ -403,7 +408,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             resultsContent = await readFile(join(sm.outputDir, "e2e-test-results.md"), "utf-8");
         }
         catch { /* file doesn't exist */ }
-        const phase5Validation = await validatePhase5Artifacts(sm.outputDir, testFileCount, resultsContent);
+        const phase5Validation = await validatePhase5Artifacts(sm.outputDir, testFileCount, resultsContent, implFileCount);
         if (!phase5Validation.valid) {
             return textResult({
                 error: "PHASE5_ARTIFACTS_MISSING",

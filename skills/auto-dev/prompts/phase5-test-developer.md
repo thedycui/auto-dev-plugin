@@ -14,8 +14,16 @@
 
 1. 读取 `{output_dir}/e2e-test-cases.md` 了解测试用例设计
 2. 读取 `{output_dir}/design.md` 了解功能上下文
-3. 实现所有测试用例
-4. 确保测试可编译和运行
+3. **必须实现所有标记为 UNIT 的测试用例**（用 Mockito/jest.mock，不依赖外部服务）
+4. 对标记为 INTEGRATION 的用例，优先写自动化测试；如果确认本地无法启动服务，可用 curl 脚本替代
+5. 对标记为 E2E 的用例，可以 DEFERRED，但必须在 e2e-test-results.md 中说明原因
+6. 确保测试可编译和运行
+
+## 硬性要求
+
+- **必须新增至少 1 个测试文件**（*Test.java / *.test.ts 等）。框架会通过 git diff 检测，0 个新测试文件会被 HARD BLOCK
+- 不允许只写 markdown 测试计划而不写任何测试代码
+- "项目没有测试基础设施"不是跳过 UNIT 测试的理由 — Mockito/jest.mock 不需要基础设施
 
 ## Constraints
 

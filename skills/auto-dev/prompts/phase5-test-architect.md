@@ -18,6 +18,33 @@
 3. 探索实现代码，理解调用链和数据流
 4. 设计测试用例，写入 `{output_dir}/e2e-test-cases.md`
 
+## 测试可行性评估（必须先执行）
+
+在设计测试用例之前，必须先评估本地测试能力：
+
+1. **查询 episodic memory**：之前是否在本地启动过服务？用什么命令？
+2. **检查 CLAUDE.md**：有没有本地启动方式（mvn spring-boot:run、docker-compose 等）？
+3. **检查项目文件**：有没有 docker-compose.yml、Makefile、scripts/ 目录？
+4. **检查测试依赖**：pom.xml/package.json 中有没有 Mockito/jest/embedded-mongo 等测试工具？
+
+**只有在确认本地无法启动服务后，才可以将集成测试标为 DEFERRED。**
+
+## 测试分类（每个用例必须标注）
+
+对每个测试用例，必须标注类型：
+
+| 类型 | 定义 | 本地能跑吗 | 要求 |
+|---|---|---|---|
+| **UNIT** | 纯逻辑测试，mock 所有外部依赖 | ✅ 一定能 | **必须写代码** |
+| **INTEGRATION** | 需要真实服务，但本地可启动 | ✅ 通常能 | **优先写代码，其次 curl** |
+| **E2E** | 需要完整部署环境（多服务协调） | ❌ 通常不能 | 可以 DEFERRED |
+
+### 强制规则
+
+- **核心业务逻辑**（校验、计算、权限判断、状态转换）如果被标为 INTEGRATION 或 E2E，必须解释为什么不能用 UNIT 测试覆盖
+- **"项目没有测试基础设施"不是跳过 UNIT 测试的理由** — Mockito/jest.mock 不需要任何基础设施
+- UNIT 类型的测试用例占比不得低于 30%
+
 ## Test Design Techniques
 
 - 等价类划分（Equivalence Partitioning）

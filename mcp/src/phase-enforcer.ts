@@ -246,28 +246,43 @@ export interface PhaseArtifactValidation {
 
 /**
  * Phase 5 验证：检查是否有实际的测试产出物。
- * 防止 Claude 只写测试计划文档而不写测试代码。
+ * 防止 Claude 只写测试计划文档而不写测试代码（"DEFERRED 大法"）。
  *
  * 验证规则：
  * 1. 必须有新增的测试文件（通过 git diff 检测 *Test.java / *.test.ts 等）
  * 2. e2e-test-results.md 必须包含实际执行结果（PASS/FAIL），不能只有计划
+ * 3. 有新增实现文件时，必须有对应的新增测试文件（防止全标 DEFERRED 不写代码）
+ * 4. DEFERRED 占比 > 80% 时发出警告
  */
 export async function validatePhase5Artifacts(
   outputDir: string,
   testFileCount: number,
   resultsContent: string | null,
+  implFileCount?: number,
 ): Promise<PhaseArtifactValidation> {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // 1. 检查测试文件（新增或修改均算）
   if (testFileCount === 0) {
     errors.push(
       "未检测到新增或修改的测试文件。必须调用 test-architect agent 设计用例，" +
-      "再调用 developer agent 实现或修改测试代码。不能只写测试计划文档。"
+      "再调用 developer agent 实现或修改测试代码。不能只写测试计划文档。" +
+      "即使项目缺少集成测试基础设施，核心业务逻辑也可以用 Mockito/jest.mock 编写单元测试。" +
+      "\"项目没有测试基础设施\"不是跳过所有自动化测试的理由。"
     );
   }
 
-  // 2. 检查测试结果文件
+  // 2. 新增实现文件 vs 新增测试文件比例检查（防止 DEFERRED 大法）
+  if (implFileCount !== undefined && implFileCount > 0 && testFileCount === 0) {
+    errors.push(
+      `检测到 ${implFileCount} 个新增实现文件但 0 个新增测试文件。` +
+      "不允许只写 markdown 测试计划而不写任何可执行的测试代码。" +
+      "至少为核心逻辑（校验、计算、转换、权限判断）编写 Mockito/jest 单元测试。"
+    );
+  }
+
+  // 3. 检查测试结果文件
   if (!resultsContent) {
     errors.push("e2e-test-results.md 不存在。");
   } else {
@@ -280,6 +295,21 @@ export async function validatePhase5Artifacts(
         "仍然必须写测试代码并标注哪些本地通过、哪些需要部署后验证。"
       );
     }
+
+    // 4. DEFERRED 比例检查
+    const deferredMatches = resultsContent.match(/DEFERRED|待部署|待验证|需要部署后/gi);
+    const passFailMatches = resultsContent.match(/\bPASS\b|\bFAIL\b|passed|failed|✅|❌/gi);
+    const deferredCount = deferredMatches ? deferredMatches.length : 0;
+    const executedCount = passFailMatches ? passFailMatches.length : 0;
+    const totalCount = deferredCount + executedCount;
+
+    if (totalCount > 0 && deferredCount / totalCount > 0.8) {
+      warnings.push(
+        `⚠️ ${deferredCount}/${totalCount} 测试标记为 DEFERRED（${Math.round(deferredCount / totalCount * 100)}%）。` +
+        "大部分测试未在本地验证，质量保障不充分。" +
+        "请确认是否有更多测试可以用 UNIT 方式（Mockito/jest.mock）在本地覆盖。"
+      );
+    }
   }
 
   if (errors.length > 0) {
@@ -290,7 +320,8 @@ export async function validatePhase5Artifacts(
     };
   }
 
-  return { valid: true, errors: [], mandate: "" };
+  const warningText = warnings.length > 0 ? " " + warnings.join(" ") : "";
+  return { valid: true, errors: [], mandate: warningText };
 }
 
 /**
