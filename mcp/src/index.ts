@@ -16,7 +16,7 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit, validatePredecessor } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 
@@ -184,6 +184,27 @@ server.tool(
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
     await sm.atomicUpdate(behaviorUpdates);
 
+    // Write immutable INIT marker to progress-log with original commands and integrity hash.
+    // This is the single source of truth for auto_dev_complete — agent cannot tamper
+    // because progress-log is append-only from the framework's perspective, and the
+    // hash covers the critical fields.
+    const initFields = {
+      buildCmd: stack.buildCmd,
+      testCmd: stack.testCmd,
+      skipE2e: skipE2e === true,
+      mode,
+    };
+    const { createHash } = await import("node:crypto");
+    const integrityHash = createHash("sha256")
+      .update(JSON.stringify(initFields) + startCommit)
+      .digest("hex")
+      .slice(0, 16);
+    const initMarker =
+      `<!-- INIT buildCmd="${stack.buildCmd}" testCmd="${stack.testCmd}"` +
+      ` skipE2e=${skipE2e === true} mode=${mode}` +
+      ` integrity=${integrityHash} -->`;
+    await sm.appendToProgressLog("\n" + initMarker + "\n");
+
     const state = sm.getFullState();
     return textResult({
       projectRoot: state.projectRoot,
@@ -332,8 +353,41 @@ server.tool(
     // or state.json, so failed checks don't pollute formal state.
     // ===================================================================
 
-    // Phase 5 artifact pre-validation
+    // Phase 1 review artifact pre-validation: design-review.md must exist
+    if (phase === 1 && status === "PASS") {
+      let reviewContent: string | null = null;
+      try {
+        reviewContent = await readFile(join(sm.outputDir, "design-review.md"), "utf-8");
+      } catch { /* file doesn't exist */ }
+      const phase1Validation = validatePhase1ReviewArtifact(reviewContent);
+      if (!phase1Validation.valid) {
+        return textResult({
+          error: "PHASE1_REVIEW_MISSING",
+          ...phase1Validation,
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+        });
+      }
+    }
+
+    // Phase 2 review artifact pre-validation: plan-review.md must exist
+    if (phase === 2 && status === "PASS") {
+      let reviewContent: string | null = null;
+      try {
+        reviewContent = await readFile(join(sm.outputDir, "plan-review.md"), "utf-8");
+      } catch { /* file doesn't exist */ }
+      const phase2Validation = validatePhase2ReviewArtifact(reviewContent);
+      if (!phase2Validation.valid) {
+        return textResult({
+          error: "PHASE2_REVIEW_MISSING",
+          ...phase2Validation,
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+        });
+      }
+    }
+
+    // Phase 5 artifact pre-validation + ACTUAL test execution
     if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
+      // 5a. Check test files exist
       let testFileCount = 0;
       try {
         const { execFile: execFileAsync } = await import("node:child_process");
@@ -366,6 +420,37 @@ server.tool(
           ...phase5Validation,
           note: "Checkpoint rejected BEFORE writing state. No state pollution.",
         });
+      }
+
+      // 5b. ACTUALLY RUN testCmd — framework executes tests, not the agent
+      // Read original testCmd from INIT marker (tamper-proof)
+      const progressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8").catch(() => "");
+      const initData = parseInitMarker(progressLog);
+      const testCmd = initData?.testCmd ?? state.stack?.testCmd;
+      if (testCmd) {
+        try {
+          const { execFile: execFileTest } = await import("node:child_process");
+          const testResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
+            execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: 300_000 }, (err, _stdout, stderr) => {
+              resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+            });
+          });
+          if (!testResult.success) {
+            return textResult({
+              error: "PHASE5_TESTS_FAILED",
+              message: `Phase 5 checkpoint 被拒绝：框架实际执行 testCmd 失败。` +
+                `\n命令: ${testCmd}\n错误: ${testResult.stderr}`,
+              mandate: "[BLOCKED] 测试未通过。框架已自行执行 testCmd 验证。禁止伪造测试结果。",
+              note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+            });
+          }
+        } catch (err) {
+          return textResult({
+            error: "PHASE5_TEST_EXECUTION_ERROR",
+            message: `框架执行 testCmd 时出错: ${(err as Error).message}`,
+            note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          });
+        }
       }
     }
 
@@ -817,8 +902,44 @@ server.tool(
     }
 
     // === Verification gate: run actual build + test ===
-    const buildCmd = state.stack?.buildCmd;
-    const testCmd = state.stack?.testCmd;
+    // CRITICAL: Read original commands from INIT marker in progress-log,
+    // NOT from state.json — agent may have tampered with state.stack.testCmd
+    // (e.g., adding -DskipTests to bypass test execution).
+    const initMarker = parseInitMarker(progressLogContent);
+    const buildCmd = initMarker?.buildCmd ?? state.stack?.buildCmd;
+    const testCmd = initMarker?.testCmd ?? state.stack?.testCmd;
+
+    // Tamper detection: if INIT marker exists, compare with state
+    if (initMarker && state.stack) {
+      if (initMarker.testCmd !== state.stack.testCmd) {
+        return textResult({
+          error: "TESTCMD_TAMPERED",
+          canComplete: false,
+          message: `testCmd 被篡改！原始值(INIT marker): "${initMarker.testCmd}", ` +
+            `当前 state.json 值: "${state.stack.testCmd}". 禁止绕过测试门禁。`,
+          mandate: "[BLOCKED] 检测到 testCmd 被篡改。必须恢复原始测试命令后重试。",
+        });
+      }
+      if (initMarker.buildCmd !== state.stack.buildCmd) {
+        return textResult({
+          error: "BUILDCMD_TAMPERED",
+          canComplete: false,
+          message: `buildCmd 被篡改！原始值(INIT marker): "${initMarker.buildCmd}", ` +
+            `当前 state.json 值: "${state.stack.buildCmd}". `,
+          mandate: "[BLOCKED] 检测到 buildCmd 被篡改。必须恢复原始构建命令后重试。",
+        });
+      }
+      if (initMarker.skipE2e !== (state.skipE2e === true)) {
+        return textResult({
+          error: "SKIPE2E_TAMPERED",
+          canComplete: false,
+          message: `skipE2e 被篡改！原始值(INIT marker): ${initMarker.skipE2e}, ` +
+            `当前 state.json 值: ${state.skipE2e}. `,
+          mandate: "[BLOCKED] 检测到 skipE2e 标志被篡改。禁止事后修改跳过策略。",
+        });
+      }
+    }
+
     if (buildCmd) {
       try {
         const { execFile } = await import("node:child_process");
@@ -831,7 +952,7 @@ server.tool(
           return textResult({
             error: "BUILD_FAILED_AT_COMPLETION",
             canComplete: false,
-            message: `所有 Phase 已 PASS，但最终构建失败。请修复后重新调用 auto_dev_complete。\n${buildResult.stderr}`,
+            message: `所有 Phase 已 PASS，但最终构建失败（使用 INIT 原始命令: ${buildCmd}）。\n${buildResult.stderr}`,
             mandate: "[BLOCKED] 构建失败，禁止宣称完成。",
           });
         }
@@ -849,7 +970,7 @@ server.tool(
           return textResult({
             error: "TESTS_FAILED_AT_COMPLETION",
             canComplete: false,
-            message: `所有 Phase 已 PASS，但最终测试失败。请修复后重新调用 auto_dev_complete。\n${testResult.stderr}`,
+            message: `所有 Phase 已 PASS，但最终测试失败（使用 INIT 原始命令: ${testCmd}）。\n${testResult.stderr}`,
             mandate: "[BLOCKED] 测试失败，禁止宣称完成。",
           });
         }

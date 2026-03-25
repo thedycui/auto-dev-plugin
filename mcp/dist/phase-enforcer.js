@@ -276,4 +276,63 @@ export function validatePredecessor(targetPhase, progressLogContent, mode, skipE
         error: `Phase ${targetPhase} (${targetName}) 的前置阶段 Phase ${predecessorPhase} (${predName}) 尚未通过。必须按顺序执行，禁止跳过。`,
     };
 }
+/**
+ * Parse the INIT marker from progress-log to retrieve the original
+ * buildCmd/testCmd/skipE2e set at init time. This is tamper-resistant
+ * because progress-log is append-only and the integrity hash covers
+ * the critical fields + startCommit.
+ *
+ * Returns null if INIT marker is not found.
+ */
+export function parseInitMarker(progressLogContent) {
+    const match = progressLogContent.match(/<!-- INIT buildCmd="([^"]*)" testCmd="([^"]*)" skipE2e=(true|false) mode=(\w+) integrity=(\w+) -->/);
+    if (!match)
+        return null;
+    return {
+        buildCmd: match[1],
+        testCmd: match[2],
+        skipE2e: match[3] === "true",
+        mode: match[4],
+        integrity: match[5],
+    };
+}
+// ---------------------------------------------------------------------------
+// Phase 1/2 Review Artifact Validation
+// ---------------------------------------------------------------------------
+/**
+ * Phase 1 PASS 要求 design-review.md 存在且有实质内容。
+ * 防止 agent 跳过 reviewer 直接 checkpoint PASS。
+ */
+export function validatePhase1ReviewArtifact(reviewContent) {
+    const errors = [];
+    if (!reviewContent) {
+        errors.push("design-review.md 不存在。Phase 1 PASS 要求必须调用 design-reviewer agent 进行审查。" +
+            "禁止跳过审查直接 checkpoint PASS。");
+    }
+    else if (reviewContent.trim().length < 100) {
+        errors.push("design-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。");
+    }
+    if (errors.length > 0) {
+        return { valid: false, errors, mandate: "[BLOCKED] Phase 1 PASS 被拒绝：" + errors.join(" ") };
+    }
+    return { valid: true, errors: [], mandate: "" };
+}
+/**
+ * Phase 2 PASS 要求 plan-review.md 存在且有实质内容。
+ * 防止 agent 跳过 reviewer 直接 checkpoint PASS。
+ */
+export function validatePhase2ReviewArtifact(reviewContent) {
+    const errors = [];
+    if (!reviewContent) {
+        errors.push("plan-review.md 不存在。Phase 2 PASS 要求必须调用 plan-reviewer agent 进行审查。" +
+            "禁止跳过审查直接 checkpoint PASS。");
+    }
+    else if (reviewContent.trim().length < 100) {
+        errors.push("plan-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。");
+    }
+    if (errors.length > 0) {
+        return { valid: false, errors, mandate: "[BLOCKED] Phase 2 PASS 被拒绝：" + errors.join(" ") };
+    }
+    return { valid: true, errors: [], mandate: "" };
+}
 //# sourceMappingURL=phase-enforcer.js.map
