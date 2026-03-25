@@ -85,7 +85,7 @@ describe("AC-6: skipE2e in phase-enforcer", () => {
   });
 
   it("validateCompletion accepts without phase 5 when skipE2e=true (full mode)", () => {
-    const log = [1, 2, 3, 4, 6].map(p =>
+    const log = [1, 2, 3, 4, 6, 7].map(p =>
       `<!-- CHECKPOINT phase=${p} status=PASS timestamp=2026-01-01T00:00:00Z -->`
     ).join("\n");
     const result = validateCompletion(log, "full", false, true);
@@ -94,7 +94,7 @@ describe("AC-6: skipE2e in phase-enforcer", () => {
   });
 
   it("validateCompletion rejects without phase 5 when skipE2e=false (full mode)", () => {
-    const log = [1, 2, 3, 4, 6].map(p =>
+    const log = [1, 2, 3, 4, 6, 7].map(p =>
       `<!-- CHECKPOINT phase=${p} status=PASS timestamp=2026-01-01T00:00:00Z -->`
     ).join("\n");
     const result = validateCompletion(log, "full", false, false);
@@ -102,8 +102,8 @@ describe("AC-6: skipE2e in phase-enforcer", () => {
     expect(result.missingPhases).toContain(5);
   });
 
-  it("validateCompletion works with quick+skipE2e (phases 3,4 only)", () => {
-    const log = [3, 4].map(p =>
+  it("validateCompletion works with quick+skipE2e (phases 3,4,7 required)", () => {
+    const log = [3, 4, 7].map(p =>
       `<!-- CHECKPOINT phase=${p} status=PASS timestamp=2026-01-01T00:00:00Z -->`
     ).join("\n");
     const result = validateCompletion(log, "quick", false, true);

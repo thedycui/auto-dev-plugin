@@ -353,6 +353,20 @@ server.tool(
     // or state.json, so failed checks don't pollute formal state.
     // ===================================================================
 
+    // Guard: lesson feedback must be submitted before PASS
+    if (status === "PASS") {
+      const pendingIds = state.injectedLessonIds ?? [];
+      if (pendingIds.length > 0) {
+        return textResult({
+          error: "LESSON_FEEDBACK_REQUIRED",
+          lessonFeedbackRequired: true,
+          injectedLessonIds: pendingIds,
+          feedbackInstruction: "必须先调用 auto_dev_lessons_feedback 对注入的经验逐条反馈，然后再 checkpoint PASS。",
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+        });
+      }
+    }
+
     // Phase 1 review artifact pre-validation: design-review.md must exist
     if (phase === 1 && status === "PASS") {
       let reviewContent: string | null = null;
@@ -699,13 +713,17 @@ server.tool(
           let extraContext = "";
 
           // 1. Inject lessons learned (all phases — avoid repeating past mistakes)
+          const localLessonIds: string[] = [];
+          const globalLessonIds: string[] = [];
           try {
             const lessonsManager = new LessonsManager(sm.outputDir, projectRoot);
             const lessons = await lessonsManager.get(phase);
             if (lessons.length > 0) {
               extraContext += `## 历史教训（自动注入，请在本次执行中避免重蹈覆辙）\n\n`;
               for (const l of lessons) {
-                extraContext += `- [${l.category}] ${l.lesson}\n`;
+                const idTag = l.id ? `[id:${l.id}] ` : "";
+                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}\n`;
+                if (l.id) localLessonIds.push(l.id);
               }
               extraContext += "\n";
             }
@@ -717,11 +735,20 @@ server.tool(
             if (globalLessons.length > 0) {
               extraContext += `## 全局经验（跨项目积累，自动注入）\n\n`;
               for (const l of globalLessons) {
-                extraContext += `- [${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ""}\n`;
+                const idTag = l.id ? `[id:${l.id}] ` : "";
+                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ""}\n`;
+                if (l.id) globalLessonIds.push(l.id);
               }
               extraContext += "\n";
             }
           } catch { /* global lessons not found, skip */ }
+
+          // 1-footer. Record injected lesson IDs and add feedback hint
+          const injectedIds = [...localLessonIds, ...globalLessonIds];
+          if (injectedIds.length > 0) {
+            extraContext += `> Phase 完成后请对以上经验逐条反馈（helpful / not_applicable / incorrect）\n\n`;
+            await sm.atomicUpdate({ injectedLessonIds: injectedIds });
+          }
 
           // 1c. Inject Phase 3 task-level resume info
           if (phase === 3 && state.task && state.task > 0) {
@@ -856,7 +883,41 @@ server.tool(
 
 
 // ===========================================================================
-// 11. auto_dev_complete (Phase Completion Gate)
+// 12. auto_dev_lessons_feedback (Lesson Feedback)
+// ===========================================================================
+
+server.tool(
+  "auto_dev_lessons_feedback",
+  "Submit feedback verdicts for lessons that were injected during preflight. Must be called before checkpoint PASS.",
+  {
+    projectRoot: z.string(),
+    topic: z.string(),
+    feedbacks: z.array(z.object({
+      id: z.string(),
+      verdict: z.enum(["helpful", "not_applicable", "incorrect"]),
+    })),
+  },
+  async ({ projectRoot, topic, feedbacks }) => {
+    const sm = new StateManager(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+    const lessons = new LessonsManager(sm.outputDir, projectRoot);
+    const result = await lessons.feedback(feedbacks, { phase: state.phase, topic: state.topic });
+
+    // Clear injectedLessonIds after feedback is submitted
+    await sm.atomicUpdate({ injectedLessonIds: [] });
+
+    return textResult({
+      success: true,
+      localUpdated: result.localUpdated.length,
+      globalUpdated: result.globalUpdated.length,
+      localIds: result.localUpdated,
+      globalIds: result.globalUpdated,
+    });
+  },
+);
+
+// ===========================================================================
+// 13. auto_dev_complete (Phase Completion Gate)
 // ===========================================================================
 
 server.tool(

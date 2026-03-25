@@ -57,6 +57,25 @@ export declare const LessonEntrySchema: z.ZodObject<{
     appliedCount: z.ZodOptional<z.ZodNumber>;
     lastAppliedAt: z.ZodOptional<z.ZodString>;
     timestamp: z.ZodString;
+    score: z.ZodOptional<z.ZodNumber>;
+    lastPositiveAt: z.ZodOptional<z.ZodString>;
+    feedbackHistory: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        verdict: z.ZodEnum<{
+            helpful: "helpful";
+            not_applicable: "not_applicable";
+            incorrect: "incorrect";
+        }>;
+        phase: z.ZodNumber;
+        topic: z.ZodString;
+        timestamp: z.ZodString;
+    }, z.core.$strip>>>;
+    retired: z.ZodOptional<z.ZodBoolean>;
+    retiredAt: z.ZodOptional<z.ZodString>;
+    retiredReason: z.ZodOptional<z.ZodEnum<{
+        displaced_by_new: "displaced_by_new";
+        score_decayed: "score_decayed";
+        manually_removed: "manually_removed";
+    }>>;
 }, z.core.$strip>;
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
 export declare const StateJsonSchema: z.ZodObject<{
@@ -102,6 +121,7 @@ export declare const StateJsonSchema: z.ZodObject<{
         total: z.ZodNumber;
         byPhase: z.ZodRecord<z.ZodString, z.ZodNumber>;
     }, z.core.$strip>>;
+    injectedLessonIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;

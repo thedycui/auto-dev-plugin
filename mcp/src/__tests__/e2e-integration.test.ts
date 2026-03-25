@@ -728,7 +728,7 @@ describe("E2E Integration: Checkpoint Pipeline (Entry Point)", () => {
 
     // Build progress-log with all phases PASS
     let checkpoints = "";
-    for (const p of [1, 2, 3, 4, 5, 6]) {
+    for (const p of [1, 2, 3, 4, 5, 6, 7]) {
       checkpoints += `\n<!-- CHECKPOINT phase=${p} status=PASS summary="phase ${p} done" timestamp=2026-01-01T0${p}:00:00Z -->\n`;
     }
     await sm.appendToProgressLog(checkpoints);
@@ -738,7 +738,7 @@ describe("E2E Integration: Checkpoint Pipeline (Entry Point)", () => {
 
     expect(validation.canComplete).toBe(true);
     expect(validation.missingPhases).toEqual([]);
-    expect(validation.passedPhases).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(validation.passedPhases).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 });
 

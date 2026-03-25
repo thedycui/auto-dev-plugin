@@ -1,10 +1,19 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
+import { MAX_GLOBAL_INJECT, MAX_GLOBAL_POOL, MIN_DISPLACEMENT_MARGIN, DECAY_PERIOD_DAYS, SCORE_DELTA, MAX_FEEDBACK_HISTORY, initialScore, ensureDefaults } from "./lessons-constants.js";
 const GLOBAL_DIR = "docs/auto-dev/_global";
 const GLOBAL_FILE = "lessons-global.json";
-const MAX_GLOBAL_INJECT = 10;
-const STALE_DAYS = 30;
+// ---------------------------------------------------------------------------
+// Scoring: time-based decay
+// ---------------------------------------------------------------------------
+export function applyDecay(entry, now = new Date()) {
+    const refDateStr = entry.lastPositiveAt ?? entry.timestamp;
+    const refDate = new Date(refDateStr);
+    const daysSince = (now.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24);
+    const decayPenalty = Math.floor(daysSince / DECAY_PERIOD_DAYS);
+    return Math.max(0, (entry.score ?? initialScore(entry.severity)) - decayPenalty);
+}
 export class LessonsManager {
     filePath;
     outputDir;
@@ -16,11 +25,12 @@ export class LessonsManager {
     }
     async add(phase, category, lesson, context, options) {
         const entries = await this.readEntries();
+        const severity = options?.severity ?? "minor";
         const entry = {
             id: randomUUID().slice(0, 12),
             phase,
             category: category,
-            severity: options?.severity ?? "minor",
+            severity,
             lesson,
             ...(context !== undefined ? { context } : {}),
             topic: options?.topic,
@@ -28,11 +38,12 @@ export class LessonsManager {
             appliedCount: 0,
             lastAppliedAt: undefined,
             timestamp: new Date().toISOString(),
+            score: initialScore(severity),
         };
         entries.push(entry);
         await this.writeAtomic(entries, this.filePath);
         if (entry.reusable) {
-            await this.addToGlobal(entry);
+            await this.addToGlobal(entry); // result intentionally ignored for add() caller
         }
     }
     async get(phase, category) {
@@ -45,90 +56,157 @@ export class LessonsManager {
             return true;
         });
     }
-    async getGlobalLessons(limit = MAX_GLOBAL_INJECT) {
-        const globalPath = this.globalFilePath();
-        let entries;
-        try {
-            const raw = await readFile(globalPath, "utf-8");
-            entries = JSON.parse(raw);
-        }
-        catch {
-            return [];
-        }
-        const now = Date.now();
-        const cutoff = STALE_DAYS * 24 * 60 * 60 * 1000;
-        entries = entries.filter((e) => {
-            const age = now - new Date(e.timestamp).getTime();
-            return !(age > cutoff && (!e.appliedCount || e.appliedCount === 0));
-        });
-        const severityOrder = { critical: 0, important: 1, minor: 2 };
-        entries.sort((a, b) => {
-            const sa = severityOrder[a.severity ?? "minor"] ?? 2;
-            const sb = severityOrder[b.severity ?? "minor"] ?? 2;
-            if (sa !== sb)
-                return sa - sb;
-            return (b.appliedCount ?? 0) - (a.appliedCount ?? 0);
-        });
-        const selected = entries.slice(0, limit);
-        const selectedIds = new Set(selected.map((e) => e.id));
+    async feedback(feedbacks, meta) {
+        const localEntries = await this.readEntries();
+        const globalEntries = await this.readGlobalEntries();
+        const localMap = new Map(localEntries.map((e) => [e.id, e]));
+        const globalMap = new Map(globalEntries.map((e) => [e.id, e]));
         const nowStr = new Date().toISOString();
-        for (const e of entries) {
+        const localUpdated = [];
+        const globalUpdated = [];
+        for (const fb of feedbacks) {
+            const delta = SCORE_DELTA[fb.verdict];
+            const historyItem = {
+                verdict: fb.verdict,
+                phase: meta.phase,
+                topic: meta.topic,
+                timestamp: nowStr,
+            };
+            const localEntry = localMap.get(fb.id);
+            if (localEntry) {
+                localEntry.score = Math.max(0, (localEntry.score ?? initialScore(localEntry.severity)) + delta);
+                localEntry.feedbackHistory = [
+                    ...(localEntry.feedbackHistory ?? []),
+                    historyItem,
+                ].slice(-MAX_FEEDBACK_HISTORY);
+                if (fb.verdict === "helpful") {
+                    localEntry.lastPositiveAt = nowStr;
+                }
+                localUpdated.push(fb.id);
+            }
+            const globalEntry = globalMap.get(fb.id);
+            if (globalEntry) {
+                globalEntry.score = Math.max(0, (globalEntry.score ?? initialScore(globalEntry.severity)) + delta);
+                globalEntry.feedbackHistory = [
+                    ...(globalEntry.feedbackHistory ?? []),
+                    historyItem,
+                ].slice(-MAX_FEEDBACK_HISTORY);
+                if (fb.verdict === "helpful") {
+                    globalEntry.lastPositiveAt = nowStr;
+                }
+                globalUpdated.push(fb.id);
+            }
+        }
+        // Write local and global independently with error isolation
+        if (localUpdated.length > 0) {
+            await this.writeAtomic(localEntries, this.filePath).catch(() => { });
+        }
+        if (globalUpdated.length > 0) {
+            await this.writeAtomic(globalEntries, this.globalFilePath()).catch(() => { });
+        }
+        return { localUpdated, globalUpdated };
+    }
+    async getGlobalLessons(limit = MAX_GLOBAL_INJECT) {
+        const allEntries = await this.readGlobalEntries();
+        if (allEntries.length === 0)
+            return [];
+        const now = new Date();
+        const nowStr = now.toISOString();
+        // Lazy retirement pass (P0-1): retire non-retired entries whose decayed score <= 0
+        for (const e of allEntries) {
+            if (!e.retired && applyDecay(e, now) <= 0) {
+                e.retired = true;
+                e.retiredAt = nowStr;
+                e.retiredReason = "score_decayed";
+            }
+        }
+        // Filter out retired, compute effective score, sort by score desc
+        const active = allEntries
+            .filter((e) => !e.retired)
+            .map((e) => ({ ...e, score: applyDecay(e, now) }))
+            .sort((a, b) => b.score - a.score);
+        const selected = active.slice(0, limit);
+        const selectedIds = new Set(selected.map((e) => e.id));
+        // Update appliedCount and lastAppliedAt on the full array for persistence
+        for (const e of allEntries) {
             if (selectedIds.has(e.id)) {
                 e.appliedCount = (e.appliedCount ?? 0) + 1;
                 e.lastAppliedAt = nowStr;
             }
         }
-        await this.writeAtomic(entries, globalPath);
+        await this.writeAtomic(allEntries, this.globalFilePath());
         return selected;
     }
     async promoteReusableLessons(topic) {
         const entries = await this.readEntries();
-        const reusable = entries.filter((e) => e.reusable);
-        if (reusable.length === 0)
-            return 0;
-        const globalPath = this.globalFilePath();
-        let globalEntries;
-        try {
-            const raw = await readFile(globalPath, "utf-8");
-            globalEntries = JSON.parse(raw);
-        }
-        catch {
-            globalEntries = [];
-        }
-        const existing = new Set(globalEntries.map((e) => e.lesson));
-        let added = 0;
-        for (const entry of reusable) {
-            if (!existing.has(entry.lesson)) {
-                globalEntries.push({ ...entry, topic });
-                existing.add(entry.lesson);
-                added++;
+        let promoted = 0;
+        for (const e of entries) {
+            if (e.reusable && !e.retired) {
+                const result = await this.addToGlobal(ensureDefaults({ ...e, topic }));
+                if (result.added)
+                    promoted++;
             }
         }
-        if (added > 0)
-            await this.writeAtomic(globalEntries, globalPath);
-        return added;
+        return promoted;
     }
     globalFilePath() {
         return join(this.projectRoot, GLOBAL_DIR, GLOBAL_FILE);
     }
     async addToGlobal(entry) {
-        const globalPath = this.globalFilePath();
-        let entries;
-        try {
-            const raw = await readFile(globalPath, "utf-8");
-            entries = JSON.parse(raw);
+        const entries = await this.readGlobalEntries();
+        // Dedup: same lesson text and not retired
+        if (entries.some((e) => e.lesson === entry.lesson && !e.retired)) {
+            return { added: false };
         }
-        catch {
-            entries = [];
+        const now = new Date();
+        const active = entries.filter((e) => !e.retired);
+        if (active.length < MAX_GLOBAL_POOL) {
+            entries.push(entry);
+            await this.writeAtomic(entries, this.globalFilePath());
+            return { added: true };
         }
-        if (entries.some((e) => e.lesson === entry.lesson))
-            return;
+        // Pool full -- find lowest effective-score active entry
+        let lowestIdx = -1;
+        let lowestScore = Infinity;
+        for (let i = 0; i < entries.length; i++) {
+            const e = entries[i];
+            if (e.retired)
+                continue;
+            const es = applyDecay(e, now);
+            if (es < lowestScore) {
+                lowestScore = es;
+                lowestIdx = i;
+            }
+        }
+        const newScore = applyDecay(entry, now);
+        // New entry must exceed lowest + margin to displace
+        if (newScore <= lowestScore + MIN_DISPLACEMENT_MARGIN) {
+            return { added: false };
+        }
+        // Displace the lowest entry
+        const displaced = entries[lowestIdx];
+        entries[lowestIdx] = {
+            ...displaced,
+            retired: true,
+            retiredAt: now.toISOString(),
+            retiredReason: "displaced_by_new",
+        };
         entries.push(entry);
-        await this.writeAtomic(entries, globalPath);
+        await this.writeAtomic(entries, this.globalFilePath());
+        return { added: true, displaced };
     }
     async readEntries() {
         try {
             const raw = await readFile(this.filePath, "utf-8");
+            return JSON.parse(raw);
+        }
+        catch {
+            return [];
+        }
+    }
+    async readGlobalEntries() {
+        try {
+            const raw = await readFile(this.globalFilePath(), "utf-8");
             return JSON.parse(raw);
         }
         catch {

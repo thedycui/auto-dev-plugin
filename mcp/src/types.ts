@@ -65,6 +65,19 @@ export const LessonEntrySchema = z.object({
   appliedCount: z.number().int().optional(),
   lastAppliedAt: z.string().optional(),
   timestamp: z.string(),
+
+  // Scoring & feedback fields (lessons-evolution)
+  score: z.number().optional(),
+  lastPositiveAt: z.string().optional(),
+  feedbackHistory: z.array(z.object({
+    verdict: z.enum(["helpful", "not_applicable", "incorrect"]),
+    phase: z.number(),
+    topic: z.string(),
+    timestamp: z.string(),
+  })).optional(),
+  retired: z.boolean().optional(),
+  retiredAt: z.string().optional(),
+  retiredReason: z.enum(["displaced_by_new", "score_decayed", "manually_removed"]).optional(),
 });
 
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
@@ -120,6 +133,9 @@ export const StateJsonSchema = z.object({
     total: z.number(),
     byPhase: z.record(z.string(), z.number()),
   }).optional(),
+
+  // Injected lesson IDs for feedback tracking (lessons-evolution)
+  injectedLessonIds: z.array(z.string()).optional(),
 
   // Timestamps
   startedAt: z.string(),
