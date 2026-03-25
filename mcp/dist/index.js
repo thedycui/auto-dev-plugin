@@ -166,8 +166,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         behaviorUpdates["dryRun"] = true;
     if (skipE2e)
         behaviorUpdates["skipE2e"] = true;
-    if (tdd)
-        behaviorUpdates["tdd"] = true;
+    behaviorUpdates["tdd"] = tdd !== false; // TDD on by default, --no-tdd to disable
     if (brainstorm)
         behaviorUpdates["brainstorm"] = true;
     await sm.atomicUpdate(behaviorUpdates);

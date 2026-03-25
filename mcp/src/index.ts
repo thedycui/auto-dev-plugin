@@ -179,7 +179,7 @@ server.tool(
     if (interactive) behaviorUpdates["interactive"] = true;
     if (dryRun) behaviorUpdates["dryRun"] = true;
     if (skipE2e) behaviorUpdates["skipE2e"] = true;
-    if (tdd) behaviorUpdates["tdd"] = true;
+    behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
     await sm.atomicUpdate(behaviorUpdates);
 
