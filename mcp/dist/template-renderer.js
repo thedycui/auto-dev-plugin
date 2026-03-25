@@ -22,8 +22,21 @@ export class TemplateRenderer {
         }
         catch (err) {
             const code = err.code;
+            // List available templates to help agent self-correct
+            let available = "";
+            try {
+                const { readdirSync } = await import("node:fs");
+                const promptsDir = join(this.skillsDir, "prompts");
+                const files = readdirSync(promptsDir)
+                    .filter((f) => f.endsWith(".md"))
+                    .map((f) => f.replace(/\.md$/, ""));
+                available = `\nAvailable templates: ${files.join(", ")}`;
+            }
+            catch { /* ignore */ }
             throw new Error(`Template file not found: ${templatePath}` +
-                (code ? ` (${code})` : ""));
+                (code ? ` (${code})` : "") +
+                available +
+                `\nHint: use auto_dev_preflight() which returns suggestedPrompt with the correct template name.`);
         }
         // 2. Mask CHECKPOINT comments to protect their braces from substitution
         const checkpointPlaceholders = [];

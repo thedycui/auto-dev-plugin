@@ -12,6 +12,7 @@ const PHASE_META = {
     4: { name: "VERIFY", description: "编译测试验证" },
     5: { name: "E2E_TEST", description: "端到端测试" },
     6: { name: "ACCEPTANCE", description: "验收" },
+    7: { name: "RETROSPECTIVE", description: "经验萃取" },
 };
 /** full 模式的必需 Phase */
 const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6];
@@ -244,5 +245,35 @@ export function countTestFiles(diffFileNames) {
         /tests?\//i,
     ];
     return diffFileNames.filter((f) => testPatterns.some((p) => p.test(f))).length;
+}
+/**
+ * 验证前置阶段是否已通过。
+ * checkpoint(phase=N, status=PASS) 时调用，确保 phase N-1 已 PASS。
+ * 防止 agent 跳过中间阶段直接标记后续阶段为 PASS。
+ */
+export function validatePredecessor(targetPhase, progressLogContent, mode, skipE2e) {
+    const basePhases = mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
+    const requiredPhases = skipE2e ? basePhases.filter((p) => p !== 5) : basePhases;
+    const targetIndex = requiredPhases.indexOf(targetPhase);
+    // Phase not in required list (e.g., Phase 0 brainstorm) → allow
+    if (targetIndex < 0) {
+        return { valid: true };
+    }
+    // First required phase → no predecessor needed
+    if (targetIndex === 0) {
+        return { valid: true };
+    }
+    // Check predecessor phase has PASS in progress-log
+    const predecessorPhase = requiredPhases[targetIndex - 1];
+    const regex = new RegExp(`<!-- CHECKPOINT phase=${predecessorPhase}\\b.*?status=PASS`);
+    if (regex.test(progressLogContent)) {
+        return { valid: true };
+    }
+    const predName = PHASE_META[predecessorPhase]?.name ?? `Phase ${predecessorPhase}`;
+    const targetName = PHASE_META[targetPhase]?.name ?? `Phase ${targetPhase}`;
+    return {
+        valid: false,
+        error: `Phase ${targetPhase} (${targetName}) 的前置阶段 Phase ${predecessorPhase} (${predName}) 尚未通过。必须按顺序执行，禁止跳过。`,
+    };
 }
 //# sourceMappingURL=phase-enforcer.js.map

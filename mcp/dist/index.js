@@ -13,7 +13,7 @@ import { StateManager } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit, validatePredecessor } from "./phase-enforcer.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 // ---------------------------------------------------------------------------
@@ -235,6 +235,27 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
         return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
+    }
+    // Guard A: COMPLETED status is reserved for auto_dev_complete only
+    if (status === "COMPLETED") {
+        return textResult({
+            error: "INVALID_STATUS",
+            message: "COMPLETED 状态不能通过 checkpoint 设置。必须调用 auto_dev_complete() 完成。",
+            mandate: "[BLOCKED] 禁止通过 checkpoint 设置 COMPLETED。唯一的完成方式是调用 auto_dev_complete。",
+        });
+    }
+    // Guard B: PASS requires predecessor phase to be PASS (prevent phase skipping)
+    if (status === "PASS") {
+        const progressLogPath = join(sm.outputDir, "progress-log.md");
+        const progressLogContent = await readFile(progressLogPath, "utf-8").catch(() => "");
+        const predCheck = validatePredecessor(phase, progressLogContent, state.mode, state.skipE2e === true);
+        if (!predCheck.valid) {
+            return textResult({
+                error: "PREDECESSOR_NOT_PASSED",
+                message: predCheck.error,
+                mandate: `[BLOCKED] ${predCheck.error}`,
+            });
+        }
     }
     // [P0-1 fix] REGRESS validation BEFORE any state mutation
     if (status === "REGRESS") {
@@ -503,6 +524,16 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
             5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect" },
             6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator" },
         };
+        // Phase 1: if design.md already exists, skip architect → go directly to reviewer
+        if (phase === 1) {
+            try {
+                await stat(join(outputDir, "design.md"));
+                phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev-reviewer" };
+                result.designExists = true;
+                result.hint = "design.md already exists. Skipping architect, going directly to design review.";
+            }
+            catch { /* design.md not found, use default architect flow */ }
+        }
         const mapping = phasePromptMap[phase];
         if (mapping) {
             try {
