@@ -87,6 +87,7 @@ export const StateJsonSchema = z.object({
     tdd: z.boolean().optional(), // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
     tddWarnings: z.array(z.string()).optional(), // TDD violation warnings collected during Phase 3
     brainstorm: z.boolean().optional(), // --brainstorm mode (Phase 0 enabled)
+    costMode: z.enum(["economy", "beast"]).optional(), // economy=按阶段选模型(默认), beast=全部最强模型
     // Git baseline for accurate Phase 5 diff
     startCommit: z.string().optional(),
     // Regression count (max 2 regressions allowed)

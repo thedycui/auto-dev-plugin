@@ -88,9 +88,10 @@ server.tool(
     skipE2e: z.boolean().optional(),
     tdd: z.boolean().optional(),
     brainstorm: z.boolean().optional(),
+    costMode: z.enum(["economy", "beast"]).optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
   },
-  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, onConflict }) => {
+  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -182,6 +183,7 @@ server.tool(
     if (skipE2e) behaviorUpdates["skipE2e"] = true;
     behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
+    behaviorUpdates["costMode"] = costMode ?? "economy"; // economy=按阶段选模型, beast=全部最强
     await sm.atomicUpdate(behaviorUpdates);
 
     // Write immutable INIT marker to progress-log with original commands and integrity hash.
@@ -680,22 +682,27 @@ server.tool(
 
     // Auto-render suggested prompt when ready
     if (ready) {
-      const phasePromptMap: Record<number, { promptFile: string; agent: string }> = {
-        0: { promptFile: "phase0-brainstorm", agent: "auto-dev-architect" },
-        1: { promptFile: "phase1-architect", agent: "auto-dev-architect" },
-        2: { promptFile: "phase2-planner", agent: "auto-dev-architect" },
-        3: { promptFile: "phase3-developer", agent: "auto-dev-developer" },
-        4: { promptFile: "phase4-full-reviewer", agent: "auto-dev-reviewer" },
-        5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect" },
-        6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator" },
-        7: { promptFile: "phase7-retrospective", agent: "auto-dev-reviewer" },
+      // Model routing: economy mode uses sonnet for mechanical tasks, opus for critical thinking
+      // beast mode uses opus for everything
+      const state = await sm.loadAndValidate();
+      const isBeast = state.costMode === "beast";
+
+      const phasePromptMap: Record<number, { promptFile: string; agent: string; model: string }> = {
+        0: { promptFile: "phase0-brainstorm", agent: "auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
+        1: { promptFile: "phase1-architect", agent: "auto-dev-architect", model: "opus" },       // 设计始终用最强
+        2: { promptFile: "phase2-planner", agent: "auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
+        3: { promptFile: "phase3-developer", agent: "auto-dev-developer", model: "opus" },       // 实现始终用最强
+        4: { promptFile: "phase4-full-reviewer", agent: "auto-dev-reviewer", model: "opus" },    // 代码审查始终用最强
+        5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect", model: isBeast ? "opus" : "sonnet" },
+        6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator", model: isBeast ? "opus" : "sonnet" },
+        7: { promptFile: "phase7-retrospective", agent: "auto-dev-reviewer", model: isBeast ? "opus" : "sonnet" },
       };
 
       // Phase 1: if design.md already exists, skip architect → go directly to reviewer
       if (phase === 1) {
         try {
           await stat(join(outputDir, "design.md"));
-          phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev-reviewer" };
+          phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev-reviewer", model: "opus" };
           result.designExists = true;
           result.hint = "design.md already exists. Skipping architect, going directly to design review.";
         } catch { /* design.md not found, use default architect flow */ }
@@ -789,6 +796,8 @@ server.tool(
           const rendered = await renderer.render(mapping.promptFile, variables, extraContext || undefined);
           result.suggestedPrompt = rendered.renderedPrompt;
           result.suggestedAgent = mapping.agent;
+          result.suggestedModel = mapping.model;
+          result.costMode = state.costMode ?? "economy";
         } catch { /* prompt file not found or render error, skip */ }
       }
     }

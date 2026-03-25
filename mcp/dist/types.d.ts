@@ -110,6 +110,10 @@ export declare const StateJsonSchema: z.ZodObject<{
     tdd: z.ZodOptional<z.ZodBoolean>;
     tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     brainstorm: z.ZodOptional<z.ZodBoolean>;
+    costMode: z.ZodOptional<z.ZodEnum<{
+        economy: "economy";
+        beast: "beast";
+    }>>;
     startCommit: z.ZodOptional<z.ZodString>;
     regressionCount: z.ZodOptional<z.ZodNumber>;
     phaseTimings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
