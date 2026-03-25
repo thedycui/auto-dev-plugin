@@ -183,7 +183,7 @@ server.tool(
     if (skipE2e) behaviorUpdates["skipE2e"] = true;
     behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
-    behaviorUpdates["costMode"] = costMode ?? "economy"; // economy=按阶段选模型, beast=全部最强
+    behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
     await sm.atomicUpdate(behaviorUpdates);
 
     // Write immutable INIT marker to progress-log with original commands and integrity hash.
