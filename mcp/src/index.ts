@@ -326,118 +326,22 @@ server.tool(
       }
     }
 
-    // 1. Append to progress-log (first, per design: progress-log before state.json)
-    const line = sm.getCheckpointLine(phase, task, status, summary);
-    await sm.appendToProgressLog("\n" + line + "\n");
+    // ===================================================================
+    // PRE-VALIDATION PHASE — all checks BEFORE any state mutation
+    // Artifact validation must happen before writing to progress-log
+    // or state.json, so failed checks don't pollute formal state.
+    // ===================================================================
 
-    // 2. Update state.json atomically
-    const stateUpdates: Record<string, unknown> = { phase, status };
-    if (task !== undefined) stateUpdates["task"] = task;
-
-    // Iteration tracking for NEEDS_REVISION (after potential FORCE_PASS override)
-    if (status === "NEEDS_REVISION") {
-      stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
-    } else if (status === "PASS" || status === "COMPLETED") {
-      stateUpdates["iteration"] = 0;
-    }
-
-    // REGRESS state updates (validation already done above)
-    if (status === "REGRESS") {
-      const newRegressionCount = (state.regressionCount ?? 0) + 1;
-      stateUpdates["regressionCount"] = newRegressionCount;
-      stateUpdates["iteration"] = 0;
-    }
-
-    // Phase timing tracking
-    const timings = { ...(state.phaseTimings ?? {}) };
-    const phaseKey = String(phase);
-    if (status === "IN_PROGRESS") {
-      timings[phaseKey] = { startedAt: new Date().toISOString() };
-    } else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
-      const existing = timings[phaseKey];
-      if (existing?.startedAt) {
-        const now = new Date();
-        existing.completedAt = now.toISOString();
-        existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
-      }
-    }
-    stateUpdates["phaseTimings"] = timings;
-
-    // Token usage tracking
-    if (tokenEstimate !== undefined) {
-      const usage = { ...(state.tokenUsage ?? { total: 0, byPhase: {} }) };
-      usage.total += tokenEstimate;
-      const pk = String(phase);
-      usage.byPhase = { ...usage.byPhase };
-      usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
-      stateUpdates["tokenUsage"] = usage;
-    }
-
-    try {
-      await sm.atomicUpdate(stateUpdates);
-    } catch (err) {
-      // progress-log written but state.json failed → mark dirty
-      // Direct write to mark dirty — do not go through atomicUpdate
-      try {
-        const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
-        current.dirty = true;
-        current.updatedAt = new Date().toISOString();
-        await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
-      } catch {
-        // Last resort: state.json.tmp preserved for manual recovery
-      }
-      return textResult({
-        error: "STATE_UPDATE_FAILED",
-        message: `Progress-log updated but state.json write failed: ${(err as Error).message}. State marked as dirty.`,
-      });
-    }
-
-    // 3. Create BLOCKED.md if status is BLOCKED
-    if (status === "BLOCKED") {
-      const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
-      await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
-    }
-
-    // 3.8 TDD Iron Law verification — check commit history for RED-GREEN pattern
-    if (phase === 3 && status === "PASS" && state.tdd === true) {
-      try {
-        const { execFile: execFileTdd } = await import("node:child_process");
-        const taskStartCommit = state.startCommit ?? "HEAD~20";
-        const commitLog = await new Promise<string>((resolve) => {
-          execFileTdd("git", ["log", "--oneline", taskStartCommit + "..HEAD"], { cwd: projectRoot }, (err, stdout) => {
-            resolve(err ? "" : (stdout || ""));
-          });
-        });
-        // Check for RED commits (test-first pattern)
-        const hasRedCommit = /RED|red|failing test|add.*test/i.test(commitLog);
-        const hasGreenCommit = /GREEN|green|implement|pass/i.test(commitLog);
-        if (!hasRedCommit && commitLog.trim().length > 0) {
-          // TDD violation: implementation without RED commit
-          const warnings = state.tddWarnings ?? [];
-          warnings.push(`Task ${task ?? "?"}: no RED commit found in history. TDD Iron Law may have been violated.`);
-          await sm.atomicUpdate({ tddWarnings: warnings });
-        }
-      } catch { /* git log failed, skip TDD check */ }
-    }
-
-    // 4. Phase 5/6 artifact validation — prevent skipping tests or acceptance
+    // Phase 5 artifact pre-validation
     if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
-      // Check for new test files via git
       let testFileCount = 0;
       try {
-        const git = new GitManager(projectRoot);
-        const progressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8").catch(() => "");
-        // Extract Phase 3 start commit from progress-log (first Phase 3 checkpoint)
-        const phase3Match = /CHECKPOINT phase=3.*?timestamp=/g.exec(progressLog);
-        // Use git diff to find new files since init
         const { execFile: execFileAsync } = await import("node:child_process");
-        const diffOutput = await new Promise<string>((resolve, reject) => {
+        const diffOutput = await new Promise<string>((resolve) => {
           const baseCommit = state.startCommit ?? "HEAD~20";
-          // --diff-filter=AM: committed/staged test files
           execFileAsync("git", ["diff", "--name-only", "--diff-filter=AM", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
             if (err) resolve("");
             else {
-              // Also check untracked files (developer may not have git-added yet)
               execFileAsync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err2, stdout2) => {
                 const committed = stdout || "";
                 const untracked = err2 ? "" : (stdout2 || "");
@@ -460,10 +364,12 @@ server.tool(
         return textResult({
           error: "PHASE5_ARTIFACTS_MISSING",
           ...phase5Validation,
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
         });
       }
     }
 
+    // Phase 6 artifact pre-validation
     if (phase === 6 && status === "PASS") {
       let reportContent: string | null = null;
       try {
@@ -475,8 +381,107 @@ server.tool(
         return textResult({
           error: "PHASE6_ARTIFACTS_MISSING",
           ...phase6Validation,
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
         });
       }
+    }
+
+    // TDD Iron Law pre-check (advisory, does not block — just collects warnings)
+    let tddWarning: string | null = null;
+    if (phase === 3 && status === "PASS" && state.tdd === true) {
+      try {
+        const { execFile: execFileTdd } = await import("node:child_process");
+        const taskStartCommit = state.startCommit ?? "HEAD~20";
+        const commitLog = await new Promise<string>((resolve) => {
+          execFileTdd("git", ["log", "--oneline", taskStartCommit + "..HEAD"], { cwd: projectRoot }, (err, stdout) => {
+            resolve(err ? "" : (stdout || ""));
+          });
+        });
+        const hasRedCommit = /RED|red|failing test|add.*test/i.test(commitLog);
+        if (!hasRedCommit && commitLog.trim().length > 0) {
+          tddWarning = `Task ${task ?? "?"}: no RED commit found in history. TDD Iron Law may have been violated.`;
+        }
+      } catch { /* git log failed, skip TDD check */ }
+    }
+
+    // ===================================================================
+    // COMMIT PHASE — all pre-validations passed, now persist state
+    // ===================================================================
+
+    // 1. Prepare state updates (computed in memory, not yet written)
+    const stateUpdates: Record<string, unknown> = { phase, status };
+    if (task !== undefined) stateUpdates["task"] = task;
+
+    if (status === "NEEDS_REVISION") {
+      stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
+    } else if (status === "PASS" || status === "COMPLETED") {
+      stateUpdates["iteration"] = 0;
+    }
+
+    if (status === "REGRESS") {
+      const newRegressionCount = (state.regressionCount ?? 0) + 1;
+      stateUpdates["regressionCount"] = newRegressionCount;
+      stateUpdates["iteration"] = 0;
+    }
+
+    // Phase timing
+    const timings = { ...(state.phaseTimings ?? {}) };
+    const phaseKey = String(phase);
+    if (status === "IN_PROGRESS") {
+      timings[phaseKey] = { startedAt: new Date().toISOString() };
+    } else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
+      const existing = timings[phaseKey];
+      if (existing?.startedAt) {
+        const now = new Date();
+        existing.completedAt = now.toISOString();
+        existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
+      }
+    }
+    stateUpdates["phaseTimings"] = timings;
+
+    // Token usage
+    if (tokenEstimate !== undefined) {
+      const usage = { ...(state.tokenUsage ?? { total: 0, byPhase: {} }) };
+      usage.total += tokenEstimate;
+      const pk = String(phase);
+      usage.byPhase = { ...usage.byPhase };
+      usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
+      stateUpdates["tokenUsage"] = usage;
+    }
+
+    // TDD warning (collected during pre-validation)
+    if (tddWarning) {
+      const warnings = [...(state.tddWarnings ?? []), tddWarning];
+      stateUpdates["tddWarnings"] = warnings;
+    }
+
+    // 2. Write progress-log (first)
+    const line = sm.getCheckpointLine(phase, task, status, summary);
+    await sm.appendToProgressLog("\n" + line + "\n");
+
+    // 3. Write state.json (second)
+    try {
+      await sm.atomicUpdate(stateUpdates);
+    } catch (err) {
+      // progress-log written but state.json failed → mark dirty
+      try {
+        const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+        current.dirty = true;
+        current.updatedAt = new Date().toISOString();
+        await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
+      } catch {
+        // Last resort: state.json.tmp preserved for manual recovery
+      }
+      return textResult({
+        error: "STATE_UPDATE_FAILED",
+        message: `Progress-log updated but state.json write failed: ${(err as Error).message}. State marked as dirty.`,
+      });
+    }
+
+    // 4. Post-commit side effects (non-critical, failures don't rollback)
+    if (status === "BLOCKED") {
+      const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
+      await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
     }
 
     // 5. Compute next phase directive — forces Claude to continue to next phase
