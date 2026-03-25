@@ -285,7 +285,7 @@ export function validatePredecessor(targetPhase, progressLogContent, mode, skipE
  * Returns null if INIT marker is not found.
  */
 export function parseInitMarker(progressLogContent) {
-    const match = progressLogContent.match(/<!-- INIT buildCmd="([^"]*)" testCmd="([^"]*)" skipE2e=(true|false) mode=(\w+) integrity=(\w+) -->/);
+    const match = progressLogContent.match(/<!-- INIT buildCmd="([^"]*)" testCmd="([^"]*)" skipE2e=(true|false) mode=(\w+) integrity=(\w+)(?: disabledTests=(\d+))? -->/);
     if (!match)
         return null;
     return {
@@ -294,6 +294,7 @@ export function parseInitMarker(progressLogContent) {
         skipE2e: match[3] === "true",
         mode: match[4],
         integrity: match[5],
+        disabledTestCount: match[6] !== undefined ? parseInt(match[6], 10) : undefined,
     };
 }
 // ---------------------------------------------------------------------------

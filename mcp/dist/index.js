@@ -188,9 +188,27 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         .update(JSON.stringify(initFields) + startCommit)
         .digest("hex")
         .slice(0, 16);
+    // Count @Disabled/@Ignore/skip tests at init time as baseline
+    // Agent adding new @Disabled to pass tests will be detected at complete time
+    let disabledTestCount = 0;
+    try {
+        const { execFile: execFileCount } = await import("node:child_process");
+        const countOutput = await new Promise((resolve) => {
+            execFileCount("grep", ["-r", "-c", "-E", "@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(", projectRoot + "/src"], { timeout: 15_000 }, (err, stdout) => {
+                resolve(err ? "" : (stdout || ""));
+            });
+        });
+        // grep -c returns "filename:count" per file, sum all counts
+        for (const line of countOutput.trim().split("\n")) {
+            const match = line.match(/:(\d+)$/);
+            if (match)
+                disabledTestCount += parseInt(match[1], 10);
+        }
+    }
+    catch { /* grep failed, count stays 0 */ }
     const initMarker = `<!-- INIT buildCmd="${stack.buildCmd}" testCmd="${stack.testCmd}"` +
         ` skipE2e=${skipE2e === true} mode=${mode}` +
-        ` integrity=${integrityHash} -->`;
+        ` integrity=${integrityHash} disabledTests=${disabledTestCount} -->`;
     await sm.appendToProgressLog("\n" + initMarker + "\n");
     const state = sm.getFullState();
     return textResult({
@@ -441,23 +459,62 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             });
         }
     }
-    // TDD Iron Law pre-check (advisory, does not block — just collects warnings)
+    // TDD Iron Law — HARD BLOCK when tdd=true
+    // Verifies that test files were changed in commits for this task.
+    // Agent cannot skip TDD by telling sub-agents to write implementation first.
     let tddWarning = null;
     if (phase === 3 && status === "PASS" && state.tdd === true) {
         try {
             const { execFile: execFileTdd } = await import("node:child_process");
             const taskStartCommit = state.startCommit ?? "HEAD~20";
+            // Get list of changed files since start
+            const changedFiles = await new Promise((resolve) => {
+                execFileTdd("git", ["diff", "--name-only", taskStartCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+                    resolve(err ? "" : (stdout || ""));
+                });
+            });
+            // Also check untracked files (not yet committed)
+            const untrackedFiles = await new Promise((resolve) => {
+                execFileTdd("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err, stdout) => {
+                    resolve(err ? "" : (stdout || ""));
+                });
+            });
+            const allFiles = (changedFiles + "\n" + untrackedFiles).trim().split("\n").filter(f => f.length > 0);
+            // Check for test files in the changes
+            const testPatterns = [
+                /[Tt]est\.(java|py|ts|js|kt|go|rs)$/,
+                /\.test\.(ts|js|tsx|jsx)$/,
+                /\.spec\.(ts|js|tsx|jsx)$/,
+                /_test\.(go|py)$/,
+                /tests?\//i,
+            ];
+            const hasTestFiles = allFiles.some(f => testPatterns.some(p => p.test(f)));
+            // Also check implementation files exist (if only tests, that's fine — pure test task)
+            const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/, /\.go$/, /\.rs$/, /\.kt$/];
+            const hasImplFiles = allFiles.some(f => implPatterns.some(p => p.test(f)) && !testPatterns.some(p => p.test(f)));
+            if (hasImplFiles && !hasTestFiles) {
+                // Implementation exists but no tests — TDD violation, HARD BLOCK
+                return textResult({
+                    error: "TDD_VIOLATION",
+                    message: `TDD Iron Law 违规：Task ${task ?? "?"} 有实现代码变更但没有测试文件变更。` +
+                        `\n检测到实现文件但未检测到测试文件 (*Test.*, *.test.*, *.spec.*, _test.*)。` +
+                        `\nTDD 要求：先写测试（RED），再写实现（GREEN）。必须补充测试后重试。`,
+                    mandate: "[BLOCKED] TDD 模式下，checkpoint PASS 要求必须包含测试文件变更。",
+                    note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+                });
+            }
+            // Advisory: check commit order (RED before GREEN) via commit messages
             const commitLog = await new Promise((resolve) => {
                 execFileTdd("git", ["log", "--oneline", taskStartCommit + "..HEAD"], { cwd: projectRoot }, (err, stdout) => {
                     resolve(err ? "" : (stdout || ""));
                 });
             });
             const hasRedCommit = /RED|red|failing test|add.*test/i.test(commitLog);
-            if (!hasRedCommit && commitLog.trim().length > 0) {
-                tddWarning = `Task ${task ?? "?"}: no RED commit found in history. TDD Iron Law may have been violated.`;
+            if (!hasRedCommit && commitLog.trim().length > 0 && hasImplFiles) {
+                tddWarning = `Task ${task ?? "?"}: no RED commit found in history. TDD commit order may have been violated (advisory).`;
             }
         }
-        catch { /* git log failed, skip TDD check */ }
+        catch { /* git command failed, skip TDD check */ }
     }
     // ===================================================================
     // COMMIT PHASE — all pre-validations passed, now persist state
@@ -882,6 +939,35 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
                 message: `skipE2e 被篡改！原始值(INIT marker): ${initMarker.skipE2e}, ` +
                     `当前 state.json 值: ${state.skipE2e}. `,
                 mandate: "[BLOCKED] 检测到 skipE2e 标志被篡改。禁止事后修改跳过策略。",
+            });
+        }
+    }
+    // @Disabled/@Ignore count comparison — detect agent adding skip annotations to pass tests
+    if (initMarker?.disabledTestCount !== undefined) {
+        let currentDisabledCount = 0;
+        try {
+            const { execFile: execFileGrep } = await import("node:child_process");
+            const grepOutput = await new Promise((resolve) => {
+                execFileGrep("grep", ["-r", "-c", "-E", "@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(", projectRoot + "/src"], { timeout: 15_000 }, (err, stdout) => {
+                    resolve(err ? "" : (stdout || ""));
+                });
+            });
+            for (const line of grepOutput.trim().split("\n")) {
+                const m = line.match(/:(\d+)$/);
+                if (m)
+                    currentDisabledCount += parseInt(m[1], 10);
+            }
+        }
+        catch { /* grep failed */ }
+        const newlyDisabled = currentDisabledCount - initMarker.disabledTestCount;
+        if (newlyDisabled > 0) {
+            return textResult({
+                error: "TESTS_NEWLY_DISABLED",
+                canComplete: false,
+                message: `检测到新增 ${newlyDisabled} 个 @Disabled/@Ignore 测试注解！` +
+                    `\n初始值（INIT marker）: ${initMarker.disabledTestCount}, 当前: ${currentDisabledCount}。` +
+                    `\n禁止通过 @Disabled 跳过失败测试来绕过测试门禁。必须修复测试或移除 @Disabled 后重试。`,
+                mandate: "[BLOCKED] 新增了跳过测试的注解。必须修复测试而非禁用测试。",
             });
         }
     }

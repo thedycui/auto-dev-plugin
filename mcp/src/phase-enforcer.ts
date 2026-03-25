@@ -409,6 +409,7 @@ export interface InitMarkerData {
   skipE2e: boolean;
   mode: string;
   integrity: string;
+  disabledTestCount?: number;
 }
 
 /**
@@ -421,7 +422,7 @@ export interface InitMarkerData {
  */
 export function parseInitMarker(progressLogContent: string): InitMarkerData | null {
   const match = progressLogContent.match(
-    /<!-- INIT buildCmd="([^"]*)" testCmd="([^"]*)" skipE2e=(true|false) mode=(\w+) integrity=(\w+) -->/
+    /<!-- INIT buildCmd="([^"]*)" testCmd="([^"]*)" skipE2e=(true|false) mode=(\w+) integrity=(\w+)(?: disabledTests=(\d+))? -->/
   );
   if (!match) return null;
   return {
@@ -430,6 +431,7 @@ export function parseInitMarker(progressLogContent: string): InitMarkerData | nu
     skipE2e: match[3] === "true",
     mode: match[4]!,
     integrity: match[5]!,
+    disabledTestCount: match[6] !== undefined ? parseInt(match[6], 10) : undefined,
   };
 }
 
