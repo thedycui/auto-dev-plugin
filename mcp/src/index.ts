@@ -584,6 +584,17 @@ server.tool(
         5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect" },
         6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator" },
       };
+
+      // Phase 1: if design.md already exists, skip architect → go directly to reviewer
+      if (phase === 1) {
+        try {
+          await stat(join(outputDir, "design.md"));
+          phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev-reviewer" };
+          result.designExists = true;
+          result.hint = "design.md already exists. Skipping architect, going directly to design review.";
+        } catch { /* design.md not found, use default architect flow */ }
+      }
+
       const mapping = phasePromptMap[phase];
       if (mapping) {
         try {
