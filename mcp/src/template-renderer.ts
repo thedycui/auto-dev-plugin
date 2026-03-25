@@ -32,9 +32,21 @@ export class TemplateRenderer {
       content = await readFile(templatePath, "utf-8");
     } catch (err) {
       const code = (err as { code?: string }).code;
+      // List available templates to help agent self-correct
+      let available = "";
+      try {
+        const { readdirSync } = await import("node:fs");
+        const promptsDir = join(this.skillsDir, "prompts");
+        const files = readdirSync(promptsDir)
+          .filter((f: string) => f.endsWith(".md"))
+          .map((f: string) => f.replace(/\.md$/, ""));
+        available = `\nAvailable templates: ${files.join(", ")}`;
+      } catch { /* ignore */ }
       throw new Error(
         `Template file not found: ${templatePath}` +
-          (code ? ` (${code})` : ""),
+          (code ? ` (${code})` : "") +
+          available +
+          `\nHint: use auto_dev_preflight() which returns suggestedPrompt with the correct template name.`,
       );
     }
 
