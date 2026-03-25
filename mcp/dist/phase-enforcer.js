@@ -15,9 +15,9 @@ const PHASE_META = {
     7: { name: "RETROSPECTIVE", description: "经验萃取" },
 };
 /** full 模式的必需 Phase */
-const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6];
+const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6, 7];
 /** quick 模式的必需 Phase */
-const REQUIRED_PHASES_QUICK = [3, 4, 5];
+const REQUIRED_PHASES_QUICK = [3, 4, 5, 7];
 const MAX_ITERATIONS_PER_PHASE = {
     1: 3, 2: 3, 3: 2, 4: 3, 5: 3,
 };
@@ -61,7 +61,7 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
 export function computeNextDirective(currentPhase, status, state, regressTo) {
     const mode = state.mode;
     const isDryRun = state.dryRun === true;
-    const maxPhase = isDryRun ? 2 : 6;
+    const maxPhase = isDryRun ? 2 : 7;
     // REGRESS 分支必须在守卫之前
     if (status === "REGRESS") {
         if (!regressTo || regressTo >= currentPhase) {

@@ -511,6 +511,8 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
         await fileCheck("code_review_md", join(outputDir, "code-review.md"));
     if (phase >= 6)
         await fileCheck("e2e_test_results_md", join(outputDir, "e2e-test-results.md"));
+    if (phase >= 7)
+        await fileCheck("acceptance_report_md", join(outputDir, "acceptance-report.md"));
     const ready = checks.every((c) => c.passed);
     const result = { ready, checks };
     // Auto-render suggested prompt when ready
@@ -523,6 +525,7 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
             4: { promptFile: "phase4-full-reviewer", agent: "auto-dev-reviewer" },
             5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect" },
             6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator" },
+            7: { promptFile: "phase7-retrospective", agent: "auto-dev-reviewer" },
         };
         // Phase 1: if design.md already exists, skip architect → go directly to reviewer
         if (phase === 1) {
@@ -755,7 +758,7 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
     // Generate summary.md
     try {
         const PHASE_NAMES = {
-            "0": "BRAINSTORM", "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE",
+            "0": "BRAINSTORM", "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE", "7": "RETROSPECTIVE",
         };
         const timingRows = timingSummary
             .map(t => `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? "?"}) | ${t.durationStr} |`)
@@ -779,19 +782,12 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
             `- \`code-review.md\` — 代码审查报告\n` +
             (state.skipE2e ? "" : `- \`e2e-test-results.md\` — E2E 测试结果\n`) +
             `- \`acceptance-report.md\` — 验收报告\n` +
+            `- \`retrospective.md\` — 回顾总结（Phase 7）\n` +
             `- \`progress-log.md\` — 完整执行日志\n\n` +
             `> 如需回滚至 init 状态：\`git reset --hard auto-dev/${state.topic}/start\`\n`;
         await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
     }
     catch { /* summary.md generation failed — non-fatal */ }
-    // Phase 7: RETROSPECTIVE — auto-extract lessons for self-evolution
-    let retrospectiveResult = null;
-    try {
-        retrospectiveResult = await runRetrospective(state, sm.outputDir, projectRoot);
-    }
-    catch (e) {
-        // Retrospective failed — non-fatal, log but don't block completion
-    }
     return textResult({
         canComplete: true,
         passedPhases: validation.passedPhases,
@@ -799,7 +795,6 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
         status: "COMPLETED",
         timingSummary,
         tokenUsage,
-        retrospective: retrospectiveResult,
     });
 });
 // ===========================================================================
