@@ -486,3 +486,44 @@ export function validatePhase2ReviewArtifact(
   }
   return { valid: true, errors: [], mandate: "" };
 }
+
+/**
+ * Phase 7 PASS 要求 retrospective.md 存在且有实质内容。
+ * 防止主 agent 跳过 reviewer subagent 直接 checkpoint PASS。
+ *
+ * 验证规则：
+ * 1. retrospective.md 必须存在
+ * 2. 内容不少于 50 行（防止敷衍）
+ * 3. 必须包含诚实度审计表格（PASS/FAIL/PARTIAL 关键词）
+ */
+export function validatePhase7Artifacts(
+  retroContent: string | null,
+): PhaseArtifactValidation {
+  const errors: string[] = [];
+  if (!retroContent) {
+    errors.push(
+      "retrospective.md 不存在。Phase 7 PASS 要求必须调用 reviewer agent 生成深度复盘报告。" +
+      "禁止主 agent 自己调用 lessons_add 后直接 checkpoint PASS。"
+    );
+  } else {
+    const lines = retroContent.trim().split("\n").length;
+    if (lines < 50) {
+      errors.push(
+        `retrospective.md 内容过短（${lines} 行，要求 >= 50 行），疑似敷衍。` +
+        "必须包含完整的诚实度审计、踩坑清单、亮点和改进建议。"
+      );
+    }
+    const hasIntegrityAudit = /诚实度审计|integrity.*audit/i.test(retroContent);
+    const hasAuditVerdict = /\b(PASS|FAIL|PARTIAL)\b/.test(retroContent);
+    if (!hasIntegrityAudit || !hasAuditVerdict) {
+      errors.push(
+        "retrospective.md 缺少诚实度审计章节或审计结论（PASS/FAIL/PARTIAL）。" +
+        "复盘报告必须包含：是否跳过阶段、是否被框架拦截、review/测试是否真实、TDD 合规性、是否有作弊行为。"
+      );
+    }
+  }
+  if (errors.length > 0) {
+    return { valid: false, errors, mandate: "[BLOCKED] Phase 7 PASS 被拒绝：" + errors.join(" ") };
+  }
+  return { valid: true, errors: [], mandate: "" };
+}

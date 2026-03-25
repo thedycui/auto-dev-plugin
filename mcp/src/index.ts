@@ -16,7 +16,7 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
+import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 
@@ -500,6 +500,23 @@ server.tool(
         return textResult({
           error: "PHASE6_ARTIFACTS_MISSING",
           ...phase6Validation,
+          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+        });
+      }
+    }
+
+    // Phase 7 artifact pre-validation: retrospective.md must exist and be substantial
+    if (phase === 7 && status === "PASS") {
+      let retroContent: string | null = null;
+      try {
+        retroContent = await readFile(join(sm.outputDir, "retrospective.md"), "utf-8");
+      } catch { /* file doesn't exist */ }
+
+      const retroValidation = validatePhase7Artifacts(retroContent);
+      if (!retroValidation.valid) {
+        return textResult({
+          error: "PHASE7_RETROSPECTIVE_MISSING",
+          ...retroValidation,
           note: "Checkpoint rejected BEFORE writing state. No state pollution.",
         });
       }
