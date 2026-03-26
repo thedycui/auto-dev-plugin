@@ -334,7 +334,7 @@ export class StateManager {
   // -----------------------------------------------------------------------
 
   /** Create the output directory, write initial state.json (atomic) and progress-log header. */
-  async init(mode: "full" | "quick", stack: StackInfo, startPhase?: number): Promise<void> {
+  async init(mode: "full" | "quick" | "turbo", stack: StackInfo, startPhase?: number): Promise<void> {
     await mkdir(this.outputDir, { recursive: true });
 
     const now = new Date().toISOString();

@@ -1,0 +1,43 @@
+{
+  "topic": "turbo-mode",
+  "mode": "full",
+  "phase": 7,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/turbo-mode",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "skipE2e": true,
+  "tdd": false,
+  "costMode": "beast",
+  "startCommit": "8244752fdcd353d72d8c38cd9274fb4cc46793b0",
+  "phaseTimings": {
+    "4": {
+      "startedAt": "2026-03-26T08:45:12.464Z",
+      "completedAt": "2026-03-26T08:50:39.321Z",
+      "durationMs": 326857
+    },
+    "6": {
+      "startedAt": "2026-03-26T08:51:06.615Z",
+      "completedAt": "2026-03-26T08:53:31.046Z",
+      "durationMs": 144431
+    },
+    "7": {
+      "startedAt": "2026-03-26T08:54:23.285Z",
+      "completedAt": "2026-03-26T09:00:15.127Z",
+      "durationMs": 351842
+    }
+  },
+  "tribunalSubmits": {
+    "4": 2,
+    "6": 1,
+    "7": 1
+  },
+  "startedAt": "2026-03-26T08:37:39.941Z",
+  "updatedAt": "2026-03-26T09:00:52.140Z"
+}

@@ -8,6 +8,7 @@ import { z } from "zod/v4";
 export declare const ModeSchema: z.ZodEnum<{
     full: "full";
     quick: "quick";
+    turbo: "turbo";
 }>;
 export declare const PhaseStatusSchema: z.ZodEnum<{
     IN_PROGRESS: "IN_PROGRESS";
@@ -83,6 +84,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     mode: z.ZodEnum<{
         full: "full";
         quick: "quick";
+        turbo: "turbo";
     }>;
     phase: z.ZodNumber;
     task: z.ZodOptional<z.ZodNumber>;
@@ -156,6 +158,7 @@ export declare const InitInputSchema: z.ZodObject<{
     mode: z.ZodEnum<{
         full: "full";
         quick: "quick";
+        turbo: "turbo";
     }>;
     startPhase: z.ZodOptional<z.ZodNumber>;
     interactive: z.ZodOptional<z.ZodBoolean>;

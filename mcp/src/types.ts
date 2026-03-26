@@ -11,7 +11,7 @@ import { z } from "zod/v4";
 // Enums / Shared Literals
 // ---------------------------------------------------------------------------
 
-export const ModeSchema = z.enum(["full", "quick"]);
+export const ModeSchema = z.enum(["full", "quick", "turbo"]);
 
 export const PhaseStatusSchema = z.enum([
   "IN_PROGRESS",

@@ -26,6 +26,9 @@ const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6, 7];
 /** quick 模式的必需 Phase */
 const REQUIRED_PHASES_QUICK = [3, 4, 5, 7];
 
+/** turbo 模式的必需 Phase（无 tribunal，只要 build+test 通过） */
+const REQUIRED_PHASES_TURBO = [3];
+
 const MAX_ITERATIONS_PER_PHASE: Record<number, number> = {
   1: 3, 2: 3, 3: 2, 4: 3, 5: 3,
 };
@@ -104,7 +107,7 @@ export function computeNextDirective(
 ): NextDirective {
   const mode = state.mode;
   const isDryRun = state.dryRun === true;
-  const maxPhase = isDryRun ? 2 : 7;
+  const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : 7;
 
   // REGRESS 分支必须在守卫之前
   if (status === "REGRESS") {
@@ -192,15 +195,17 @@ export interface CompletionValidation {
  */
 export function validateCompletion(
   progressLogContent: string,
-  mode: "full" | "quick",
+  mode: "full" | "quick" | "turbo",
   isDryRun: boolean,
   skipE2e: boolean = false,
 ): CompletionValidation {
   const basePhases = isDryRun
     ? [1, 2]
-    : mode === "quick"
-      ? REQUIRED_PHASES_QUICK
-      : REQUIRED_PHASES_FULL;
+    : mode === "turbo"
+      ? REQUIRED_PHASES_TURBO
+      : mode === "quick"
+        ? REQUIRED_PHASES_QUICK
+        : REQUIRED_PHASES_FULL;
   const requiredPhases = skipE2e
     ? basePhases.filter((p) => p !== 5)
     : basePhases;
@@ -399,10 +404,10 @@ export interface PredecessorValidation {
 export function validatePredecessor(
   targetPhase: number,
   progressLogContent: string,
-  mode: "full" | "quick",
+  mode: "full" | "quick" | "turbo",
   skipE2e: boolean,
 ): PredecessorValidation {
-  const basePhases = mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
+  const basePhases = mode === "turbo" ? REQUIRED_PHASES_TURBO : mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
   const requiredPhases = skipE2e ? basePhases.filter((p) => p !== 5) : basePhases;
 
   const targetIndex = requiredPhases.indexOf(targetPhase);

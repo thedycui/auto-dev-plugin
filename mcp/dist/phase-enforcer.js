@@ -20,6 +20,8 @@ const PHASE_META = {
 const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6, 7];
 /** quick 模式的必需 Phase */
 const REQUIRED_PHASES_QUICK = [3, 4, 5, 7];
+/** turbo 模式的必需 Phase（无 tribunal，只要 build+test 通过） */
+const REQUIRED_PHASES_TURBO = [3];
 const MAX_ITERATIONS_PER_PHASE = {
     1: 3, 2: 3, 3: 2, 4: 3, 5: 3,
 };
@@ -63,7 +65,7 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
 export function computeNextDirective(currentPhase, status, state, regressTo) {
     const mode = state.mode;
     const isDryRun = state.dryRun === true;
-    const maxPhase = isDryRun ? 2 : 7;
+    const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : 7;
     // REGRESS 分支必须在守卫之前
     if (status === "REGRESS") {
         if (!regressTo || regressTo >= currentPhase) {
@@ -135,9 +137,11 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
 export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e = false) {
     const basePhases = isDryRun
         ? [1, 2]
-        : mode === "quick"
-            ? REQUIRED_PHASES_QUICK
-            : REQUIRED_PHASES_FULL;
+        : mode === "turbo"
+            ? REQUIRED_PHASES_TURBO
+            : mode === "quick"
+                ? REQUIRED_PHASES_QUICK
+                : REQUIRED_PHASES_FULL;
     const requiredPhases = skipE2e
         ? basePhases.filter((p) => p !== 5)
         : basePhases;
@@ -277,7 +281,7 @@ export function countTestFiles(diffFileNames) {
  * 防止 agent 跳过中间阶段直接标记后续阶段为 PASS。
  */
 export function validatePredecessor(targetPhase, progressLogContent, mode, skipE2e) {
-    const basePhases = mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
+    const basePhases = mode === "turbo" ? REQUIRED_PHASES_TURBO : mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
     const requiredPhases = skipE2e ? basePhases.filter((p) => p !== 5) : basePhases;
     const targetIndex = requiredPhases.indexOf(targetPhase);
     // Phase not in required list (e.g., Phase 0 brainstorm) → allow

@@ -86,7 +86,7 @@ server.tool(
   {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick"]),
+    mode: z.enum(["full", "quick", "turbo"]),
     startPhase: z.number().optional(),
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),

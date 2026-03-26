@@ -71,7 +71,7 @@ const server = new McpServer({
 server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, detect tech stack, init state. If directory exists, onConflict controls behavior (resume/overwrite).", {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick"]),
+    mode: z.enum(["full", "quick", "turbo"]),
     startPhase: z.number().optional(),
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
