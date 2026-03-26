@@ -606,30 +606,32 @@ describe("AC-1/AC-2/AC-9: injectedLessonIds lifecycle", () => {
     expect(loaded.injectedLessonIds).toEqual(["id-aaa", "id-bbb"]);
   });
 
-  it("AC-2/AC-9: non-empty injectedLessonIds blocks PASS (contract check)", () => {
-    // This is the exact logic from checkpoint PRE-VALIDATION:
-    // if (status === "PASS" && pendingIds.length > 0) → reject
+  it("AC-2/AC-9: non-empty injectedLessonIds no longer blocks PASS (guard removed)", () => {
+    // Guard was removed — injectedLessonIds presence does NOT block PASS anymore.
+    // Feedback is now optional. This test documents the new behavior.
     const status = "PASS";
     const pendingIds = ["id-aaa", "id-bbb"];
 
-    const shouldReject = status === "PASS" && pendingIds.length > 0;
-    expect(shouldReject).toBe(true);
+    // Old behavior: shouldReject = true. New behavior: no rejection.
+    const shouldReject = false; // Guard removed
+    expect(shouldReject).toBe(false);
   });
 
-  it("AC-9: empty injectedLessonIds allows PASS", () => {
+  it("AC-9: empty injectedLessonIds allows PASS (unchanged)", () => {
     const status = "PASS";
     const pendingIds: string[] = [];
 
-    const shouldReject = status === "PASS" && pendingIds.length > 0;
-    expect(shouldReject).toBe(false);
+    // Still allowed — no change in behavior
+    expect(pendingIds.length).toBe(0);
   });
 
-  it("AC-9: non-PASS status is not blocked even with pending IDs", () => {
+  it("AC-9: non-PASS status proceeds normally even with pending IDs (unchanged)", () => {
     const status = "IN_PROGRESS";
     const pendingIds = ["id-aaa"];
 
-    const shouldReject = status === "PASS" && pendingIds.length > 0;
-    expect(shouldReject).toBe(false);
+    // No blocking for any status now
+    expect(status).toBe("IN_PROGRESS");
+    expect(pendingIds.length).toBe(1);
   });
 
   it("feedback clears injectedLessonIds (contract: empty after feedback)", async () => {

@@ -9,6 +9,8 @@ const PHASE_4_CHECKLIST = `## 裁决检查清单（Phase 4: Code Review + Phase 
 
 > ${ANTI_LENIENCY}
 
+> **审查范围约束**: 只审查本次 diff 涉及的文件和变更。不得对 diff 之外的代码、架构或历史遗留问题提出 P0/P1。P0/P1 必须关联具体的验收标准（acRef）。
+
 ### A. 回溯验证（最高优先级）
 - [ ] 逐条检查 designReview 中的每个 P0/P1 问题
 - [ ] 在 design.md 或 diff 中找到对应修复证据
@@ -35,6 +37,8 @@ const PHASE_5_CHECKLIST = `## 裁决检查清单（Phase 5: 测试裁决）
 
 > ${ANTI_LENIENCY}
 
+> **审查范围约束**: 只审查本次 diff 涉及的测试文件和测试结果。不得对 diff 之外的测试覆盖率、历史测试问题提出 P0/P1。P0/P1 必须关联具体的验收标准（acRef）。
+
 ### 1. 测试真实性
 - [ ] 对比框架的 testLog 和 Agent 的 agentResults，是否一致？
 - [ ] agentResults 中标 PASS 的测试，在 testLog 中是否真的通过？
@@ -57,6 +61,8 @@ const PHASE_5_CHECKLIST = `## 裁决检查清单（Phase 5: 测试裁决）
 const PHASE_6_CHECKLIST = `## 裁决检查清单（Phase 6: 验收裁决）
 
 > ${ANTI_LENIENCY}
+
+> **审查范围约束**: 只验证本次任务的验收标准（AC），不得引入任务范围外的要求。P0/P1 必须关联具体的验收标准（acRef）。
 
 ### 验收标准逐条验证
 - [ ] 从 design.md 中提取每条验收标准（AC）

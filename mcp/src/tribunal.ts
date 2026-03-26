@@ -27,6 +27,7 @@ import {
   countTestFiles,
   computeNextDirective,
 } from "./phase-enforcer.js";
+import { LessonsManager } from "./lessons-manager.js";
 import type { NextDirective } from "./phase-enforcer.js";
 import { getClaudePath } from "./agent-spawner.js";
 
@@ -194,6 +195,10 @@ export async function prepareTribunalInput(
   content += `你是独立裁决者。你的默认立场是 FAIL。\n`;
   content += `PASS 必须对每条检查项提供证据（文件名:行号），FAIL 只需说明理由。\n`;
   content += `PASS 的举证成本远大于 FAIL —— 如果你不确定，判 FAIL。\n\n`;
+  content += `## 范围限制\n\n`;
+  content += `- 你只能审查本次 diff 涉及的变更，不得对 diff 之外的代码提出阻塞性问题（P0/P1）。\n`;
+  content += `- P0/P1 问题必须提供 acRef（关联验收标准编号），否则将被降级为 advisory。\n`;
+  content += `- 不在本次任务范围内的改进建议请放入 advisory 字段。\n\n`;
 
   // 1. Framework statistics (hard data — git diff --stat)
   const diffBase = startCommit ?? "HEAD";
@@ -216,7 +221,22 @@ export async function prepareTribunalInput(
   const keyDiff = await getKeyDiff(projectRoot, startCommit, 300);
   content += `## 关键代码变更\n\`\`\`diff\n${keyDiff}\n\`\`\`\n\n`;
 
-  // 4. Checklist
+  // 4. Inject tribunal-category lessons (calibration)
+  try {
+    const lessonsManager = new LessonsManager(outputDir, projectRoot);
+    const tribunalLessons = (await lessonsManager.get(undefined, "tribunal"))
+      .filter((l) => !l.retired)
+      .slice(0, 5);
+    if (tribunalLessons.length > 0) {
+      content += `## 裁决校准经验（历史积累）\n\n`;
+      for (const l of tribunalLessons) {
+        content += `- [${l.severity ?? "minor"}] ${l.lesson}\n`;
+      }
+      content += `\n`;
+    }
+  } catch { /* lessons not available, skip */ }
+
+  // 5. Checklist
   content += `## 检查清单\n\n${getTribunalChecklist(phase)}\n`;
 
   await writeFile(digestFile, content, "utf-8");
@@ -548,6 +568,30 @@ export async function executeTribunal(
       digestHash,
       mandate: "[FALLBACK] 请调用 auto-dev-reviewer subagent 审查上述材料，然后提交 auto_dev_tribunal_verdict。",
     });
+  }
+
+  // ------- Auto-override: FAIL without P0/P1 -> PASS -------
+  if (verdict.verdict === "FAIL") {
+    // Downgrade P0/P1 issues without acRef to advisory
+    const advisory: Array<{ description: string; suggestion?: string }> = [];
+    const remaining = verdict.issues.filter((issue) => {
+      if ((issue.severity === "P0" || issue.severity === "P1") && !(issue as any).acRef) {
+        advisory.push({ description: issue.description, suggestion: issue.suggestion });
+        return false;
+      }
+      return true;
+    });
+
+    const hasBlockingIssues = remaining.some(
+      (i) => i.severity === "P0" || i.severity === "P1",
+    );
+
+    if (!hasBlockingIssues) {
+      // Override FAIL to PASS — no real P0/P1 with acRef
+      verdict.verdict = "PASS";
+      verdict.issues = remaining;
+      (verdict as any).advisory = advisory;
+    }
   }
 
   // ------- Cross-validate on PASS -------

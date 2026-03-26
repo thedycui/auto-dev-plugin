@@ -421,20 +421,6 @@ server.tool(
     // or state.json, so failed checks don't pollute formal state.
     // ===================================================================
 
-    // Guard: lesson feedback must be submitted before PASS
-    if (status === "PASS") {
-      const pendingIds = state.injectedLessonIds ?? [];
-      if (pendingIds.length > 0) {
-        return textResult({
-          error: "LESSON_FEEDBACK_REQUIRED",
-          lessonFeedbackRequired: true,
-          injectedLessonIds: pendingIds,
-          feedbackInstruction: "必须先调用 auto_dev_lessons_feedback 对注入的经验逐条反馈，然后再 checkpoint PASS。",
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
-        });
-      }
-    }
-
     // Phase 1 review artifact pre-validation: design-review.md must exist
     if (phase === 1 && status === "PASS") {
       let reviewContent: string | null = null;
@@ -1021,7 +1007,6 @@ server.tool(
           // 1-footer. Record injected lesson IDs and add feedback hint
           const injectedIds = [...localLessonIds, ...globalLessonIds];
           if (injectedIds.length > 0) {
-            extraContext += `> Phase 完成后请对以上经验逐条反馈（helpful / not_applicable / incorrect）\n\n`;
             await sm.atomicUpdate({ injectedLessonIds: injectedIds });
           }
 
@@ -1165,7 +1150,7 @@ server.tool(
 
 server.tool(
   "auto_dev_lessons_feedback",
-  "Submit feedback verdicts for lessons that were injected during preflight. Must be called before checkpoint PASS.",
+  "Optional: submit feedback verdicts for lessons that were injected during preflight. Improves future lesson quality but is not required for checkpoint PASS.",
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1227,6 +1212,22 @@ server.tool(
       state.dryRun === true,
       state.skipE2e === true,
     );
+
+    // State consistency check: state.phase must match max passed phase in progress-log
+    if (validation.passedPhases.length > 0) {
+      const maxPassedPhase = Math.max(...validation.passedPhases);
+      if (state.phase < maxPassedPhase) {
+        return textResult({
+          error: "STATE_PHASE_INCONSISTENCY",
+          canComplete: false,
+          statePhase: state.phase,
+          maxPassedPhase,
+          passedPhases: validation.passedPhases,
+          message: `state.phase (${state.phase}) 落后于 progress-log 中的最高已通过 Phase (${maxPassedPhase})。状态可能被篡改或回退。`,
+          mandate: "[BLOCKED] state.json 与 progress-log 不一致。禁止宣称完成。",
+        });
+      }
+    }
 
     if (!validation.canComplete) {
       return textResult({
@@ -1447,6 +1448,12 @@ server.tool(
     if (phase === 7) {
       const outputDir = sm.outputDir;
       await generateRetrospectiveData(outputDir);
+
+      // Auto-clear any un-feedbacked injectedLessonIds before completing
+      if ((state.injectedLessonIds ?? []).length > 0) {
+        await sm.atomicUpdate({ injectedLessonIds: [] });
+      }
+
       const ckptSummary = `[RETRO] 复盘完成，跳过 tribunal 直接通过。${summary}`;
       await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
       const nextDirective = computeNextDirective(phase, "PASS", state);

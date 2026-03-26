@@ -57,7 +57,7 @@ export type GitInfo = z.infer<typeof GitInfoSchema>;
 export const LessonEntrySchema = z.object({
   id: z.string().optional(),
   phase: z.number().int(),
-  category: z.enum(["pitfall", "highlight", "process", "technical", "pattern", "iteration-limit"]),
+  category: z.enum(["pitfall", "highlight", "process", "technical", "pattern", "iteration-limit", "tribunal"]),
   severity: z.enum(["critical", "important", "minor"]).optional(),
   lesson: z.string(),
   context: z.string().optional(),
@@ -283,6 +283,11 @@ export interface TribunalVerdict {
     severity: "P0" | "P1" | "P2";
     description: string;
     file?: string;
+    suggestion?: string;
+    acRef?: string;
+  }>;
+  advisory?: Array<{
+    description: string;
     suggestion?: string;
   }>;
   traces?: Array<{
