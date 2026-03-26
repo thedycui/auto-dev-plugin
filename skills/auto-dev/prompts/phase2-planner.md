@@ -1,4 +1,4 @@
-# Phase 2: Implementation Plan
+# 实施计划
 
 ## Task
 
@@ -51,3 +51,6 @@
 ## Output
 
 将计划写入 `{output_dir}/plan.md`，然后返回任务总数和关键路径摘要。
+
+---
+完成后不需要做其他操作。直接完成任务即可。

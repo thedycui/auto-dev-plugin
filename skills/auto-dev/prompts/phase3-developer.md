@@ -1,4 +1,4 @@
-# Phase 3: Task Implementation
+# 任务实现
 
 ## Task
 
@@ -48,7 +48,7 @@
 5. 可以创建测试辅助文件（fixtures、mock data）放在 test 目录
 
 ### 输出
-- 列出所有创建/修改的测试文件路径（用于 auto_dev_task_red 的 testFiles 参数）
+- 列出所有创建/修改的测试文件路径
 
 ## TDD GREEN Mode (当 {tdd_step} = "green" 时激活)
 
@@ -62,3 +62,6 @@
 
 ### 输出
 - 列出所有创建/修改的文件路径
+
+---
+完成后不需要做其他操作。直接完成任务即可。

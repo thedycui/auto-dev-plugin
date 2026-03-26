@@ -1,4 +1,4 @@
-# Phase 4: Full Code Review
+# 完整代码审查
 
 ## Task
 
@@ -20,7 +20,7 @@
 
 ## Review Scope
 
-审查从 Phase 3 以来的所有代码变更，重点关注跨任务的集成问题。
+审查本次开发的所有代码变更，重点关注跨任务的集成问题。
 
 ## Review Checklist
 
@@ -80,3 +80,6 @@ PASS / NEEDS_FIX
 - P0/P1 必须给出具体修复建议和涉及文件
 - 只检查与本次变更相关的 checklist 项
 - 不 bikeshed
+
+---
+完成后不需要做其他操作。直接完成任务即可。

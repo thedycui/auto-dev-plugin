@@ -11,7 +11,7 @@
 
 ### Step 2: 代码质量（Step 1 通过后再做）
 
-# Phase 3: Quick Code Review
+# 快速代码审查
 
 ## Task
 
@@ -63,3 +63,6 @@ PASS / NEEDS_FIX
 - 这是快速审查，聚焦 P0/P1，不纠缠 P2
 - P0/P1 必须给出具体修复建议
 - 不 bikeshed
+
+---
+完成后不需要做其他操作。直接完成任务即可。

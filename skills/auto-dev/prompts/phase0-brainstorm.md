@@ -1,4 +1,4 @@
-# Phase 0: Brainstorm — 需求探索与方向确认
+# 需求探索与方向确认
 
 > 本阶段的目标是理清模糊需求，探索可能的方向，确定最终实现范围。
 
@@ -64,7 +64,8 @@
 
 - **默认模式（非 interactive）下**：自行分析代码库，给出推荐，不等待用户回复
 - **interactive 模式下**：每个阶段等待用户确认后再继续
-- 这是探索阶段，不需要详尽的技术细节——那是 Phase 1 DESIGN 的事
-- brainstorm-notes.md 会自动注入到 Phase 1 作为 extraContext
+- 这是探索阶段，不需要详尽的技术细节——那是设计阶段的事
+- brainstorm-notes.md 会自动注入到设计阶段作为 extraContext
 
-<!-- CHECKPOINT phase=0 status=PASS summary="Brainstorm complete, direction confirmed" -->
+---
+完成后不需要做其他操作。直接完成任务即可。

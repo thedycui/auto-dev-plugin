@@ -1,4 +1,4 @@
-# Phase 2: Plan Review
+# 计划审查
 
 ## Task
 
@@ -39,3 +39,6 @@ PASS / NEEDS_REVISION
 - P0/P1 必须给出具体修复建议
 - Coverage Matrix 逐一核对设计文档中的功能点
 - 不 bikeshed
+
+---
+完成后不需要做其他操作。直接完成任务即可。

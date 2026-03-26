@@ -1,4 +1,4 @@
-# Phase 1: Design Review
+# 设计审查
 
 ## Task
 
@@ -105,3 +105,6 @@ PASS / NEEDS_REVISION
 - P0/P1 必须给出具体修复建议
 - 只检查与本次设计相关的 checklist 项
 - 不 bikeshed（不在小问题上纠缠）
+
+---
+完成后不需要做其他操作。直接完成任务即可。

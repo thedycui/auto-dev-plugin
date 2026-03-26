@@ -1,4 +1,4 @@
-# Phase 1: Architecture Design
+# 架构设计
 
 ## Task
 
@@ -67,3 +67,6 @@
 ## Iron Law
 
 **设计文档必须包含至少 2 个方案的对比分析和至少 3 条可验证的验收标准（AC-N）。不符合则 review 必须返回 NEEDS_REVISION。**
+
+---
+完成后不需要做其他操作。直接完成任务即可。

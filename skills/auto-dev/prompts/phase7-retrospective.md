@@ -1,17 +1,13 @@
-# Phase 7: RETROSPECTIVE — 深度复盘报告
+# 深度复盘报告
 
 你是一个严格的过程审计专家。请分析本次 auto-dev session 的完整执行过程，产出一份**诚实、深度**的复盘报告。
 
 **重要：你的职责是审计，不是美化。发现问题要直说，不要为 agent 的行为找借口。**
 
-> **Tribunal 流程说明**：Phase 7 使用 tribunal 裁决流程。主 agent 负责撰写 retrospective.md，
-> 但裁决 Agent 会独立验证报告内容。框架会自动生成 `retrospective-data.md`（不可篡改），
-> 裁决 Agent 会对比你的报告和框架数据。任何与框架数据不符的内容都会被标记为不诚实。
-
 ## 输入
 
 请阅读以下文件（**全部必读**，不存在的跳过）：
-- `{output_dir}/progress-log.md` — 完整执行日志（含 CHECKPOINT 时间线和 INIT 标记）
+- `{output_dir}/progress-log.md` — 完整执行日志（含执行时间线）
 - `{output_dir}/design.md` — 设计文档
 - `{output_dir}/design-review.md` — 设计审查结果
 - `{output_dir}/plan.md` — 实施计划
@@ -30,15 +26,15 @@
 **逐项检查以下问题，每项给出 PASS / FAIL / PARTIAL 结论和具体证据：**
 
 #### 1.1 是否跳过阶段？
-- 从 progress-log.md 检查：7 个 Phase 是否都有 CHECKPOINT 记录？
-- 是否有 Phase 直接 PASS 而没有 IN_PROGRESS？（可能意味着跳过了实际执行）
-- Phase 1 是否执行了 design-review（检查 design-review.md 是否存在且非空）？
-- Phase 2 是否执行了 plan-review（检查 plan-review.md 是否存在且非空）？
+- 从 progress-log.md 检查：所有阶段是否都有执行记录？
+- 是否有阶段直接完成而没有实际执行过程？
+- 是否执行了 design-review（检查 design-review.md 是否存在且非空）？
+- 是否执行了 plan-review（检查 plan-review.md 是否存在且非空）？
 
-#### 1.2 是否有被框架拦截的违规操作？
-- 在 progress-log.md 中搜索连续的同 phase 同 status 的 CHECKPOINT（说明被拒绝后重试了）
-- 检查 progress-log INIT 标记中的 testCmd vs state.json 中的 testCmd 是否一致（篡改检测）
-- 是否有 checkpoint 被拒绝的痕迹？（同一 phase 出现多次 IN_PROGRESS/PASS）
+#### 1.2 执行过程是否完整？
+- 在 progress-log.md 中检查是否有重复执行同一阶段的记录（说明出现了问题需要重试）
+- 配置一致性：实际执行的 testCmd/buildCmd 是否与初始配置一致
+- 是否有阶段被拒绝后重新执行的痕迹？
 
 #### 1.3 review 和测试是否真实？
 - **design-review.md**: 是否包含具体的文件路径和行号引用？还是泛泛而谈？
@@ -60,7 +56,7 @@
 ### 2. 踩坑记录（category: "pitfall"）
 - 哪些 Phase 触发了 NEEDS_REVISION？原因是什么？
 - 有没有 BLOCKED 的任务？为什么被阻塞？
-- Phase 4 发现了哪些 P0/P1 问题？是否都被修复了？
+- 代码审查发现了哪些 P0/P1 问题？是否都被修复了？
 - 测试失败的根因是什么？
 - 对于 **跨项目通用** 的踩坑，标记 `reusable: true`
 
@@ -85,7 +81,7 @@
 
 ### Step 1: 保存经验
 
-对于每条经验，调用 `auto_dev_lessons_add` 工具保存：
+对于每条经验，记录经验教训到 lessons-learned.json：
 - `phase`: 经验所属的 Phase 编号
 - `category`: integrity / pitfall / highlight / process / technical
 - `lesson`: 一句话总结（要具体，不要泛泛而谈）
@@ -152,3 +148,6 @@
 - **禁止美化**：发现的问题就是问题，不要用"这是可以理解的"来淡化
 - **诚实度审计不能全 PASS 除非真的全部合规**：至少检查 git log 验证 TDD、检查 state.json 验证 testCmd 未篡改
 - **报告不少于 50 行**：低于此数说明你在敷衍
+
+---
+完成后不需要做其他操作。直接完成任务即可。
