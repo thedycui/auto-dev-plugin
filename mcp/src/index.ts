@@ -23,6 +23,7 @@ import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
 import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
 import type { ToolResult } from "./tribunal.js";
+import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
 import { computeNextTask } from "./orchestrator.js";
 
@@ -374,7 +375,7 @@ server.tool(
       }
     }
 
-    // Guard C: Tribunal phases (4/5/6/7) cannot be directly marked PASS via checkpoint
+    // Guard C: Tribunal phases (4/5/6) cannot be directly marked PASS via checkpoint
     if ((TRIBUNAL_PHASES as readonly number[]).includes(phase) && status === "PASS") {
       return textResult({
         error: "TRIBUNAL_REQUIRED",
@@ -1414,7 +1415,7 @@ server.tool(
 
 server.tool(
   "auto_dev_submit",
-  "提交当前 Phase 产物进行独立裁决。Phase 4/5/6/7 必须通过裁决 Agent 审查才能通过。",
+  "提交当前 Phase 产物进行独立裁决。Phase 4/5/6 需要独立裁决，Phase 7（复盘）直接通过。",
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1422,11 +1423,12 @@ server.tool(
     summary: z.string(),
   },
   async ({ projectRoot, topic, phase, summary }) => {
-    // Validate phase is a tribunal phase
-    if (!(TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+    // Validate phase is a submit-eligible phase (tribunal phases + phase 7 retrospective)
+    const SUBMIT_PHASES = [...TRIBUNAL_PHASES, 7] as const;
+    if (!(SUBMIT_PHASES as readonly number[]).includes(phase)) {
       return textResult({
         error: "INVALID_PHASE",
-        message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
+        message: `Phase ${phase} 不是可提交 Phase。只有 Phase ${SUBMIT_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
       });
     }
 
@@ -1438,6 +1440,22 @@ server.tool(
       return textResult({
         error: "PHASE_MISMATCH",
         message: `当前 Phase 为 ${state.phase}，但提交的是 Phase ${phase}。请确认 Phase 是否正确。`,
+      });
+    }
+
+    // Phase 7 (retrospective): generate retro data and directly PASS, no tribunal
+    if (phase === 7) {
+      const outputDir = sm.outputDir;
+      await generateRetrospectiveData(outputDir);
+      const ckptSummary = `[RETRO] 复盘完成，跳过 tribunal 直接通过。${summary}`;
+      await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
+      const nextDirective = computeNextDirective(phase, "PASS", state);
+      return textResult({
+        status: "TRIBUNAL_PASS",
+        phase,
+        nextPhase: nextDirective.nextPhase,
+        mandate: nextDirective.mandate,
+        message: "Phase 7 复盘完成，无需独立裁决。",
       });
     }
 

@@ -100,17 +100,18 @@ function setupExecCallback(
 // ---------------------------------------------------------------------------
 
 describe("Tribunal Phase PASS Block (AC-1, AC-8)", () => {
-  it("TC-1: TRIBUNAL_PHASES includes 4, 5, 6, 7", () => {
+  it("TC-1: TRIBUNAL_PHASES includes 4, 5, 6 (not 7)", () => {
     expect(TRIBUNAL_PHASES).toContain(4);
     expect(TRIBUNAL_PHASES).toContain(5);
     expect(TRIBUNAL_PHASES).toContain(6);
-    expect(TRIBUNAL_PHASES).toContain(7);
+    expect((TRIBUNAL_PHASES as readonly number[]).includes(7)).toBe(false);
   });
 
-  it("TC-1.4: Phase 1/2/3 are NOT tribunal phases (AC-8)", () => {
+  it("TC-1.4: Phase 1/2/3/7 are NOT tribunal phases (AC-8)", () => {
     expect((TRIBUNAL_PHASES as readonly number[]).includes(1)).toBe(false);
     expect((TRIBUNAL_PHASES as readonly number[]).includes(2)).toBe(false);
     expect((TRIBUNAL_PHASES as readonly number[]).includes(3)).toBe(false);
+    expect((TRIBUNAL_PHASES as readonly number[]).includes(7)).toBe(false);
   });
 
   it("TC-1.5: Only PASS is blocked — the guard checks status === PASS", () => {
@@ -506,7 +507,7 @@ describe("resolveClaudePath — 4-Tier Fallback", () => {
 
 describe("getTribunalChecklist", () => {
   it("TC-19: Valid phases return checklist content", () => {
-    for (const phase of [4, 5, 6, 7]) {
+    for (const phase of [4, 5, 6]) {
       const checklist = getTribunalChecklist(phase);
       expect(checklist).toContain("检查清单");
       expect(checklist.length).toBeGreaterThan(50);
@@ -625,10 +626,13 @@ describe("generateRetrospectiveData (AC-12, AC-13)", () => {
 
 describe("Submit Handler Logic (AC-2, AC-9)", () => {
   it("TC-2: Invalid phase (not 4/5/6/7) returns INVALID_PHASE", () => {
-    // Simulate the guard from index.ts L1202
+    // Simulate the guard from index.ts — submit accepts tribunal phases + phase 7
+    const SUBMIT_PHASES = [...TRIBUNAL_PHASES, 7] as const;
     const phase = 2;
-    const isValid = (TRIBUNAL_PHASES as readonly number[]).includes(phase);
+    const isValid = (SUBMIT_PHASES as readonly number[]).includes(phase);
     expect(isValid).toBe(false);
+    // Phase 7 is valid for submit (but skips tribunal)
+    expect((SUBMIT_PHASES as readonly number[]).includes(7)).toBe(true);
   });
 
   it("TC-4: Submit count >= 3 triggers TRIBUNAL_ESCALATE (AC-9)", () => {

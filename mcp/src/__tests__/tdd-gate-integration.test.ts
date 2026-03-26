@@ -598,13 +598,13 @@ describe("Integration: Tribunal checklist TDD Gate Verification", () => {
     expect(checklist).toContain("RED_CONFIRMED");
   });
 
-  it("other tribunal phases (5, 6, 7) do not error", () => {
+  it("other tribunal phases (5, 6) do not error", () => {
     expect(() => getTribunalChecklist(5)).not.toThrow();
     expect(() => getTribunalChecklist(6)).not.toThrow();
-    expect(() => getTribunalChecklist(7)).not.toThrow();
   });
 
-  it("non-tribunal phase throws", () => {
+  it("non-tribunal phase throws (including phase 7)", () => {
     expect(() => getTribunalChecklist(3)).toThrow(/No tribunal checklist/);
+    expect(() => getTribunalChecklist(7)).toThrow(/No tribunal checklist/);
   });
 });

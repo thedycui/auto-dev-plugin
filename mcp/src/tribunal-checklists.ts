@@ -96,19 +96,18 @@ const CHECKLISTS: Record<number, string> = {
   4: PHASE_4_CHECKLIST,
   5: PHASE_5_CHECKLIST,
   6: PHASE_6_CHECKLIST,
-  7: PHASE_7_CHECKLIST,
 };
 
 /**
  * Returns the tribunal checklist markdown for the given phase.
- * @param phase - Phase number (4, 5, 6, or 7)
+ * @param phase - Phase number (4, 5, or 6)
  * @returns Markdown checklist string
  * @throws Error if phase does not have a tribunal checklist
  */
 export function getTribunalChecklist(phase: number): string {
   const checklist = CHECKLISTS[phase];
   if (!checklist) {
-    throw new Error(`No tribunal checklist for phase ${phase}. Tribunal phases are: 4, 5, 6, 7.`);
+    throw new Error(`No tribunal checklist for phase ${phase}. Tribunal phases are: 4, 5, 6.`);
   }
   return checklist;
 }

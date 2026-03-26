@@ -44,4 +44,4 @@ export const TRIBUNAL_SCHEMA = {
 };
 
 /** Phases that require tribunal judgment */
-export const TRIBUNAL_PHASES = [4, 5, 6, 7] as const;
+export const TRIBUNAL_PHASES = [4, 5, 6] as const;
