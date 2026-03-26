@@ -1,0 +1,66 @@
+{
+  "topic": "circuit-breaker",
+  "mode": "full",
+  "phase": 7,
+  "task": 10,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/circuit-breaker",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "tdd": true,
+  "costMode": "beast",
+  "startCommit": "2fe49765cb377e5f65aed2a3bcac42c128008fdb",
+  "phaseTimings": {
+    "1": {
+      "startedAt": "2026-03-26T14:11:04.316Z",
+      "completedAt": "2026-03-26T14:13:31.674Z",
+      "durationMs": 147358
+    },
+    "4": {
+      "startedAt": "2026-03-26T14:32:30.774Z",
+      "completedAt": "2026-03-26T14:42:35.157Z",
+      "durationMs": 604383
+    },
+    "5": {
+      "startedAt": "2026-03-26T14:45:37.429Z",
+      "completedAt": "2026-03-26T15:00:29.394Z",
+      "durationMs": 891965
+    },
+    "6": {
+      "startedAt": "2026-03-26T15:02:40.492Z",
+      "completedAt": "2026-03-26T15:04:36.247Z",
+      "durationMs": 115755
+    },
+    "7": {
+      "startedAt": "2026-03-26T15:08:06.053Z",
+      "completedAt": "2026-03-26T15:19:11.460Z",
+      "durationMs": 665407
+    }
+  },
+  "injectedLessonIds": [
+    "2d612ff7-cbf",
+    "c4acc017-229",
+    "1c4d1d95-3cd",
+    "faaec30f-d74",
+    "d4bb4caf-800",
+    "ca751344-692",
+    "95b91929-d6f",
+    "99d34a30-f0e",
+    "591f5848-54c",
+    "4270a22b-323"
+  ],
+  "tribunalSubmits": {
+    "4": 2,
+    "5": 3,
+    "6": 1,
+    "7": 2
+  },
+  "startedAt": "2026-03-26T14:06:39.957Z",
+  "updatedAt": "2026-03-26T15:19:48.232Z"
+}

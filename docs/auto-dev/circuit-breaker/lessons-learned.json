@@ -1,0 +1,62 @@
+[
+  {
+    "id": "cb-lesson-01",
+    "category": "design-review",
+    "title": "设计审查的 P1 问题全部在实现中得到修复",
+    "description": "设计审查提出 4 个 P1（持久化遗漏、stepIteration 竞态、清零 context 前提、格式不规范恢复策略），计划审查又追加 2 个 P1。最终实现阶段全部修复，且 tribunal 逐条验证了修复证据。说明多阶段审查的层层拦截机制有效。",
+    "severity": "info",
+    "actionable": false
+  },
+  {
+    "id": "cb-lesson-02",
+    "category": "code-review",
+    "title": "代码审查发现的跨步骤状态泄漏是真实 P1",
+    "description": "代码审查 P1-1 发现步骤推进时未清除 approachState，会导致新 step 读到旧 step 的方案列表。这是典型的'状态残留'问题，在 Object.assign 合并模式下尤其容易遗漏。修复方法：在所有写入 step 切换的路径中显式设置 approachState: null。",
+    "severity": "high",
+    "actionable": true,
+    "rule": "使用 Object.assign 合并 partial state 时，必须在每个状态转换点显式清除不再适用的字段，不能依赖隐式保留。"
+  },
+  {
+    "id": "cb-lesson-03",
+    "category": "process",
+    "title": "Phase 5（E2E 测试）是最耗时的阶段",
+    "description": "Phase 5 耗时约 15 分钟（892s），是最耗时的阶段。主要耗时在于 26 个测试用例设计 + 18 个测试代码编写。相比之下 Phase 1（设计审查）仅 147s，Phase 6（验收）仅 116s。所有 tribunal 均一次通过。",
+    "severity": "info",
+    "actionable": true,
+    "rule": "E2E 测试阶段可考虑将测试用例设计和测试代码编写拆分为两个子阶段，减少 tribunal 驳回后的返工成本。"
+  },
+  {
+    "id": "cb-lesson-04",
+    "category": "tribunal",
+    "title": "所有 Tribunal 均一次通过",
+    "description": "Phase 4/5/6 的 tribunal 均一次通过（PASS Count = 1，Total Rejections = 0）。代码审查 P1-1（approachState 清零）在提交 tribunal 之前已修复。这说明在提交裁决前做好充分准备（修复已知问题、确保测试通过）可以避免被驳回。",
+    "severity": "info",
+    "actionable": false
+  },
+  {
+    "id": "cb-lesson-05",
+    "category": "architecture",
+    "title": "扩展字段模式（非 Zod schema）的读写需要额外测试",
+    "description": "approachState 使用 state.json 的扩展字段存储（不在 Zod schema 中），通过 readStepState/writeStepState 的 Object.assign 机制读写。这种模式灵活但脆弱：写入时需确保所有路径都正确设置或清除字段。建议对这类扩展字段增加集成测试覆盖其完整生命周期。",
+    "severity": "medium",
+    "actionable": true,
+    "rule": "扩展字段的生命周期测试应包含：创建、更新、跨状态转换清除、读取不存在字段四个场景。"
+  },
+  {
+    "id": "cb-lesson-06",
+    "category": "implementation",
+    "title": "设计与实现的合理偏差应记录",
+    "description": "设计文档定义 buildCircuitBreakPrompt({originalGoal, nextApproach, prohibited})，实现改为 {goal, approach, prohibited, outputDir}。参数重命名 + 新增 outputDir。代码审查正确标注了这个偏差为'合理偏差'。此类偏差应在代码注释或 PR 中记录原因。",
+    "severity": "low",
+    "actionable": false
+  },
+  {
+    "id": "cb-lesson-07",
+    "category": "testing",
+    "title": "TC-21 全生命周期测试是高价值测试",
+    "description": "TC-21 通过 6 次 computeNextTask 调用模拟了 3 个方案的完整断路器生命周期（CONTINUE -> CIRCUIT_BREAK -> CONTINUE -> CIRCUIT_BREAK -> CONTINUE -> ALL_EXHAUSTED），验证了状态转换的正确性。这种集成级别的生命周期测试比单点测试更有效地发现状态管理 bug。",
+    "severity": "info",
+    "actionable": true,
+    "rule": "对于有状态的多步骤逻辑，优先编写完整生命周期测试，而非仅测试单个状态转换。"
+  }
+]

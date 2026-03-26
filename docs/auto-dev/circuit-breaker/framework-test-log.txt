@@ -1,0 +1,37 @@
+
+> auto-dev-plugin@1.0.0 test
+> cd mcp && npm test
+
+
+> auto-dev-mcp-server@8.0.0 test
+> vitest run
+
+
+ RUN  v3.2.4 /Users/admin/.claude/plugins/auto-dev-plugin/mcp
+
+ ✓ src/__tests__/lessons-manager.test.ts (35 tests) 531ms
+ ✓ src/__tests__/tdd-gate-integration.test.ts (29 tests) 382ms
+ ✓ src/__tests__/e2e-integration.test.ts (19 tests) 693ms
+ ✓ src/__tests__/orchestrator-prompts.test.ts (44 tests) 26ms
+ ✓ src/__tests__/orchestrator.test.ts (28 tests) 75ms
+ ✓ src/__tests__/tdd-gate.test.ts (45 tests) 75ms
+ ✓ src/__tests__/improvements.test.ts (11 tests) 22ms
+ ✓ src/__tests__/prompt-lint.test.ts (2 tests) 76ms
+ ✓ src/__tests__/preflight-context.test.ts (7 tests) 8ms
+ ✓ src/__tests__/state-rebuild.test.ts (5 tests) 31ms
+ ✓ src/__tests__/iteration-limit.test.ts (7 tests) 15ms
+ ✓ src/__tests__/regress.test.ts (8 tests) 9ms
+ ✓ src/__tests__/tribunal.test.ts (47 tests) 6084ms
+   ✓ runTribunalWithRetry — Crash Detection and Retry > TC-11: Crash on first attempt, legitimate FAIL on retry  3003ms
+   ✓ runTribunalWithRetry — Crash Detection and Retry > TC-12: Two consecutive crashes returns exhausted-retry FAIL  3002ms
+ ✓ src/__tests__/agent-spawner.test.ts (16 tests) 9028ms
+   ✓ spawnAgentWithRetry — retry on crash > retries on crash, returns on success  3003ms
+   ✓ spawnAgentWithRetry — retry on crash > returns crash result after exhausting retries  3002ms
+   ✓ spawnAgentWithRetry — retry on crash > uses custom crashDetector when provided  3003ms
+
+ Test Files  14 passed (14)
+      Tests  303 passed (303)
+   Start at  22:57:37
+   Duration  10.46s (transform 1.58s, setup 0ms, collect 5.01s, tests 17.06s, environment 8ms, prepare 3.02s)
+
+
