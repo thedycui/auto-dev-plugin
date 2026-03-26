@@ -126,6 +126,7 @@ export declare const StateJsonSchema: z.ZodObject<{
         byPhase: z.ZodRecord<z.ZodString, z.ZodNumber>;
     }, z.core.$strip>>;
     injectedLessonIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    tribunalSubmits: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -223,3 +224,35 @@ export declare const PreflightOutputSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type PreflightOutput = z.infer<typeof PreflightOutputSchema>;
+/** Tribunal verdict returned by independent judge agent */
+export interface TribunalVerdict {
+    verdict: "PASS" | "FAIL";
+    issues: Array<{
+        severity: "P0" | "P1" | "P2";
+        description: string;
+        file?: string;
+        suggestion?: string;
+    }>;
+    traces?: Array<{
+        source: string;
+        status: "FIXED" | "NOT_FIXED" | "PARTIAL";
+        evidence?: string;
+    }>;
+    passEvidence?: string[];
+    raw: string;
+}
+/** Auto-generated retrospective data (framework-generated, tamper-proof) */
+export interface RetrospectiveAutoData {
+    rejectionCount: number;
+    phaseTimings: Record<number, {
+        startedAt: string;
+        completedAt?: string;
+        durationMs?: number;
+    }>;
+    tribunalResults: Array<{
+        phase: number;
+        verdict: string;
+        issueCount: number;
+    }>;
+    submitRetries: Record<number, number>;
+}

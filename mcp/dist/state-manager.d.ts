@@ -8,6 +8,7 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 import type { StateJson, StackInfo } from "./types.js";
+import type { NextDirective } from "./phase-enforcer.js";
 export declare function extractDocSummary(content: string, maxLines: number): string;
 export declare function extractTaskList(content: string): string;
 export declare class StateManager {
@@ -60,3 +61,20 @@ export declare class StateManager {
     /** Append content to progress-log.md (atomic via write-to-temp-then-rename). */
     appendToProgressLog(content: string): Promise<void>;
 }
+/**
+ * Persist checkpoint state: write progress-log, update state.json atomically,
+ * compute phase timings, and return the next directive.
+ *
+ * This function contains ONLY the commit/persistence logic. All pre-validation
+ * checks (artifact validation, TDD, predecessor checks) remain in the caller.
+ */
+export declare function internalCheckpoint(sm: StateManager, state: StateJson, phase: number, status: string, summary?: string, task?: number, tokenEstimate?: number, opts?: {
+    tddWarning?: string | null;
+    regressTo?: number;
+}): Promise<{
+    ok: boolean;
+    nextDirective: NextDirective;
+    stateUpdates: Record<string, unknown>;
+    error?: string;
+    message?: string;
+}>;

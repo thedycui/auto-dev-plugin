@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { StateJsonSchema } from "./types.js";
 import type { StateJson, StackInfo } from "./types.js";
+import { computeNextDirective } from "./phase-enforcer.js";
+import type { NextDirective } from "./phase-enforcer.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -500,4 +502,128 @@ export class StateManager {
 
     await this.atomicWrite(this.progressLogPath, existing + content);
   }
+}
+
+// ---------------------------------------------------------------------------
+// internalCheckpoint — extracted commit logic from checkpoint handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist checkpoint state: write progress-log, update state.json atomically,
+ * compute phase timings, and return the next directive.
+ *
+ * This function contains ONLY the commit/persistence logic. All pre-validation
+ * checks (artifact validation, TDD, predecessor checks) remain in the caller.
+ */
+export async function internalCheckpoint(
+  sm: StateManager,
+  state: StateJson,
+  phase: number,
+  status: string,
+  summary?: string,
+  task?: number,
+  tokenEstimate?: number,
+  opts?: {
+    tddWarning?: string | null;
+    regressTo?: number;
+  },
+): Promise<{
+  ok: boolean;
+  nextDirective: NextDirective;
+  stateUpdates: Record<string, unknown>;
+  error?: string;
+  message?: string;
+}> {
+  const tddWarning = opts?.tddWarning ?? null;
+  const regressTo = opts?.regressTo;
+
+  // 1. Prepare state updates (computed in memory, not yet written)
+  const stateUpdates: Record<string, unknown> = { phase, status };
+  if (task !== undefined) stateUpdates["task"] = task;
+
+  if (status === "NEEDS_REVISION") {
+    stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
+  } else if (status === "PASS" || status === "COMPLETED") {
+    stateUpdates["iteration"] = 0;
+  }
+
+  if (status === "REGRESS") {
+    const newRegressionCount = (state.regressionCount ?? 0) + 1;
+    stateUpdates["regressionCount"] = newRegressionCount;
+    stateUpdates["iteration"] = 0;
+  }
+
+  // Phase timing
+  const timings = { ...(state.phaseTimings ?? {}) };
+  const phaseKey = String(phase);
+  if (status === "IN_PROGRESS") {
+    timings[phaseKey] = { startedAt: new Date().toISOString() };
+  } else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
+    const existing = timings[phaseKey];
+    if (existing?.startedAt) {
+      const now = new Date();
+      existing.completedAt = now.toISOString();
+      existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
+    }
+  }
+  stateUpdates["phaseTimings"] = timings;
+
+  // Token usage
+  if (tokenEstimate !== undefined) {
+    const usage = { ...(state.tokenUsage ?? { total: 0, byPhase: {} }) };
+    usage.total += tokenEstimate;
+    const pk = String(phase);
+    usage.byPhase = { ...usage.byPhase };
+    usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
+    stateUpdates["tokenUsage"] = usage;
+  }
+
+  // TDD warning (collected during pre-validation)
+  if (tddWarning) {
+    const warnings = [...(state.tddWarnings ?? []), tddWarning];
+    stateUpdates["tddWarnings"] = warnings;
+  }
+
+  // 2. Write progress-log (first)
+  const line = sm.getCheckpointLine(phase, task, status, summary);
+  await sm.appendToProgressLog("\n" + line + "\n");
+
+  // 3. Write state.json (second)
+  try {
+    await sm.atomicUpdate(stateUpdates);
+  } catch (err) {
+    // progress-log written but state.json failed -> mark dirty
+    try {
+      const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+      current.dirty = true;
+      current.updatedAt = new Date().toISOString();
+      await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
+    } catch {
+      // Last resort: state.json.tmp preserved for manual recovery
+    }
+    // Return a failed result with directive pointing to current phase
+    const fallbackDirective = computeNextDirective(phase, "BLOCKED", state);
+    return {
+      ok: false,
+      nextDirective: fallbackDirective,
+      stateUpdates,
+      error: "STATE_UPDATE_FAILED",
+      message: `Progress-log updated but state.json write failed: ${(err as Error).message}. State marked as dirty.`,
+    };
+  }
+
+  // 4. Post-commit side effects (non-critical, failures don't rollback)
+  if (status === "BLOCKED") {
+    const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
+    await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
+  }
+
+  // 5. Compute next phase directive
+  // [P1-3 fix] Pass updated regressionCount so limit check uses current value
+  const stateForDirective = status === "REGRESS"
+    ? { ...state, regressionCount: (state.regressionCount ?? 0) + 1 }
+    : state;
+  const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
+
+  return { ok: true, nextDirective, stateUpdates };
 }

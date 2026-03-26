@@ -105,6 +105,8 @@ export const StateJsonSchema = z.object({
     }).optional(),
     // Injected lesson IDs for feedback tracking (lessons-evolution)
     injectedLessonIds: z.array(z.string()).optional(),
+    // Tribunal submit counters per phase (tribunal feature)
+    tribunalSubmits: z.record(z.string(), z.number()).optional(),
     // Timestamps
     startedAt: z.string(),
     updatedAt: z.string(),

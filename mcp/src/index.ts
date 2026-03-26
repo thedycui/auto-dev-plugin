@@ -11,14 +11,17 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile, stat } from "node:fs/promises";
 
-import { StateManager } from "./state-manager.js";
+import { StateManager, internalCheckpoint } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { computeNextDirective, validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
+import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
+import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
+import { executeTribunal } from "./tribunal.js";
+import { getClaudePath } from "./tribunal.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -225,6 +228,16 @@ server.tool(
       ` integrity=${integrityHash} disabledTests=${disabledTestCount} -->`;
     await sm.appendToProgressLog("\n" + initMarker + "\n");
 
+    // Health check: verify claude CLI availability for tribunal phases
+    let tribunalReady = false;
+    let tribunalWarning: string | undefined;
+    try {
+      await getClaudePath();
+      tribunalReady = true;
+    } catch {
+      tribunalWarning = "claude CLI not found — tribunal phases (independent judge) will not be available. Install @anthropic-ai/claude-code or set TRIBUNAL_CLAUDE_PATH.";
+    }
+
     const state = sm.getFullState();
     return textResult({
       projectRoot: state.projectRoot,
@@ -238,6 +251,8 @@ server.tool(
       langChecklist: stack.langChecklist,
       branch: git.currentBranch,
       dirty: git.isDirty,
+      tribunalReady,
+      ...(tribunalWarning ? { tribunalWarning } : {}),
     });
   },
 );
@@ -334,6 +349,15 @@ server.tool(
           mandate: `[BLOCKED] ${predCheck.error}`,
         });
       }
+    }
+
+    // Guard C: Tribunal phases (4/5/6/7) cannot be directly marked PASS via checkpoint
+    if ((TRIBUNAL_PHASES as readonly number[]).includes(phase) && status === "PASS") {
+      return textResult({
+        error: "TRIBUNAL_REQUIRED",
+        message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
+        mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
+      });
     }
 
     // [P0-1 fix] REGRESS validation BEFORE any state mutation
@@ -599,90 +623,19 @@ server.tool(
     // COMMIT PHASE — all pre-validations passed, now persist state
     // ===================================================================
 
-    // 1. Prepare state updates (computed in memory, not yet written)
-    const stateUpdates: Record<string, unknown> = { phase, status };
-    if (task !== undefined) stateUpdates["task"] = task;
+    const result = await internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, {
+      tddWarning,
+      regressTo,
+    });
 
-    if (status === "NEEDS_REVISION") {
-      stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
-    } else if (status === "PASS" || status === "COMPLETED") {
-      stateUpdates["iteration"] = 0;
-    }
-
-    if (status === "REGRESS") {
-      const newRegressionCount = (state.regressionCount ?? 0) + 1;
-      stateUpdates["regressionCount"] = newRegressionCount;
-      stateUpdates["iteration"] = 0;
-    }
-
-    // Phase timing
-    const timings = { ...(state.phaseTimings ?? {}) };
-    const phaseKey = String(phase);
-    if (status === "IN_PROGRESS") {
-      timings[phaseKey] = { startedAt: new Date().toISOString() };
-    } else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
-      const existing = timings[phaseKey];
-      if (existing?.startedAt) {
-        const now = new Date();
-        existing.completedAt = now.toISOString();
-        existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
-      }
-    }
-    stateUpdates["phaseTimings"] = timings;
-
-    // Token usage
-    if (tokenEstimate !== undefined) {
-      const usage = { ...(state.tokenUsage ?? { total: 0, byPhase: {} }) };
-      usage.total += tokenEstimate;
-      const pk = String(phase);
-      usage.byPhase = { ...usage.byPhase };
-      usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
-      stateUpdates["tokenUsage"] = usage;
-    }
-
-    // TDD warning (collected during pre-validation)
-    if (tddWarning) {
-      const warnings = [...(state.tddWarnings ?? []), tddWarning];
-      stateUpdates["tddWarnings"] = warnings;
-    }
-
-    // 2. Write progress-log (first)
-    const line = sm.getCheckpointLine(phase, task, status, summary);
-    await sm.appendToProgressLog("\n" + line + "\n");
-
-    // 3. Write state.json (second)
-    try {
-      await sm.atomicUpdate(stateUpdates);
-    } catch (err) {
-      // progress-log written but state.json failed → mark dirty
-      try {
-        const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
-        current.dirty = true;
-        current.updatedAt = new Date().toISOString();
-        await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
-      } catch {
-        // Last resort: state.json.tmp preserved for manual recovery
-      }
+    if (!result.ok) {
       return textResult({
-        error: "STATE_UPDATE_FAILED",
-        message: `Progress-log updated but state.json write failed: ${(err as Error).message}. State marked as dirty.`,
+        error: result.error,
+        message: result.message,
       });
     }
 
-    // 4. Post-commit side effects (non-critical, failures don't rollback)
-    if (status === "BLOCKED") {
-      const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
-      await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
-    }
-
-    // 5. Compute next phase directive — forces Claude to continue to next phase
-    // [P1-3 fix] Pass updated regressionCount so limit check uses current value
-    const stateForDirective = status === "REGRESS"
-      ? { ...state, regressionCount: (state.regressionCount ?? 0) + 1 }
-      : state;
-    const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
-
-    return textResult({ ok: true, ...nextDirective });
+    return textResult({ ok: true, ...result.nextDirective });
   },
 );
 
@@ -1228,6 +1181,64 @@ server.tool(
       timingSummary,
       tokenUsage,
     });
+  },
+);
+
+// ===========================================================================
+// 14. auto_dev_submit (Tribunal Submit)
+// ===========================================================================
+
+server.tool(
+  "auto_dev_submit",
+  "提交当前 Phase 产物进行独立裁决。Phase 4/5/6/7 必须通过裁决 Agent 审查才能通过。",
+  {
+    projectRoot: z.string(),
+    topic: z.string(),
+    phase: z.number(),
+    summary: z.string(),
+  },
+  async ({ projectRoot, topic, phase, summary }) => {
+    // Validate phase is a tribunal phase
+    if (!(TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+      return textResult({
+        error: "INVALID_PHASE",
+        message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
+      });
+    }
+
+    const sm = new StateManager(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+
+    // Verify current phase matches
+    if (state.phase !== phase) {
+      return textResult({
+        error: "PHASE_MISMATCH",
+        message: `当前 Phase 为 ${state.phase}，但提交的是 Phase ${phase}。请确认 Phase 是否正确。`,
+      });
+    }
+
+    // Track submit count: max 3 attempts before escalation
+    const phaseKey = String(phase);
+    const submits = state.tribunalSubmits ?? {};
+    const currentCount = submits[phaseKey] ?? 0;
+    if (currentCount >= 3) {
+      return textResult({
+        status: "TRIBUNAL_ESCALATE",
+        phase,
+        message: `Phase ${phase} 已提交 ${currentCount} 次裁决均未通过。需要人工介入。`,
+        mandate: "已达到最大裁决提交次数（3次），请人工审查后决定是否继续。",
+      });
+    }
+
+    // Increment submit counter (stored in tribunalSubmits record)
+    const updatedSubmits = { ...submits, [phaseKey]: currentCount + 1 };
+    await sm.atomicUpdate({ tribunalSubmits: updatedSubmits });
+
+    // Execute tribunal
+    const outputDir = sm.outputDir;
+    const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
+    // Convert tribunal ToolResult to MCP-compatible format
+    return { content: tribunalResult.content };
   },
 );
 
