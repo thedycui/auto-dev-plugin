@@ -24,6 +24,7 @@ import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
 import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
 import type { ToolResult } from "./tribunal.js";
 import { getClaudePath } from "./tribunal.js";
+import { runOrchestrator } from "./orchestrator.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1593,6 +1594,36 @@ server.tool(
       issues,
       mandate: "请根据以上问题逐一修复，修复完成后再次调用 auto_dev_submit。",
     });
+  },
+);
+
+// ===========================================================================
+// 16. auto_dev_orchestrate (Invisible Framework Entry Point)
+// ===========================================================================
+
+server.tool(
+  "auto_dev_orchestrate",
+  "Launch autonomous development loop. Orchestrates design → plan → implement → verify → test → accept → retrospect as isolated task agents. Returns progress or escalation when human input needed.",
+  {
+    projectRoot: z.string(),
+    topic: z.string(),
+    mode: z.enum(["full", "quick", "turbo"]).optional(),
+    skipE2e: z.boolean().optional(),
+    tdd: z.boolean().optional(),
+    costMode: z.enum(["economy", "beast"]).optional(),
+    interactive: z.boolean().optional(),
+  },
+  async ({ projectRoot, topic, mode, skipE2e, tdd, costMode, interactive }) => {
+    const result = await runOrchestrator({
+      projectRoot,
+      topic,
+      mode: mode ?? "full",
+      skipE2e,
+      tdd,
+      costMode,
+      interactive,
+    });
+    return textResult(result);
   },
 );
 
