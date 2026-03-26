@@ -1,0 +1,67 @@
+[
+  {
+    "id": "616c65db-349",
+    "phase": 7,
+    "category": "integrity",
+    "severity": "important",
+    "lesson": "Phase 4 代码审查使用了 TRIBUNAL_PENDING fallback 机制（tribunal 崩溃后主 Agent 自行裁决）。tribunal submit counter 显示 Phase 4 尝试了 3 次，最终走 fallback 路径通过。这恰好验证了本次实现的 fallback 机制的必要性——tribunal 确实会频繁崩溃。但 fallback 裁决的独立性低于 claude -p 独立进程，需要在 tribunal log 中标记 source 以便审计。",
+    "context": "state.json 显示 tribunalSubmits: {\"4\": 3, \"6\": 1}，Phase 4 耗时 29 分钟（最长阶段），说明 tribunal 崩溃重试消耗了大量时间。Phase 6 一次通过，说明预消化+权限修复后 tribunal 稳定性显著提升。",
+    "topic": "tribunal-resilience",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T07:20:41.632Z",
+    "score": 6
+  },
+  {
+    "id": "fa3b934b-45f",
+    "phase": 7,
+    "category": "pitfall",
+    "severity": "minor",
+    "lesson": "代码审查发现 auto_dev_tribunal_verdict 工具中使用了冗余的动态 import（import(\"./state-manager.js\")），而文件顶部已有静态 import。这是实现阶段的疏忽——Task 9 在 index.ts 中新增工具时，可能参考了其他代码片段而未检查文件顶部已有的 import。动态 import 在 ESM 中虽不会报错，但增加了维护成本和潜在的 module resolution 歧义。",
+    "context": "index.ts:1549-1550 使用 dynamic import，而第 7 行和第 15 行已有相同模块的静态 import。code-review P1-2 记录此问题。",
+    "topic": "tribunal-resilience",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T07:20:48.155Z",
+    "score": 3
+  },
+  {
+    "id": "64dd9096-4af",
+    "phase": 7,
+    "category": "process",
+    "severity": "important",
+    "lesson": "设计审查（Phase 1）的 2 个 P1 问题都被采纳并修订：(1) 补充 crashed 标志区分崩溃与裁决 FAIL；(2) 补充 crossValidate Phase 4/6/7 增强 + digestHash 防篡改。计划审查（Phase 2）的 2 个 P0 也被采纳：Task 1 拆为 3 个子任务，补充 digest 路径推算逻辑。两轮审查共发现 4 个阻塞/重要问题，全部在实现前修复。这验证了「审查前置」的价值——设计阶段修复成本远低于实现后返工。",
+    "context": "Phase 1 耗时 4.5 分钟，Phase 2 耗时 4 分钟。Phase 3（实现）耗时 9 分钟（06:29 到 06:38），11 个 task 全部一次通过，零返工。",
+    "topic": "tribunal-resilience",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T07:20:56.225Z",
+    "score": 6
+  },
+  {
+    "id": "3f41dae4-560",
+    "phase": 7,
+    "category": "technical",
+    "severity": "important",
+    "lesson": "claude CLI 的 --dangerously-skip-permissions flag 是解决非交互模式下工具权限问题的有效方案，但引入了安全 trade-off：tribunal agent 获得了文件写入和命令执行的能力。缓解措施包括 --json-schema 约束输出格式、--no-session-persistence 防止状态泄漏、crossValidate 硬数据兜底。该 flag 的命名本身就是一个提醒——应在文档中记录此决策的 risk acceptance。",
+    "context": "之前使用 --allowedTools \"Read,Grep,Glob\" 时，Grep/Glob 在非交互模式下需要用户确认权限导致 permission denied 崩溃。改为 --dangerously-skip-permissions 后 Phase 6 tribunal 一次通过。",
+    "topic": "tribunal-resilience",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T07:21:03.454Z",
+    "score": 6
+  },
+  {
+    "id": "f9c42c36-aa7",
+    "phase": 7,
+    "category": "highlight",
+    "severity": "important",
+    "lesson": "预消化（pre-digest）策略显著提升了 tribunal 稳定性：将 5-8 个文件 + 大 patch 压缩为 1 个 digest 文件，tribunal 只需 1 次 Read。Phase 6 tribunal 一次通过（对比 Phase 4 的 3 次尝试，其中 Phase 4 可能仍受旧路径影响）。getKeyDiff 的按文件均匀分配截断策略（每文件 max = budget / fileCount，最少 20 行）确保每个文件至少有 hunk header 可见，避免前几个大文件吃掉全部配额。",
+    "context": "设计目标 digest < 50KB。实际通过 safeRead 截断（80-100 行/文件）+ diff 总预算 300 行实现。排除 dist/、*.map、*.lock、node_modules/、__tests__/。",
+    "topic": "tribunal-resilience",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T07:21:11.169Z",
+    "score": 6
+  }
+]

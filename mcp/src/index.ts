@@ -16,12 +16,13 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask } from "./phase-enforcer.js";
+import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective } from "./phase-enforcer.js";
 import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS } from "./tdd-gate.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
-import { executeTribunal } from "./tribunal.js";
+import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
+import type { ToolResult } from "./tribunal.js";
 import { getClaudePath } from "./tribunal.js";
 
 // ---------------------------------------------------------------------------
@@ -1441,6 +1442,137 @@ server.tool(
     const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
     // Convert tribunal ToolResult to MCP-compatible format
     return { content: tribunalResult.content };
+  },
+);
+
+// ===========================================================================
+// 15. auto_dev_tribunal_verdict (Fallback Tribunal Verdict)
+// ===========================================================================
+
+server.tool(
+  "auto_dev_tribunal_verdict",
+  "Submit tribunal verdict from fallback subagent review. Only valid after TRIBUNAL_PENDING.",
+  {
+    projectRoot: z.string(),
+    topic: z.string(),
+    phase: z.number(),
+    verdict: z.enum(["PASS", "FAIL"]),
+    issues: z.array(z.object({
+      severity: z.enum(["P0", "P1", "P2"]),
+      description: z.string(),
+      file: z.string().optional(),
+    })),
+    passEvidence: z.array(z.string()).optional(),
+    summary: z.string().optional(),
+    digestHash: z.string(),
+  },
+  async ({ projectRoot, topic, phase, verdict, issues, passEvidence, summary, digestHash }) => {
+    // 1. Validate phase is a tribunal phase
+    if (!(TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+      return textResult({
+        error: "INVALID_PHASE",
+        message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join("/")} 需要裁决。`,
+      });
+    }
+
+    // 2. Verify digestHash matches digest file
+    const sm = new StateManager(projectRoot, topic);
+    const outputDir = sm.outputDir;
+    const digestPath = join(outputDir, `tribunal-digest-phase${phase}.md`);
+    let digestContent: string;
+    try {
+      digestContent = await readFile(digestPath, "utf-8");
+    } catch {
+      return textResult({
+        error: "DIGEST_NOT_FOUND",
+        message: `tribunal-digest-phase${phase}.md 不存在。必须先通过 auto_dev_submit 触发 TRIBUNAL_PENDING。`,
+      });
+    }
+
+    const { createHash } = await import("node:crypto");
+    const expectedHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
+    if (digestHash !== expectedHash) {
+      return textResult({
+        error: "DIGEST_HASH_MISMATCH",
+        message: `digestHash 不匹配。期望 ${expectedHash}，收到 ${digestHash}。禁止篡改 digest 内容。`,
+      });
+    }
+
+    // 3. PASS requires passEvidence
+    if (verdict === "PASS" && (!passEvidence || passEvidence.length === 0)) {
+      return textResult({
+        error: "PASS_EVIDENCE_REQUIRED",
+        message: "裁决 PASS 必须提供 passEvidence（逐条举证），不能为空。",
+      });
+    }
+
+    // 4. Load state for crossValidate and checkpoint
+    const state = await sm.loadAndValidate();
+    const startCommit = state.startCommit;
+
+    // 5. crossValidate (hard-data checks for Phase 4/5/6/7)
+    if (verdict === "PASS") {
+      const crossCheckFail = await crossValidate(phase, outputDir, projectRoot, startCommit);
+      if (crossCheckFail) {
+        // Write tribunal log with OVERRIDDEN
+        const overriddenVerdict = {
+          verdict: "FAIL" as const,
+          issues: [{ severity: "P0" as const, description: crossCheckFail }],
+          passEvidence: passEvidence ?? [],
+          raw: summary ?? "",
+        };
+        const tribunalLog = buildTribunalLog(phase, overriddenVerdict, "fallback-subagent");
+        await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
+
+        return textResult({
+          status: "TRIBUNAL_OVERRIDDEN",
+          phase,
+          message: `Fallback 裁决判定 PASS，但框架交叉验证不通过：${crossCheckFail}`,
+          issues: [{ severity: "P0", description: crossCheckFail }],
+          mandate: "框架硬数据与裁决结果矛盾，请修复后重新 submit。",
+        });
+      }
+    }
+
+    // 6. Write tribunal log (source: fallback-subagent)
+    const tribunalVerdict = {
+      verdict: verdict as "PASS" | "FAIL",
+      issues,
+      passEvidence: passEvidence ?? [],
+      raw: summary ?? "",
+    };
+    const tribunalLog = buildTribunalLog(phase, tribunalVerdict, "fallback-subagent");
+    await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
+
+    // 7. PASS: write checkpoint
+    if (verdict === "PASS") {
+      const ckpt = internalCheckpoint;
+      const computeND = computeNextDirective;
+      const ckptSummary = `[TRIBUNAL-FALLBACK] Fallback 裁决通过。${issues.length} 个建议项。`;
+      const ckptResult = await ckpt(sm, state, phase, "PASS", ckptSummary);
+
+      const nextDirective = ckptResult.ok
+        ? ckptResult.nextDirective
+        : computeND(phase, "PASS", state);
+
+      return textResult({
+        status: "TRIBUNAL_PASS",
+        phase,
+        nextPhase: nextDirective.nextPhase,
+        mandate: nextDirective.mandate,
+        message: "Fallback 裁决通过，checkpoint 已自动写入。",
+        suggestions: issues,
+      });
+    }
+
+    // 8. FAIL: return issues
+    return textResult({
+      status: "TRIBUNAL_FAIL",
+      phase,
+      message: `Fallback 裁决未通过。发现 ${issues.length} 个问题，请修复后重新 submit。`,
+      issues,
+      mandate: "请根据以上问题逐一修复，修复完成后再次调用 auto_dev_submit。",
+    });
   },
 );
 

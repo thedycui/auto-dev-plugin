@@ -1,0 +1,63 @@
+{
+  "topic": "tribunal-resilience",
+  "mode": "full",
+  "phase": 7,
+  "task": 11,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/tribunal-resilience",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "skipE2e": true,
+  "tdd": false,
+  "costMode": "beast",
+  "startCommit": "c8cfb0d58423278e87a4e6e3399e2274f1fee652",
+  "phaseTimings": {
+    "1": {
+      "startedAt": "2026-03-26T06:19:34.296Z",
+      "completedAt": "2026-03-26T06:24:06.971Z",
+      "durationMs": 272675
+    },
+    "2": {
+      "startedAt": "2026-03-26T06:25:10.807Z",
+      "completedAt": "2026-03-26T06:29:13.255Z",
+      "durationMs": 242448
+    },
+    "4": {
+      "startedAt": "2026-03-26T06:43:55.752Z",
+      "completedAt": "2026-03-26T07:13:24.619Z",
+      "durationMs": 1768867
+    },
+    "6": {
+      "startedAt": "2026-03-26T07:16:57.748Z",
+      "completedAt": "2026-03-26T07:18:53.619Z",
+      "durationMs": 115871
+    },
+    "7": {
+      "startedAt": "2026-03-26T07:23:13.953Z",
+      "completedAt": "2026-03-26T07:31:53.247Z",
+      "durationMs": 519294
+    }
+  },
+  "tokenUsage": {
+    "total": 313308,
+    "byPhase": {
+      "1": 48513,
+      "2": 88283,
+      "3": 176512
+    }
+  },
+  "injectedLessonIds": [],
+  "tribunalSubmits": {
+    "4": 3,
+    "6": 1,
+    "7": 1
+  },
+  "startedAt": "2026-03-26T06:17:38.454Z",
+  "updatedAt": "2026-03-26T07:32:29.233Z"
+}

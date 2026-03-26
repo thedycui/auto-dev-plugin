@@ -154,7 +154,7 @@ describe("runTribunal — Output Parsing", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("PASS");
     expect(result.passEvidence).toContain("tribunal.ts:42 — tested output parsing");
@@ -171,7 +171,7 @@ describe("runTribunal — Output Parsing", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("passEvidence 为空");
@@ -188,7 +188,7 @@ describe("runTribunal — Output Parsing", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 4);
+    const result = await runTribunal("fake digest content", 4);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("passEvidence");
@@ -206,7 +206,7 @@ describe("runTribunal — Output Parsing", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues).toHaveLength(2);
@@ -219,7 +219,7 @@ describe("runTribunal — Output Parsing", () => {
     const err = new Error("spawn ENOENT");
     setupExecFileCallback(err, "");
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("裁决进程执行失败");
@@ -229,7 +229,7 @@ describe("runTribunal — Output Parsing", () => {
   it("TC-9: Invalid JSON output returns FAIL", async () => {
     setupExecFileCallback(null, "This is not JSON at all");
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("JSON 解析失败");
@@ -238,7 +238,7 @@ describe("runTribunal — Output Parsing", () => {
   it("TC-10: Missing structured_output returns FAIL", async () => {
     setupExecFileCallback(null, JSON.stringify({ result: "no structured_output" }));
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("未返回有效的 structured_output");
@@ -249,7 +249,7 @@ describe("runTribunal — Output Parsing", () => {
       structured_output: { verdict: null, issues: [] },
     }));
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.description).toContain("未返回有效的 structured_output");
@@ -290,10 +290,11 @@ describe("runTribunalWithRetry — Crash Detection and Retry", () => {
       return undefined as any;
     });
 
-    const result = await runTribunalWithRetry("/fake/input.md", 5);
+    const result = await runTribunalWithRetry("fake digest content", 5);
 
-    expect(result.verdict).toBe("FAIL");
-    expect(result.issues[0]!.description).toBe("Legitimate code issue found");
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(result.verdict.issues[0]!.description).toBe("Legitimate code issue found");
+    expect(result.crashed).toBe(false);
     // Verify 2 calls were made
     expect(callCount).toBe(2);
   });
@@ -305,11 +306,12 @@ describe("runTribunalWithRetry — Crash Detection and Retry", () => {
       return undefined as any;
     });
 
-    const result = await runTribunalWithRetry("/fake/input.md", 5);
+    const result = await runTribunalWithRetry("fake digest content", 5);
 
-    expect(result.verdict).toBe("FAIL");
-    expect(result.issues[0]!.description).toContain("连续");
-    expect(result.issues[0]!.description).toContain("崩溃");
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(result.verdict.issues[0]!.description).toContain("连续");
+    expect(result.verdict.issues[0]!.description).toContain("崩溃");
+    expect(result.crashed).toBe(true);
   });
 
   it("TC-11b: Legitimate FAIL on first attempt — no retry", async () => {
@@ -326,10 +328,11 @@ describe("runTribunalWithRetry — Crash Detection and Retry", () => {
       return undefined as any;
     });
 
-    const result = await runTribunalWithRetry("/fake/input.md", 5);
+    const result = await runTribunalWithRetry("fake digest content", 5);
 
-    expect(result.verdict).toBe("FAIL");
-    expect(result.issues[0]!.description).toBe("Real review failure");
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(result.verdict.issues[0]!.description).toBe("Real review failure");
+    expect(result.crashed).toBe(false);
     expect(callCount).toBe(1); // No retry for legitimate FAIL
   });
 });
@@ -401,13 +404,29 @@ describe("crossValidate — Hard Data Override", () => {
     expect(result).toBeNull();
   });
 
-  it("TC-16: Phase 4 has no cross-validation — returns null", async () => {
-    const result = await crossValidate(4, tmpDir, "/fake/project");
+  it("TC-16: Phase 4 cross-validation — git diff non-empty returns null", async () => {
+    mockExecFile.mockImplementation((...args: any[]) => {
+      const callback = args[args.length - 1];
+      if (typeof callback === "function") {
+        callback(null, " 2 files changed, 10 insertions(+)\n", "");
+      }
+      return undefined as any;
+    });
+
+    const result = await crossValidate(4, tmpDir, "/fake/project", "abc123");
 
     expect(result).toBeNull();
   });
 
-  it("TC-16b: Phase 6 has no cross-validation — returns null", async () => {
+  it("TC-16a: Phase 4 cross-validation — undefined startCommit returns error", async () => {
+    const result = await crossValidate(4, tmpDir, "/fake/project");
+
+    expect(result).toContain("startCommit 未设置");
+  });
+
+  it("TC-16b: Phase 6 cross-validation — acceptance-report.md with PASS/FAIL returns null", async () => {
+    await writeFile(join(tmpDir, "acceptance-report.md"), "## AC-1\nResult: PASS\n", "utf-8");
+
     const result = await crossValidate(6, tmpDir, "/fake/project");
 
     expect(result).toBeNull();
@@ -852,7 +871,7 @@ describe("Negative & Edge Cases", () => {
   it("TC-N1: runTribunal with empty stdout returns FAIL", async () => {
     setupExecFileCallback(null, "");
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     // Empty string cannot be parsed as JSON
@@ -869,7 +888,7 @@ describe("Negative & Edge Cases", () => {
     });
     setupExecFileCallback(null, rawJson);
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.raw).toBe(rawJson);
   });
@@ -888,7 +907,7 @@ describe("Negative & Edge Cases", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 5);
+    const result = await runTribunal("fake digest content", 5);
 
     expect(result.verdict).toBe("FAIL");
     expect(result.issues[0]!.file).toBe("tribunal.ts");
@@ -909,7 +928,7 @@ describe("Negative & Edge Cases", () => {
     });
     setupExecFileCallback(null, responseJson);
 
-    const result = await runTribunal("/fake/input.md", 4);
+    const result = await runTribunal("fake digest content", 4);
 
     expect(result.verdict).toBe("PASS");
     expect(result.traces).toHaveLength(2);

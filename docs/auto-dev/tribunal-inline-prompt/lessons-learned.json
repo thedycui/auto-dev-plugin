@@ -1,0 +1,15 @@
+[
+  {
+    "id": "c4749f01-907",
+    "phase": 4,
+    "category": "highlight",
+    "severity": "critical",
+    "lesson": "Inlining digest content directly into claude -p prompt eliminated error_max_turns completely. Phase 4 tribunal went from 3 consecutive crashes to 1-shot pass.",
+    "context": "claude -p has a built-in max turns limit (~10-15). When tribunal needed to Read a file first (1 turn) then analyze (N turns), complex phases exceeded the limit. Inlining the digest into the prompt reduces turns to 1-2 since no file reading is needed.",
+    "topic": "tribunal-inline-prompt",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T08:07:09.307Z",
+    "score": 10
+  }
+]

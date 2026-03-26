@@ -1,0 +1,43 @@
+{
+  "topic": "tribunal-inline-prompt",
+  "mode": "full",
+  "phase": 7,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/tribunal-inline-prompt",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "skipE2e": true,
+  "tdd": false,
+  "costMode": "beast",
+  "startCommit": "c8cfb0d58423278e87a4e6e3399e2274f1fee652",
+  "phaseTimings": {
+    "4": {
+      "startedAt": "2026-03-26T07:59:24.307Z",
+      "completedAt": "2026-03-26T08:04:33.851Z",
+      "durationMs": 309544
+    },
+    "6": {
+      "startedAt": "2026-03-26T08:05:03.003Z",
+      "completedAt": "2026-03-26T08:06:53.232Z",
+      "durationMs": 110229
+    },
+    "7": {
+      "startedAt": "2026-03-26T08:07:38.236Z",
+      "completedAt": "2026-03-26T08:13:05.840Z",
+      "durationMs": 327604
+    }
+  },
+  "tribunalSubmits": {
+    "4": 1,
+    "6": 1,
+    "7": 3
+  },
+  "startedAt": "2026-03-26T07:55:21.081Z",
+  "updatedAt": "2026-03-26T08:13:44.223Z"
+}
