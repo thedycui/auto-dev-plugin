@@ -100,8 +100,9 @@ server.tool(
     brainstorm: z.boolean().optional(),
     costMode: z.enum(["economy", "beast"]).optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
+    designDoc: z.string().optional(),
   },
-  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict }) => {
+  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -213,6 +214,43 @@ server.tool(
     behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
     await sm.atomicUpdate(behaviorUpdates);
 
+    // --- Design doc binding (Issue #7) ---
+    let designDocSource: string | undefined;
+    const { copyFile: copyFileAsync } = await import("node:fs/promises");
+
+    if (designDoc) {
+      // Explicit designDoc parameter — copy to output dir
+      const resolvedDesignDoc = resolve(projectRoot, designDoc);
+      try {
+        await copyFileAsync(resolvedDesignDoc, join(sm.outputDir, "design.md"));
+        designDocSource = designDoc;
+      } catch (err) {
+        return textResult({
+          error: "DESIGN_DOC_NOT_FOUND",
+          message: `designDoc "${designDoc}" not found: ${(err as Error).message}`,
+        });
+      }
+    } else {
+      // Auto-match: look for design-*{topic}*.md in docs/
+      try {
+        const { readdir } = await import("node:fs/promises");
+        const docsDir = join(projectRoot, "docs");
+        const files = await readdir(docsDir);
+        const topicLower = topic.toLowerCase();
+        const matches = files.filter(f =>
+          f.startsWith("design-") && f.endsWith(".md") &&
+          f.toLowerCase().includes(topicLower)
+        );
+        if (matches.length === 1) {
+          await copyFileAsync(join(docsDir, matches[0]!), join(sm.outputDir, "design.md"));
+          designDocSource = `docs/${matches[0]}`;
+        } else if (matches.length > 1) {
+          // Multiple matches — don't guess, let user specify
+          designDocSource = undefined; // will start fresh design in Phase 1
+        }
+      } catch { /* docs/ doesn't exist, start fresh */ }
+    }
+
     // Write immutable INIT marker to progress-log with original commands and integrity hash.
     // This is the single source of truth for auto_dev_complete — agent cannot tamper
     // because progress-log is append-only from the framework's perspective, and the
@@ -277,6 +315,7 @@ server.tool(
       dirty: git.isDirty,
       tribunalReady,
       ...(tribunalWarning ? { tribunalWarning } : {}),
+      ...(designDocSource ? { designDocSource, designDocBound: true } : {}),
     });
   },
 );
