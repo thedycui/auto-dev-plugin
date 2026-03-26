@@ -12,7 +12,7 @@
 
 import { execFile, exec } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TribunalVerdict, StateJson } from "./types.js";
 import { TRIBUNAL_SCHEMA } from "./tribunal-schema.js";
@@ -28,63 +28,10 @@ import {
   computeNextDirective,
 } from "./phase-enforcer.js";
 import type { NextDirective } from "./phase-enforcer.js";
+import { getClaudePath } from "./agent-spawner.js";
 
-// ---------------------------------------------------------------------------
-// Claude CLI Path Resolution
-// ---------------------------------------------------------------------------
-
-let cachedClaudePath: string | null = null;
-
-/**
- * 4-tier fallback to resolve the `claude` CLI binary path:
- *   1. env TRIBUNAL_CLAUDE_PATH
- *   2. `command -v claude` (POSIX-portable)
- *   3. hardcoded candidate paths
- *   4. npx fallback (requires shell: true)
- */
-export async function resolveClaudePath(): Promise<string> {
-  // Tier 1: environment variable override
-  if (process.env.TRIBUNAL_CLAUDE_PATH) {
-    return process.env.TRIBUNAL_CLAUDE_PATH;
-  }
-
-  // Tier 2: command -v claude (POSIX, R2-4)
-  try {
-    const resolved = await new Promise<string>((resolve, reject) => {
-      exec("command -v claude", (err, stdout) => {
-        if (err || !stdout.trim()) reject(new Error("not found"));
-        else resolve(stdout.trim());
-      });
-    });
-    return resolved;
-  } catch { /* fall through */ }
-
-  // Tier 3: hardcoded candidate paths
-  const candidates = [
-    "/usr/local/bin/claude",
-    `${process.env.HOME}/.npm-global/bin/claude`,
-    `${process.env.HOME}/.claude/local/claude`,
-  ];
-  for (const p of candidates) {
-    try {
-      await stat(p);
-      return p;
-    } catch { /* try next */ }
-  }
-
-  // Tier 4: npx fallback (shell: true required)
-  return "npx --yes @anthropic-ai/claude-code";
-}
-
-/**
- * Cached wrapper for resolveClaudePath.
- */
-export async function getClaudePath(): Promise<string> {
-  if (!cachedClaudePath) {
-    cachedClaudePath = await resolveClaudePath();
-  }
-  return cachedClaudePath;
-}
+// Re-export for backward compatibility
+export { getClaudePath, resolveClaudePath } from "./agent-spawner.js";
 
 // ---------------------------------------------------------------------------
 // Digest Helpers (Task 1 + Task 2)
