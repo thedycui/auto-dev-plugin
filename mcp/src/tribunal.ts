@@ -134,7 +134,7 @@ export async function prepareTribunalInput(
   const diffFile = join(outputDir, `tribunal-diff-phase${phase}.patch`);
   const diff = await new Promise<string>((resolve) => {
     const diffBase = startCommit ?? "HEAD";
-    execFile("git", ["diff", diffBase], {
+    execFile("git", ["diff", diffBase, "--", ".", ":!*/dist/*", ":!*.map", ":!*.lock"], {
       cwd: projectRoot,
       maxBuffer: 5 * 1024 * 1024,
     }, (err, stdout) => resolve(err ? "" : stdout));
@@ -222,7 +222,7 @@ export async function runTribunal(
     "-p", prompt,
     "--output-format", "json",
     "--json-schema", schemaStr,
-    "--allowedTools", "Read",
+    "--allowedTools", "Read,Grep,Glob",
     "--model", "sonnet",
     "--max-turns", maxTurns,
     "--no-session-persistence",
