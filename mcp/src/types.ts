@@ -110,6 +110,12 @@ export const StateJsonSchema = z.object({
   skipE2e: z.boolean().optional(),      // --skip-e2e mode (skip Phase 5)
   tdd: z.boolean().optional(),          // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
   tddWarnings: z.array(z.string()).optional(),  // TDD violation warnings collected during Phase 3
+  tddTaskStates: z.record(z.string(), z.object({
+    status: z.enum(["PENDING", "RED_CONFIRMED", "GREEN_CONFIRMED"]),
+    redTestFiles: z.array(z.string()).optional(),
+    redExitCode: z.number().optional(),
+    redFailType: z.enum(["compilation_error", "test_failure"]).optional(),
+  })).optional(),
   brainstorm: z.boolean().optional(),   // --brainstorm mode (Phase 0 enabled)
   costMode: z.enum(["economy", "beast"]).optional(), // economy=按阶段选模型(默认), beast=全部最强模型
 
@@ -147,6 +153,14 @@ export const StateJsonSchema = z.object({
 });
 
 export type StateJson = z.infer<typeof StateJsonSchema>;
+
+/** TDD task state for a single task */
+export interface TddTaskState {
+  status: "PENDING" | "RED_CONFIRMED" | "GREEN_CONFIRMED";
+  redTestFiles?: string[];
+  redExitCode?: number;
+  redFailType?: "compilation_error" | "test_failure";
+}
 
 // ---------------------------------------------------------------------------
 // auto_dev_init
@@ -291,4 +305,11 @@ export interface RetrospectiveAutoData {
   phaseTimings: Record<number, { startedAt: string; completedAt?: string; durationMs?: number }>;
   tribunalResults: Array<{ phase: number; verdict: string; issueCount: number }>;
   submitRetries: Record<number, number>;
+  tddGateStats?: {
+    totalTasks: number;
+    tddTasks: number;
+    exemptTasks: number;
+    redRejections: number;
+    greenRejections: number;
+  };
 }

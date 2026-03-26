@@ -418,7 +418,6 @@ export class StateManager {
  * checks (artifact validation, TDD, predecessor checks) remain in the caller.
  */
 export async function internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, opts) {
-    const tddWarning = opts?.tddWarning ?? null;
     const regressTo = opts?.regressTo;
     // 1. Prepare state updates (computed in memory, not yet written)
     const stateUpdates = { phase, status };
@@ -458,11 +457,6 @@ export async function internalCheckpoint(sm, state, phase, status, summary, task
         usage.byPhase = { ...usage.byPhase };
         usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
         stateUpdates["tokenUsage"] = usage;
-    }
-    // TDD warning (collected during pre-validation)
-    if (tddWarning) {
-        const warnings = [...(state.tddWarnings ?? []), tddWarning];
-        stateUpdates["tddWarnings"] = warnings;
     }
     // 2. Write progress-log (first)
     const line = sm.getCheckpointLine(phase, task, status, summary);

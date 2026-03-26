@@ -69,7 +69,7 @@ export declare class StateManager {
  * checks (artifact validation, TDD, predecessor checks) remain in the caller.
  */
 export declare function internalCheckpoint(sm: StateManager, state: StateJson, phase: number, status: string, summary?: string, task?: number, tokenEstimate?: number, opts?: {
-    tddWarning?: string | null;
+    tddWarning?: null;
     regressTo?: number;
 }): Promise<{
     ok: boolean;

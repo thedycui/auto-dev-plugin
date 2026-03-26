@@ -4,6 +4,8 @@
  * 1. computeNextDirective: checkpoint 返回值中带下一步指令
  * 2. validateCompletion: 完成门禁，检查所有必需 Phase 是否已通过
  */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 /** Phase 元数据 */
 const PHASE_META = {
     1: { name: "DESIGN", description: "设计审查" },
@@ -391,5 +393,30 @@ export function validatePhase7Artifacts(retroContent) {
         return { valid: false, errors, mandate: "[BLOCKED] Phase 7 PASS 被拒绝：" + errors.join(" ") };
     }
     return { valid: true, errors: [], mandate: "" };
+}
+// ---------------------------------------------------------------------------
+// TDD Exempt Task Detection
+// ---------------------------------------------------------------------------
+/**
+ * 判断指定 task 是否标记为 TDD 豁免（plan.md 中标注 **TDD**: skip）。
+ *
+ * 解析方式：按 `## Task N` 分割 plan.md，找到目标 task 的 section，
+ * 在该 section 内查找 `**TDD**: skip`（不区分大小写）。
+ */
+export async function isTddExemptTask(outputDir, task) {
+    let content;
+    try {
+        content = await readFile(join(outputDir, "plan.md"), "utf-8");
+    }
+    catch {
+        return false;
+    }
+    // 按 ## Task N 分割，找到目标 task 的 section
+    const sections = content.split(/(?=^## Task \d+)/m);
+    const taskHeader = new RegExp(`^## Task ${task}\\b`);
+    const section = sections.find(s => taskHeader.test(s));
+    if (!section)
+        return false;
+    return /\*\*TDD\*\*:\s*skip/i.test(section);
 }
 //# sourceMappingURL=phase-enforcer.js.map

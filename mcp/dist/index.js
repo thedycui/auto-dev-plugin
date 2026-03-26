@@ -13,7 +13,8 @@ import { StateManager, internalCheckpoint } from "./state-manager.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact } from "./phase-enforcer.js";
+import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask } from "./phase-enforcer.js";
+import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS } from "./tdd-gate.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
@@ -503,68 +504,29 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             });
         }
     }
-    // TDD Iron Law — HARD BLOCK when tdd=true
-    // Verifies that test files were changed in commits for this task.
-    // Agent cannot skip TDD by telling sub-agents to write implementation first.
-    let tddWarning = null;
-    if (phase === 3 && status === "PASS" && state.tdd === true) {
-        try {
-            const { execFile: execFileTdd } = await import("node:child_process");
-            const taskStartCommit = state.startCommit ?? "HEAD~20";
-            // Get list of changed files since start
-            const changedFiles = await new Promise((resolve) => {
-                execFileTdd("git", ["diff", "--name-only", taskStartCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
-                    resolve(err ? "" : (stdout || ""));
-                });
-            });
-            // Also check untracked files (not yet committed)
-            const untrackedFiles = await new Promise((resolve) => {
-                execFileTdd("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err, stdout) => {
-                    resolve(err ? "" : (stdout || ""));
-                });
-            });
-            const allFiles = (changedFiles + "\n" + untrackedFiles).trim().split("\n").filter(f => f.length > 0);
-            // Check for test files in the changes
-            const testPatterns = [
-                /[Tt]est\.(java|py|ts|js|kt|go|rs)$/,
-                /\.test\.(ts|js|tsx|jsx)$/,
-                /\.spec\.(ts|js|tsx|jsx)$/,
-                /_test\.(go|py)$/,
-                /tests?\//i,
-            ];
-            const hasTestFiles = allFiles.some(f => testPatterns.some(p => p.test(f)));
-            // Also check implementation files exist (if only tests, that's fine — pure test task)
-            const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/, /\.go$/, /\.rs$/, /\.kt$/];
-            const hasImplFiles = allFiles.some(f => implPatterns.some(p => p.test(f)) && !testPatterns.some(p => p.test(f)));
-            if (hasImplFiles && !hasTestFiles) {
-                // Implementation exists but no tests — TDD violation, HARD BLOCK
+    // TDD Gate: verify RED+GREEN for each task (replaces old Iron Law)
+    if (phase === 3 && status === "PASS" && state.tdd === true && task != null) {
+        const isExempt = await isTddExemptTask(sm.outputDir, task);
+        if (!isExempt) {
+            const tddState = state.tddTaskStates?.[String(task)];
+            if (tddState?.status !== "GREEN_CONFIRMED") {
                 return textResult({
-                    error: "TDD_VIOLATION",
-                    message: `TDD Iron Law 违规：Task ${task ?? "?"} 有实现代码变更但没有测试文件变更。` +
-                        `\n检测到实现文件但未检测到测试文件 (*Test.*, *.test.*, *.spec.*, _test.*)。` +
-                        `\nTDD 要求：先写测试（RED），再写实现（GREEN）。必须补充测试后重试。`,
-                    mandate: "[BLOCKED] TDD 模式下，checkpoint PASS 要求必须包含测试文件变更。",
+                    error: "TDD_GATE_INCOMPLETE",
+                    message: `Task ${task} 未完成 TDD RED-GREEN 流程。` +
+                        (tddState?.status === "RED_CONFIRMED"
+                            ? "RED 已确认，但 GREEN 尚未完成。请先调用 auto_dev_task_green。"
+                            : "RED 尚未完成。请先调用 auto_dev_task_red。"),
+                    mandate: "[BLOCKED] TDD 模式下，checkpoint PASS 要求 RED+GREEN 均已确认。",
                     note: "Checkpoint rejected BEFORE writing state. No state pollution.",
                 });
             }
-            // Advisory: check commit order (RED before GREEN) via commit messages
-            const commitLog = await new Promise((resolve) => {
-                execFileTdd("git", ["log", "--oneline", taskStartCommit + "..HEAD"], { cwd: projectRoot }, (err, stdout) => {
-                    resolve(err ? "" : (stdout || ""));
-                });
-            });
-            const hasRedCommit = /RED|red|failing test|add.*test/i.test(commitLog);
-            if (!hasRedCommit && commitLog.trim().length > 0 && hasImplFiles) {
-                tddWarning = `Task ${task ?? "?"}: no RED commit found in history. TDD commit order may have been violated (advisory).`;
-            }
         }
-        catch { /* git command failed, skip TDD check */ }
     }
     // ===================================================================
     // COMMIT PHASE — all pre-validations passed, now persist state
     // ===================================================================
     const result = await internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, {
-        tddWarning,
+        tddWarning: null,
         regressTo,
     });
     if (!result.ok) {
@@ -574,6 +536,225 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         });
     }
     return textResult({ ok: true, ...result.nextDirective });
+});
+// ===========================================================================
+// 4b. auto_dev_task_red (TDD RED phase gate)
+// ===========================================================================
+server.tool("auto_dev_task_red", "TDD RED phase: validate that only test files were changed and tests fail. Must be called before auto_dev_task_green.", {
+    projectRoot: z.string(),
+    topic: z.string(),
+    task: z.number(),
+    testFiles: z.array(z.string()),
+}, async ({ projectRoot, topic, task, testFiles }) => {
+    const sm = new StateManager(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+    // Verify phase=3, status=IN_PROGRESS, tdd=true
+    if (state.phase !== 3 || state.status !== "IN_PROGRESS") {
+        return textResult({
+            error: "INVALID_PHASE",
+            message: `auto_dev_task_red 只能在 Phase 3 IN_PROGRESS 状态下调用。当前: phase=${state.phase}, status=${state.status}`,
+        });
+    }
+    if (state.tdd !== true) {
+        return textResult({
+            error: "TDD_NOT_ENABLED",
+            message: "TDD 模式未启用。请在 auto_dev_init 时设置 tdd=true。",
+        });
+    }
+    // Check task not already RED_CONFIRMED or GREEN_CONFIRMED
+    const taskKey = String(task);
+    const existingState = state.tddTaskStates?.[taskKey];
+    if (existingState?.status === "RED_CONFIRMED" || existingState?.status === "GREEN_CONFIRMED") {
+        return textResult({
+            error: "TASK_ALREADY_CONFIRMED",
+            message: `Task ${task} 已处于 ${existingState.status} 状态，无需重复调用 auto_dev_task_red。`,
+        });
+    }
+    // Get changed files via git
+    let changedFiles = [];
+    try {
+        const { execFile: execFileGit } = await import("node:child_process");
+        // Include unstaged, staged, AND untracked files (prevent bypass via git add)
+        const diffUnstaged = await new Promise((resolve) => {
+            execFileGit("git", ["diff", "--name-only", "HEAD"], { cwd: projectRoot }, (err, stdout) => {
+                resolve(err ? "" : (stdout || ""));
+            });
+        });
+        const diffStaged = await new Promise((resolve) => {
+            execFileGit("git", ["diff", "--name-only", "--cached"], { cwd: projectRoot }, (err, stdout) => {
+                resolve(err ? "" : (stdout || ""));
+            });
+        });
+        const untrackedOutput = await new Promise((resolve) => {
+            execFileGit("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err, stdout) => {
+                resolve(err ? "" : (stdout || ""));
+            });
+        });
+        changedFiles = (diffUnstaged + "\n" + diffStaged + "\n" + untrackedOutput).trim().split("\n").filter(f => f.length > 0);
+        // Deduplicate (a file can appear in both unstaged and staged)
+        changedFiles = [...new Set(changedFiles)];
+    }
+    catch { /* git command failed */ }
+    // Validate RED phase: no impl files, at least one test file changed
+    const validation = validateRedPhase(changedFiles, testFiles);
+    if (!validation.valid) {
+        return textResult({
+            status: "REJECTED",
+            error: "RED_VALIDATION_FAILED",
+            message: validation.error,
+        });
+    }
+    // Build and execute test command
+    const testCmd = buildTestCommand(state.stack.language, testFiles, projectRoot);
+    if (!testCmd) {
+        return textResult({
+            error: "NO_TEST_COMMAND",
+            message: `无法为语言 "${state.stack.language}" 生成测试命令。`,
+        });
+    }
+    let exitCode = 0;
+    let stderr = "";
+    try {
+        const { execFile: execFileTest } = await import("node:child_process");
+        const result = await new Promise((resolve) => {
+            execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.red }, (err, _stdout, stderrOut) => {
+                const code = err ? err.code ?? 1 : 0;
+                resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
+            });
+        });
+        exitCode = result.code;
+        stderr = result.stderr;
+    }
+    catch (err) {
+        return textResult({
+            error: "TEST_EXECUTION_ERROR",
+            message: `测试执行出错: ${err.message}`,
+        });
+    }
+    if (exitCode === 0) {
+        // Tests pass — not a valid RED
+        return textResult({
+            status: "REJECTED",
+            error: "TESTS_PASS_NOT_RED",
+            message: "RED 阶段要求测试失败，但测试全部通过。请确保测试引用了尚未实现的代码。",
+            testCmd,
+        });
+    }
+    // Tests fail — RED_CONFIRMED
+    const redFailType = /cannot find symbol|compilation error|SyntaxError|ModuleNotFoundError|ImportError|Cannot find module|TS\d{4}/i.test(stderr)
+        ? "compilation_error"
+        : "test_failure";
+    // Write tddTaskStates
+    const tddTaskStates = { ...(state.tddTaskStates ?? {}) };
+    tddTaskStates[taskKey] = {
+        status: "RED_CONFIRMED",
+        redTestFiles: testFiles,
+        redExitCode: exitCode,
+        redFailType,
+    };
+    await sm.atomicUpdate({ tddTaskStates });
+    return textResult({
+        status: "RED_CONFIRMED",
+        task,
+        testCmd,
+        exitCode,
+        failType: redFailType,
+        message: `Task ${task} RED 确认：测试失败（${redFailType}）。请实现代码后调用 auto_dev_task_green。`,
+    });
+});
+// ===========================================================================
+// 4c. auto_dev_task_green (TDD GREEN phase gate)
+// ===========================================================================
+server.tool("auto_dev_task_green", "TDD GREEN phase: verify that tests now pass after implementation. Requires prior RED_CONFIRMED.", {
+    projectRoot: z.string(),
+    topic: z.string(),
+    task: z.number(),
+}, async ({ projectRoot, topic, task }) => {
+    const sm = new StateManager(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+    // Verify phase=3, status=IN_PROGRESS, tdd=true
+    if (state.phase !== 3 || state.status !== "IN_PROGRESS") {
+        return textResult({
+            error: "INVALID_PHASE",
+            message: `auto_dev_task_green 只能在 Phase 3 IN_PROGRESS 状态下调用。当前: phase=${state.phase}, status=${state.status}`,
+        });
+    }
+    if (state.tdd !== true) {
+        return textResult({
+            error: "TDD_NOT_ENABLED",
+            message: "TDD 模式未启用。",
+        });
+    }
+    // Verify task is RED_CONFIRMED
+    const taskKey = String(task);
+    const taskState = state.tddTaskStates?.[taskKey];
+    if (taskState?.status !== "RED_CONFIRMED") {
+        return textResult({
+            status: "REJECTED",
+            error: "NOT_RED_CONFIRMED",
+            message: `Task ${task} 尚未完成 RED 阶段（当前状态: ${taskState?.status ?? "无记录"}）。请先调用 auto_dev_task_red。`,
+        });
+    }
+    // Get test files from RED phase
+    const redTestFiles = taskState.redTestFiles ?? [];
+    if (redTestFiles.length === 0) {
+        return textResult({
+            error: "NO_TEST_FILES",
+            message: `Task ${task} RED 阶段未记录测试文件。`,
+        });
+    }
+    // Build and execute test command
+    const testCmd = buildTestCommand(state.stack.language, redTestFiles, projectRoot);
+    if (!testCmd) {
+        return textResult({
+            error: "NO_TEST_COMMAND",
+            message: `无法为语言 "${state.stack.language}" 生成测试命令。`,
+        });
+    }
+    let exitCode = 0;
+    let stderr = "";
+    try {
+        const { execFile: execFileTest } = await import("node:child_process");
+        const result = await new Promise((resolve) => {
+            execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.green }, (err, _stdout, stderrOut) => {
+                const code = err ? err.code ?? 1 : 0;
+                resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
+            });
+        });
+        exitCode = result.code;
+        stderr = result.stderr;
+    }
+    catch (err) {
+        return textResult({
+            error: "TEST_EXECUTION_ERROR",
+            message: `测试执行出错: ${err.message}`,
+        });
+    }
+    if (exitCode === 0) {
+        // Tests pass — GREEN_CONFIRMED
+        const tddTaskStates = { ...(state.tddTaskStates ?? {}) };
+        tddTaskStates[taskKey] = {
+            ...tddTaskStates[taskKey],
+            status: "GREEN_CONFIRMED",
+        };
+        await sm.atomicUpdate({ tddTaskStates });
+        return textResult({
+            status: "GREEN_CONFIRMED",
+            task,
+            testCmd,
+            message: `Task ${task} GREEN 确认：测试全部通过。可以继续 checkpoint。`,
+        });
+    }
+    // Tests still fail — REJECTED
+    return textResult({
+        status: "REJECTED",
+        error: "TESTS_STILL_FAILING",
+        task,
+        testCmd,
+        exitCode,
+        stderr: stderr.slice(0, 500),
+        message: `Task ${task} GREEN 被拒绝：测试仍然失败。请修复实现后重试。`,
+    });
 });
 // ===========================================================================
 // 5. auto_dev_render

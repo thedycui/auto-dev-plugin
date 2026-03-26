@@ -21,7 +21,12 @@ const PHASE_4_CHECKLIST = `## 裁决检查清单（Phase 4: Code Review + Phase 
 - [ ] 检查安全问题（权限绕过、注入、数据泄露）
 - [ ] 检查 API 一致性（前后端接口匹配）
 
-### C. 输出要求
+### C. TDD Gate Verification (if tdd=true)
+- [ ] Check state.json tddTaskStates: every non-exempt task should have status=GREEN_CONFIRMED
+- [ ] If any task has status=RED_CONFIRMED or PENDING, TDD flow was not completed -> FAIL
+- [ ] Cross-check: test files in diff should align with redTestFiles recorded in tddTaskStates
+
+### D. 输出要求
 - 回溯验证结果：TRACE: [Phase 1/2 问题描述] → FIXED / NOT_FIXED → [证据]
 - 如果 FAIL，列出问题：ISSUE: [P0/P1] 问题描述 → 修复建议 → 涉及文件
 `;

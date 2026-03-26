@@ -225,8 +225,9 @@ export async function runTribunal(
     "--allowedTools", "Read",
     "--model", "sonnet",
     "--max-turns", maxTurns,
-    "--bare",
     "--no-session-persistence",
+    // NOTE: --bare is intentionally omitted. It skips auth initialization,
+    // causing "Not logged in" errors. The ~3s startup overhead is acceptable.
   ];
 
   const spawnOpts = {

@@ -524,7 +524,7 @@ export async function internalCheckpoint(
   task?: number,
   tokenEstimate?: number,
   opts?: {
-    tddWarning?: string | null;
+    tddWarning?: null;
     regressTo?: number;
   },
 ): Promise<{
@@ -534,7 +534,6 @@ export async function internalCheckpoint(
   error?: string;
   message?: string;
 }> {
-  const tddWarning = opts?.tddWarning ?? null;
   const regressTo = opts?.regressTo;
 
   // 1. Prepare state updates (computed in memory, not yet written)
@@ -576,12 +575,6 @@ export async function internalCheckpoint(
     usage.byPhase = { ...usage.byPhase };
     usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
     stateUpdates["tokenUsage"] = usage;
-  }
-
-  // TDD warning (collected during pre-validation)
-  if (tddWarning) {
-    const warnings = [...(state.tddWarnings ?? []), tddWarning];
-    stateUpdates["tddWarnings"] = warnings;
   }
 
   // 2. Write progress-log (first)

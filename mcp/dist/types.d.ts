@@ -109,6 +109,19 @@ export declare const StateJsonSchema: z.ZodObject<{
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     tdd: z.ZodOptional<z.ZodBoolean>;
     tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    tddTaskStates: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        status: z.ZodEnum<{
+            PENDING: "PENDING";
+            RED_CONFIRMED: "RED_CONFIRMED";
+            GREEN_CONFIRMED: "GREEN_CONFIRMED";
+        }>;
+        redTestFiles: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        redExitCode: z.ZodOptional<z.ZodNumber>;
+        redFailType: z.ZodOptional<z.ZodEnum<{
+            compilation_error: "compilation_error";
+            test_failure: "test_failure";
+        }>>;
+    }, z.core.$strip>>>;
     brainstorm: z.ZodOptional<z.ZodBoolean>;
     costMode: z.ZodOptional<z.ZodEnum<{
         economy: "economy";
@@ -131,6 +144,13 @@ export declare const StateJsonSchema: z.ZodObject<{
     updatedAt: z.ZodString;
 }, z.core.$strip>;
 export type StateJson = z.infer<typeof StateJsonSchema>;
+/** TDD task state for a single task */
+export interface TddTaskState {
+    status: "PENDING" | "RED_CONFIRMED" | "GREEN_CONFIRMED";
+    redTestFiles?: string[];
+    redExitCode?: number;
+    redFailType?: "compilation_error" | "test_failure";
+}
 export declare const InitInputSchema: z.ZodObject<{
     projectRoot: z.ZodString;
     topic: z.ZodString;
@@ -255,4 +275,11 @@ export interface RetrospectiveAutoData {
         issueCount: number;
     }>;
     submitRetries: Record<number, number>;
+    tddGateStats?: {
+        totalTasks: number;
+        tddTasks: number;
+        exemptTasks: number;
+        redRejections: number;
+        greenRejections: number;
+    };
 }
