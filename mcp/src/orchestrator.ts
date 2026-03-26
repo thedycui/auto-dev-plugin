@@ -548,6 +548,24 @@ export async function validateStep(
 // Build Task Prompt for Step
 // ---------------------------------------------------------------------------
 
+/**
+ * Extract task details including completion criteria from plan.md.
+ * Falls back to extractTaskList if parsing fails.
+ */
+function extractTaskDetails(planContent: string): string {
+  // Match ## Task N: title ... - **完成标准**: ...
+  const taskPattern = /^## Task \d+[：:].+(?:\n(?!## Task).)*/gm;
+  const matches = planContent.match(taskPattern);
+  
+  if (!matches || matches.length === 0) {
+    // Fallback to simple task list
+    const taskList = extractTaskList(planContent);
+    return taskList || "实现 plan.md 中描述的所有功能";
+  }
+  
+  return matches.join("\n\n");
+}
+
 export async function buildTaskForStep(
   step: string,
   outputDir: string,
@@ -618,14 +636,12 @@ export async function buildTaskForStep(
       return `请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
     }
 
-    const taskListStr = extractTaskList(planContent);
-    const taskLines = taskListStr.split("\n").filter((l) => l.trim().length > 0);
-    if (taskLines.length === 0) {
-      taskLines.push("实现 plan.md 中描述的所有功能");
-    }
+    // Extract task details with completion criteria (task-level contract)
+    const taskDetails = extractTaskDetails(planContent);
 
-    const allTasks = taskLines.join("\n");
-    return `请完成以下任务：\n\n${allTasks}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}` + approachPlanInstruction + ISOLATION_FOOTER;
+    return `请完成以下任务：\n\n${taskDetails}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
+      `**重要：每完成一个 task，先验证其完成标准是否满足，再开始下一个。**` +
+      approachPlanInstruction + ISOLATION_FOOTER;
   }
 
   // Step 4a: implementation fix/verify
@@ -668,7 +684,7 @@ export async function computeNextTask(
   const buildCmd = state.stack.buildCmd;
   const testCmd = state.stack.testCmd;
 
-  // 2. Read step state (extra fields not in Zod schema)
+  // 2. Read step state
   const stepState = await readStepState(sm.stateFilePath);
 
   // 3. If no step: determine first phase, set step, return first task prompt

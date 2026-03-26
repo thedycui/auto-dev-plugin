@@ -11,6 +11,15 @@
 **Design Doc**: {output_dir}/design.md
 **Code Review**: {output_dir}/code-review.md
 
+## 前端项目测试指引（仅前端项目适用）
+
+如果项目是前端项目（React/Vue/HTML）且 Playwright MCP 可用：
+- 优先使用 Playwright MCP 进行真实浏览器交互测试
+- 可以用 `browser_navigate` + `browser_snapshot` + `browser_click` 验证 UI 行为
+- 比 DOM 单元测试更能发现真实的用户交互问题
+
+判断方法：检查 package.json 是否包含 react/vue/svelte 等前端框架依赖。
+
 ## Requirements
 
 1. 读取 `{output_dir}/design.md` 理解功能需求和验收标准

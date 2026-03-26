@@ -147,6 +147,15 @@ export const StateJsonSchema = z.object({
   // Tribunal submit counters per phase (tribunal feature)
   tribunalSubmits: z.record(z.string(), z.number()).optional(),
 
+  // Step orchestrator state (persisted across auto_dev_next calls)
+  step: z.string().nullable().optional(),
+  stepIteration: z.number().int().optional(),
+  lastValidation: z.string().nullable().optional(),
+  approachState: z.any().nullable().optional(), // Complex nested object, validated at orchestrator level
+
+  // Phase-level escalation counter (Issue #2: ESCALATE auto-regress)
+  phaseEscalateCount: z.record(z.string(), z.number()).optional(),
+
   // Timestamps
   startedAt: z.string(),
   updatedAt: z.string(),

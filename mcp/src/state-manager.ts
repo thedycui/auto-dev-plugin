@@ -395,10 +395,19 @@ export class StateManager {
    * Also refreshes the in-memory state.
    */
   async atomicUpdate(updates: Record<string, unknown>): Promise<void> {
-    const current = await this.loadAndValidate();
-    const merged = { ...current, ...updates, updatedAt: new Date().toISOString() };
+    // Read raw JSON to preserve extra fields (e.g. step, stepIteration, approachState)
+    // that may not be in the Zod schema but are written by orchestrator
+    let rawState: Record<string, unknown> = {};
+    try {
+      rawState = JSON.parse(await readFile(this.stateFilePath, "utf-8"));
+    } catch {
+      // Fall back to validated state
+      rawState = { ...(await this.loadAndValidate()) };
+    }
 
-    // Validate the merged object before persisting
+    const merged = { ...rawState, ...updates, updatedAt: new Date().toISOString() };
+
+    // Validate only the schema-defined fields (don't strip extras)
     const result = StateJsonSchema.safeParse(merged);
     if (!result.success) {
       throw new Error(
@@ -407,7 +416,8 @@ export class StateManager {
       );
     }
 
-    await this.atomicWrite(this.stateFilePath, JSON.stringify(result.data, null, 2));
+    // Write merged (preserving extra fields), not result.data (which strips them)
+    await this.atomicWrite(this.stateFilePath, JSON.stringify(merged, null, 2));
     this.state = result.data;
   }
 

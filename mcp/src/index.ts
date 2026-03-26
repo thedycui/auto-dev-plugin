@@ -340,8 +340,11 @@ server.tool(
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
     regressTo: z.number().int().min(1).max(5).optional(),
+    force: z.boolean().optional(),
+    reason: z.string().optional(),
   },
-  async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary, tokenEstimate, regressTo }) => {
+  async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary0, tokenEstimate, regressTo, force, reason }) => {
+    let rawSummary = rawSummary0;
     let status: string = rawStatus;
     let summary: string | undefined = rawSummary;
     const sm = new StateManager(projectRoot, topic);
@@ -377,11 +380,20 @@ server.tool(
 
     // Guard C: Tribunal phases (4/5/6) cannot be directly marked PASS via checkpoint
     if ((TRIBUNAL_PHASES as readonly number[]).includes(phase) && status === "PASS") {
-      return textResult({
-        error: "TRIBUNAL_REQUIRED",
-        message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
-        mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
-      });
+      // Escape hatch: force=true allowed only after 2+ escalations
+      const escCount = state.phaseEscalateCount?.[String(phase)] ?? 0;
+      if (force === true && escCount >= 2) {
+        const overrideSummary = `[HUMAN_OVERRIDE] Phase ${phase} forced PASS after ${escCount} escalations. Reason: ${reason ?? "not provided"}`;
+        rawSummary = overrideSummary;
+        // Fall through to normal checkpoint logic
+      } else {
+        return textResult({
+          error: "TRIBUNAL_REQUIRED",
+          message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
+          mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
+          ...(escCount >= 2 ? { hint: "可使用 force=true + reason 强制通过" } : {}),
+        });
+      }
     }
 
     // [P0-1 fix] REGRESS validation BEFORE any state mutation
@@ -1410,6 +1422,22 @@ server.tool(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Helper: collect recent tribunal issues for ESCALATE_REGRESS feedback
+// ---------------------------------------------------------------------------
+
+async function collectRecentTribunalIssues(outputDir: string, phase: number): Promise<string> {
+  const { join } = await import("node:path");
+  const logPath = join(outputDir, `tribunal-phase${phase}.md`);
+  try {
+    const content = await readFile(logPath, "utf-8");
+    const failSections = content.split(/\n---\n/).filter((s: string) => s.includes("FAIL"));
+    return failSections.slice(-1)[0]?.trim() ?? "（无详细反馈）";
+  } catch {
+    return "（无法读取 tribunal 日志）";
+  }
+}
+
 // ===========================================================================
 // 14. auto_dev_submit (Tribunal Submit)
 // ===========================================================================
@@ -1471,11 +1499,37 @@ server.tool(
     const submits = state.tribunalSubmits ?? {};
     const currentCount = submits[phaseKey] ?? 0;
     if (currentCount >= 3) {
+      const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
+
+      if (escCount >= 2) {
+        // Second+ escalation — truly blocked, need human
+        return textResult({
+          status: "TRIBUNAL_ESCALATE",
+          phase,
+          message: `Phase ${phase} 已 ${escCount + 1} 次 ESCALATE。需要人工介入。`,
+          mandate: "所有自动恢复路径已用尽。请人工审查后使用 checkpoint(force=true, reason=...) 继续。",
+        });
+      }
+
+      // First escalation — auto-regress to Phase 3
+      const tribunalFeedback = await collectRecentTribunalIssues(sm.outputDir, phase);
+      await sm.atomicUpdate({
+        phase: 3,
+        status: "IN_PROGRESS",
+        phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
+        tribunalSubmits: { ...submits, [phaseKey]: 0 },
+        step: "3",
+        stepIteration: 0,
+        lastValidation: "ESCALATE_REGRESS",
+      });
+
       return textResult({
-        status: "TRIBUNAL_ESCALATE",
+        status: "ESCALATE_REGRESS",
         phase,
-        message: `Phase ${phase} 已提交 ${currentCount} 次裁决均未通过。需要人工介入。`,
-        mandate: "已达到最大裁决提交次数（3次），请人工审查后决定是否继续。",
+        regressTo: 3,
+        message: `Phase ${phase} tribunal 3 次未通过，自动回退到 Phase 3 修复。`,
+        tribunalFeedback,
+        mandate: `[AUTO-REGRESS] 请根据以下 tribunal 反馈修复代码，然后重新通过 Phase 4-6。`,
       });
     }
 
