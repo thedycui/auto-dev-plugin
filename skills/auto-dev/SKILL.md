@@ -3,7 +3,7 @@ name: auto-dev
 description: "自治开发循环 — 从设计到测试通过的全自动闭环。支持自审迭代，最小化人工介入。Use when user says /auto-dev, asks for autonomous development, wants a full dev loop (design -> plan -> implement -> verify -> e2e test), or mentions '自治开发', '自动开发循环', '全自动闭环', 'autonomous dev', 'auto implement'. Also use when user provides a design doc and wants it implemented end-to-end without manual intervention."
 ---
 
-# auto-dev (Plugin-Powered v7.0)
+# auto-dev (Plugin-Powered v8.0)
 
 > 本 skill 由 auto-dev Plugin 的 MCP 工具和 Agent 定义驱动。
 > **默认全自动，零确认** — 这是 auto-dev 的第一性原理。
