@@ -1,5 +1,5 @@
 /**
- * Tests for orchestrator.ts — core loop and phase execution.
+ * Tests for orchestrator.ts — step function (computeNextTask).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -8,12 +8,6 @@ import { containsFrameworkTerms } from "../orchestrator-prompts.js";
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before imports that use them
 // ---------------------------------------------------------------------------
-
-// Mock agent-spawner
-const mockSpawnAgent = vi.fn();
-vi.mock("../agent-spawner.js", () => ({
-  spawnAgent: (...args: unknown[]) => mockSpawnAgent(...args),
-}));
 
 // Mock child_process for shell()
 const mockExecFile = vi.fn();
@@ -30,6 +24,7 @@ vi.mock("../tribunal.js", () => ({
 
 // Mock state-manager
 const mockLoadAndValidate = vi.fn();
+const mockAtomicUpdate = vi.fn();
 const mockInternalCheckpoint = vi.fn();
 vi.mock("../state-manager.js", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
@@ -49,6 +44,7 @@ vi.mock("../state-manager.js", async (importOriginal) => {
         this.progressLogPath = `${this.outputDir}/progress-log.md`;
       }
       async loadAndValidate() { return mockLoadAndValidate(); }
+      async atomicUpdate(updates: Record<string, unknown>) { return mockAtomicUpdate(updates); }
       async init() {}
       getFullState() { return mockLoadAndValidate(); }
     },
@@ -66,44 +62,29 @@ vi.mock("../template-renderer.js", () => ({
   },
 }));
 
-// Mock fs/promises for fileExists / readFileSafe inside OrchestratorPhaseRunner
+// Mock fs/promises
 const mockStat = vi.fn();
 const mockReadFile = vi.fn();
+const mockWriteFile = vi.fn();
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {
     ...actual,
     stat: (...args: unknown[]) => mockStat(...args),
     readFile: (...args: unknown[]) => mockReadFile(...args),
+    writeFile: (...args: unknown[]) => mockWriteFile(...args),
   };
 });
 
-// Now import the modules under test (after mocks)
-import {
-  OrchestratorPhaseRunner,
-  runOrchestrator,
-} from "../orchestrator.js";
-import type { PhaseContext, OrchestratorConfig } from "../orchestrator.js";
+// Now import modules under test (after mocks)
+import { computeNextTask } from "../orchestrator.js";
+import type { NextTaskResult } from "../orchestrator.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeCtx(overrides?: Partial<PhaseContext>): PhaseContext {
-  return {
-    projectRoot: "/tmp/test-project",
-    outputDir: "/tmp/test-project/docs/auto-dev/test-topic",
-    topic: "test-topic",
-    mode: "full",
-    buildCmd: "npm run build",
-    testCmd: "npm test",
-    startCommit: "abc123",
-    costMode: "economy",
-    ...overrides,
-  };
-}
-
-function makeState() {
+function makeState(overrides?: Partial<Record<string, unknown>>) {
   return {
     topic: "test-topic",
     mode: "full" as const,
@@ -120,21 +101,19 @@ function makeState() {
     startedAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
     startCommit: "abc123",
+    ...overrides,
   };
-}
-
-function spawnSuccess(): { stdout: string; stderr: string; exitCode: number; crashed: boolean } {
-  return { stdout: "ok", stderr: "", exitCode: 0, crashed: false };
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("OrchestratorPhaseRunner", () => {
+describe("computeNextTask", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSpawnAgent.mockResolvedValue(spawnSuccess());
+    mockWriteFile.mockResolvedValue(undefined);
+    mockAtomicUpdate.mockResolvedValue(undefined);
     mockInternalCheckpoint.mockResolvedValue({
       ok: true,
       nextDirective: { phaseCompleted: true, nextPhase: 2, nextPhaseName: "PLAN", mandate: "", canDeclareComplete: false },
@@ -143,116 +122,135 @@ describe("OrchestratorPhaseRunner", () => {
   });
 
   // -----------------------------------------------------------------------
-  // executeDesign
+  // First call (no step) — full mode
   // -----------------------------------------------------------------------
 
-  describe("executeDesign", () => {
-    it("spawns agent and returns ARTIFACT_READY when design.md is valid", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      mockSpawnAgent.mockResolvedValue(spawnSuccess());
-      mockStat.mockResolvedValue({ isFile: () => true }); // fileExists
-      mockReadFile.mockResolvedValue("x".repeat(200)); // >= 100 chars
-
-      const result = await runner.executeDesign();
-
-      expect(mockSpawnAgent).toHaveBeenCalledTimes(1);
-      expect(result.status).toBe("ARTIFACT_READY");
-      expect(result.artifacts).toContain(
-        "/tmp/test-project/docs/auto-dev/test-topic/design.md",
-      );
-    });
-
-    it("returns NEEDS_REVISION when design.md is missing", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      mockSpawnAgent.mockResolvedValue(spawnSuccess());
-      mockReadFile.mockRejectedValue(new Error("ENOENT")); // file not found
-
-      const result = await runner.executeDesign();
-
-      expect(result.status).toBe("NEEDS_REVISION");
-      expect(result.feedback).toContain("design.md");
-    });
-
-    it("returns NEEDS_REVISION when design.md is too short", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      mockSpawnAgent.mockResolvedValue(spawnSuccess());
-      mockReadFile.mockResolvedValue("short"); // < 100 chars
-
-      const result = await runner.executeDesign();
-
-      expect(result.status).toBe("NEEDS_REVISION");
-    });
-  });
-
-  // -----------------------------------------------------------------------
-  // executeImplementation
-  // -----------------------------------------------------------------------
-
-  describe("executeImplementation", () => {
-    it("parses tasks from plan.md and spawns agent per task", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      // plan.md with structured tasks
+  describe("first call (no step)", () => {
+    it("full mode: returns architect task for step 1a", async () => {
+      const state = makeState({ mode: "full" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // readFile for step state: no step field
       mockReadFile.mockImplementation(async (path: string) => {
-        if (path.includes("plan.md")) {
-          return "### Task 1: Create module\n### Task 2: Write tests\n";
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
         }
         throw new Error("ENOENT");
       });
 
-      // Mock shell (build + test pass for each task)
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("1a");
+      expect(result.agent).toBe("auto-dev-architect");
+      expect(result.prompt).toBeDefined();
+      expect(result.prompt).not.toBeNull();
+    });
+
+    it("turbo mode without plan.md: returns implementation task with topic", async () => {
+      const state = makeState({ mode: "turbo" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // readFile: state.json has no step; plan.md does not exist
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("3");
+      expect(result.agent).toBe("auto-dev-developer");
+      expect(result.prompt).toContain("请实现以下功能");
+      expect(result.prompt).toContain("test-topic");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // After design.md written (step=1a) — validation passes, advance to 1b
+  // -----------------------------------------------------------------------
+
+  describe("step 1a validation passes", () => {
+    it("returns reviewer task for step 1b", async () => {
+      const state = makeState({ mode: "full" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // State has step=1a
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "1a", stepIteration: 0 });
+        }
+        if (path.includes("design.md")) {
+          return "x".repeat(200); // valid design.md
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("1b");
+      expect(result.agent).toBe("auto-dev-reviewer");
+      expect(result.prompt).toBeDefined();
+      expect(result.message).toContain("1a");
+      expect(result.message).toContain("passed");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // stepIteration >= MAX_STEP_ITERATIONS — escalation
+  // -----------------------------------------------------------------------
+
+  describe("escalation on iteration limit", () => {
+    it("returns escalation when stepIteration >= MAX", async () => {
+      const state = makeState({ mode: "full" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // State has step=1a, stepIteration=3 (>= MAX_STEP_ITERATIONS)
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "1a", stepIteration: 3 });
+        }
+        // design.md missing => validation fails
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.escalation).toBeDefined();
+      expect(result.escalation?.reason).toBe("iteration_limit_exceeded");
+      expect(result.prompt).toBeNull();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // All phases complete — done=true
+  // -----------------------------------------------------------------------
+
+  describe("all phases complete", () => {
+    it("returns done=true when last step passes", async () => {
+      const state = makeState({ mode: "turbo" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // State has step=3 (turbo only has phase 3)
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "3", stepIteration: 0 });
+        }
+        throw new Error("ENOENT");
+      });
+      // shell() build + test pass
       mockExecFile.mockImplementation(
         (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
           cb(null, "ok", "");
         },
       );
 
-      const result = await runner.executeImplementation();
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
 
-      // 2 tasks -> 2 spawn calls (one per task)
-      expect(mockSpawnAgent).toHaveBeenCalledTimes(2);
-      expect(result.status).toBe("PASS");
-    });
-
-    it("spawns fix agent when build fails after task", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      mockReadFile.mockImplementation(async (path: string) => {
-        if (path.includes("plan.md")) {
-          return "### Task 1: Implement feature\n";
-        }
-        throw new Error("ENOENT");
-      });
-
-      let shellCallCount = 0;
-      mockExecFile.mockImplementation(
-        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-          shellCallCount++;
-          if (shellCallCount === 1) {
-            // First build fails
-            const err = new Error("build fail") as any;
-            err.code = 1;
-            cb(err, "", "compilation error");
-          } else {
-            // Retry succeeds
-            cb(null, "ok", "");
-          }
-        },
-      );
-
-      const result = await runner.executeImplementation();
-
-      // 1 task spawn + 1 fix spawn = 2
-      expect(mockSpawnAgent).toHaveBeenCalledTimes(2);
-      expect(result.status).toBe("PASS");
+      expect(result.done).toBe(true);
+      expect(result.step).toBeNull();
+      expect(result.prompt).toBeNull();
+      expect(result.message).toContain("completed");
     });
   });
 
@@ -261,196 +259,46 @@ describe("OrchestratorPhaseRunner", () => {
   // -----------------------------------------------------------------------
 
   describe("prompt isolation", () => {
-    it("prompts sent to spawnAgent contain NO framework terms", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
-      mockReadFile.mockResolvedValue("x".repeat(200));
-      mockStat.mockResolvedValue({ isFile: () => true });
-
-      await runner.executeDesign();
-
-      const promptArg = mockSpawnAgent.mock.calls[0]?.[0]?.prompt as string;
-      expect(promptArg).toBeDefined();
-      expect(containsFrameworkTerms(promptArg)).toBe(false);
-    });
-
-    it("task prompts in executeImplementation contain NO framework terms", async () => {
-      const ctx = makeCtx();
-      const runner = new OrchestratorPhaseRunner(ctx);
-
+    it("prompts never contain framework terms", async () => {
+      const state = makeState({ mode: "full" });
+      mockLoadAndValidate.mockResolvedValue(state);
       mockReadFile.mockImplementation(async (path: string) => {
-        if (path.includes("plan.md")) {
-          return "### Task 1: Implement login\n";
+        if (path.includes("state.json")) {
+          return JSON.stringify(state); // no step
         }
         throw new Error("ENOENT");
       });
 
-      mockExecFile.mockImplementation(
-        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-          cb(null, "ok", "");
-        },
-      );
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
 
-      await runner.executeImplementation();
-
-      for (const call of mockSpawnAgent.mock.calls) {
-        const prompt = call[0]?.prompt as string;
-        expect(containsFrameworkTerms(prompt)).toBe(false);
-      }
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// runOrchestrator
-// ---------------------------------------------------------------------------
-
-describe("runOrchestrator", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-
-    const state = makeState();
-    mockLoadAndValidate.mockResolvedValue(state);
-    mockSpawnAgent.mockResolvedValue(spawnSuccess());
-    mockInternalCheckpoint.mockResolvedValue({
-      ok: true,
-      nextDirective: { phaseCompleted: true, nextPhase: null, nextPhaseName: null, mandate: "", canDeclareComplete: true },
-      stateUpdates: {},
+      expect(result.prompt).toBeDefined();
+      expect(result.prompt).not.toBeNull();
+      expect(containsFrameworkTerms(result.prompt!)).toBe(false);
     });
   });
 
-  it("iterates phases in correct order for full mode", async () => {
-    // Make all phases pass immediately
-    mockReadFile.mockResolvedValue("x".repeat(200) + "\nAPPROVE\n");
-    mockStat.mockResolvedValue({ isFile: () => true });
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-        cb(null, "ok", "");
-      },
-    );
-    mockExecuteTribunal.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify({ status: "TRIBUNAL_PASS" }) }],
+  // -----------------------------------------------------------------------
+  // Quick mode starts at phase 3
+  // -----------------------------------------------------------------------
+
+  describe("quick mode", () => {
+    it("first call starts at step 3", async () => {
+      const state = makeState({ mode: "quick" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
+        }
+        if (path.includes("plan.md")) {
+          return "### Task 1: Implement feature\n";
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.step).toBe("3");
+      expect(result.agent).toBe("auto-dev-developer");
     });
-
-    const config: OrchestratorConfig = {
-      projectRoot: "/tmp/test-project",
-      topic: "test-topic",
-      mode: "full",
-    };
-
-    const result = await runOrchestrator(config);
-
-    // internalCheckpoint should be called for each phase (IN_PROGRESS + PASS)
-    // 7 phases * 2 calls (IN_PROGRESS + PASS) = 14
-    expect(mockInternalCheckpoint).toHaveBeenCalled();
-
-    // Verify the checkpoint phases are in order
-    const inProgressCalls = mockInternalCheckpoint.mock.calls
-      .filter((c) => c[3] === "IN_PROGRESS")
-      .map((c) => c[2]);
-    expect(inProgressCalls).toEqual([1, 2, 3, 4, 5, 6, 7]);
-
-    expect(result.completed).toBe(true);
-    expect(result.status).toBe("COMPLETED");
-  });
-
-  it("returns BLOCKED when iteration limit exceeded", async () => {
-    // Design always returns NEEDS_REVISION
-    mockReadFile.mockRejectedValue(new Error("ENOENT")); // design.md missing
-    mockStat.mockRejectedValue(new Error("ENOENT"));
-
-    const config: OrchestratorConfig = {
-      projectRoot: "/tmp/test-project",
-      topic: "test-topic",
-      mode: "full",
-    };
-
-    const result = await runOrchestrator(config);
-
-    expect(result.completed).toBe(false);
-    expect(result.status).toBe("BLOCKED");
-    expect(result.escalation).toBeDefined();
-    expect(result.escalation?.reason).toBe("iteration_limit_exceeded");
-  });
-
-  it("skips phase 5 when skipE2e is set", async () => {
-    mockReadFile.mockResolvedValue("x".repeat(200) + "\nAPPROVE\n");
-    mockStat.mockResolvedValue({ isFile: () => true });
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-        cb(null, "ok", "");
-      },
-    );
-    mockExecuteTribunal.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify({ status: "TRIBUNAL_PASS" }) }],
-    });
-
-    const config: OrchestratorConfig = {
-      projectRoot: "/tmp/test-project",
-      topic: "test-topic",
-      mode: "full",
-      skipE2e: true,
-    };
-
-    const result = await runOrchestrator(config);
-
-    // Phase 5 should not be in the IN_PROGRESS calls
-    const inProgressPhases = mockInternalCheckpoint.mock.calls
-      .filter((c) => c[3] === "IN_PROGRESS")
-      .map((c) => c[2]);
-    expect(inProgressPhases).not.toContain(5);
-    expect(result.completed).toBe(true);
-  });
-
-  it("uses correct phases for quick mode", async () => {
-    mockReadFile.mockResolvedValue("x".repeat(200) + "\n### Task 1: do stuff\n");
-    mockStat.mockResolvedValue({ isFile: () => true });
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-        cb(null, "ok", "");
-      },
-    );
-    mockExecuteTribunal.mockResolvedValue({
-      content: [{ type: "text", text: JSON.stringify({ status: "TRIBUNAL_PASS" }) }],
-    });
-
-    const config: OrchestratorConfig = {
-      projectRoot: "/tmp/test-project",
-      topic: "test-topic",
-      mode: "quick",
-    };
-
-    const result = await runOrchestrator(config);
-
-    const inProgressPhases = mockInternalCheckpoint.mock.calls
-      .filter((c) => c[3] === "IN_PROGRESS")
-      .map((c) => c[2]);
-    expect(inProgressPhases).toEqual([3, 4, 5, 7]);
-    expect(result.completed).toBe(true);
-  });
-
-  it("uses correct phases for turbo mode", async () => {
-    mockReadFile.mockResolvedValue("x".repeat(200) + "\n### Task 1: do stuff\n");
-    mockStat.mockResolvedValue({ isFile: () => true });
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
-        cb(null, "ok", "");
-      },
-    );
-
-    const config: OrchestratorConfig = {
-      projectRoot: "/tmp/test-project",
-      topic: "test-topic",
-      mode: "turbo",
-    };
-
-    const result = await runOrchestrator(config);
-
-    const inProgressPhases = mockInternalCheckpoint.mock.calls
-      .filter((c) => c[3] === "IN_PROGRESS")
-      .map((c) => c[2]);
-    expect(inProgressPhases).toEqual([3]);
-    expect(result.completed).toBe(true);
   });
 });

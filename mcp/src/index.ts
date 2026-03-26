@@ -24,7 +24,7 @@ import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
 import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
 import type { ToolResult } from "./tribunal.js";
 import { getClaudePath } from "./tribunal.js";
-import { runOrchestrator } from "./orchestrator.js";
+import { computeNextTask } from "./orchestrator.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1613,16 +1613,8 @@ server.tool(
     costMode: z.enum(["economy", "beast"]).optional(),
     interactive: z.boolean().optional(),
   },
-  async ({ projectRoot, topic, mode, skipE2e, tdd, costMode, interactive }) => {
-    const result = await runOrchestrator({
-      projectRoot,
-      topic,
-      mode: mode ?? "full",
-      skipE2e,
-      tdd,
-      costMode,
-      interactive,
-    });
+  async ({ projectRoot, topic }) => {
+    const result = await computeNextTask(projectRoot, topic);
     return textResult(result);
   },
 );
