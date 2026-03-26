@@ -610,11 +610,38 @@ export async function internalCheckpoint(
     await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
   }
 
-  // 5. Compute next phase directive
+  // 5. Turbo mode guard: if Phase 3 PASS in turbo mode, check actual diff size
+  //    If actual changes exceed turbo threshold, auto-upgrade to quick mode
+  let effectiveState = state;
+  if (phase === 3 && status === "PASS" && state.mode === "turbo" && state.startCommit) {
+    const { execFile: ef } = await import("node:child_process");
+    const diffStat = await new Promise<string>((resolve) => {
+      ef("git", ["diff", "--stat", state.startCommit!], {
+        cwd: state.projectRoot,
+        timeout: 10_000,
+      }, (_err, stdout) => resolve(stdout ?? ""));
+    });
+    const statLines = diffStat.trim().split("\n");
+    const summaryLine = statLines[statLines.length - 1] ?? "";
+    const insertMatch = summaryLine.match(/(\d+) insertion/);
+    const deleteMatch = summaryLine.match(/(\d+) deletion/);
+    const actualLines = (parseInt(insertMatch?.[1] ?? "0") || 0) + (parseInt(deleteMatch?.[1] ?? "0") || 0);
+    const actualFiles = Math.max(0, statLines.length - 1);
+
+    if (actualLines > 30 || actualFiles > 3) {
+      await sm.atomicUpdate({ mode: "quick" });
+      effectiveState = { ...state, mode: "quick" };
+      await sm.appendToProgressLog(
+        `\n<!-- MODE_UPGRADE turbo→quick reason="actual diff: ${actualLines} lines, ${actualFiles} files exceeds turbo threshold" -->\n`,
+      );
+    }
+  }
+
+  // 6. Compute next phase directive
   // [P1-3 fix] Pass updated regressionCount so limit check uses current value
   const stateForDirective = status === "REGRESS"
-    ? { ...state, regressionCount: (state.regressionCount ?? 0) + 1 }
-    : state;
+    ? { ...effectiveState, regressionCount: (effectiveState.regressionCount ?? 0) + 1 }
+    : effectiveState;
   const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
 
   return { ok: true, nextDirective, stateUpdates };

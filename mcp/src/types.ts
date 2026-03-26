@@ -12,6 +12,7 @@ import { z } from "zod/v4";
 // ---------------------------------------------------------------------------
 
 export const ModeSchema = z.enum(["full", "quick", "turbo"]);
+export const ChangeTypeSchema = z.enum(["refactor", "bugfix", "feature", "config", "docs"]);
 
 export const PhaseStatusSchema = z.enum([
   "IN_PROGRESS",

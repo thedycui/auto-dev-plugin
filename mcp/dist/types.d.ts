@@ -10,6 +10,13 @@ export declare const ModeSchema: z.ZodEnum<{
     quick: "quick";
     turbo: "turbo";
 }>;
+export declare const ChangeTypeSchema: z.ZodEnum<{
+    refactor: "refactor";
+    bugfix: "bugfix";
+    feature: "feature";
+    config: "config";
+    docs: "docs";
+}>;
 export declare const PhaseStatusSchema: z.ZodEnum<{
     IN_PROGRESS: "IN_PROGRESS";
     PASS: "PASS";

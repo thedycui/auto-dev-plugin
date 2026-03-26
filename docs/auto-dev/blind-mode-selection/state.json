@@ -1,0 +1,43 @@
+{
+  "topic": "blind-mode-selection",
+  "mode": "quick",
+  "phase": 7,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/blind-mode-selection",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "skipE2e": true,
+  "tdd": false,
+  "costMode": "beast",
+  "startCommit": "08e00fb851382a653075827333bbd297c047436a",
+  "phaseTimings": {
+    "4": {
+      "startedAt": "2026-03-26T09:44:21.682Z",
+      "completedAt": "2026-03-26T09:47:27.458Z",
+      "durationMs": 185776
+    },
+    "6": {
+      "startedAt": "2026-03-26T09:47:50.961Z",
+      "completedAt": "2026-03-26T09:49:40.067Z",
+      "durationMs": 109106
+    },
+    "7": {
+      "startedAt": "2026-03-26T09:50:16.231Z",
+      "completedAt": "2026-03-26T09:53:29.241Z",
+      "durationMs": 193010
+    }
+  },
+  "tribunalSubmits": {
+    "4": 1,
+    "6": 1,
+    "7": 1
+  },
+  "startedAt": "2026-03-26T09:40:39.959Z",
+  "updatedAt": "2026-03-26T09:53:53.824Z"
+}

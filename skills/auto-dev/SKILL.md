@@ -300,19 +300,16 @@ topic: {topic} | branch: {branch} | output: {output_dir}
 
 ## 自动模式选择
 
-当用户未显式指定模式时（无 --turbo/--quick/--full），主 Agent 应自动判断：
+当用户未显式指定模式时（无 --turbo/--quick/--full），**框架自动决定模式**：
 
-1. 分析任务描述，估算改动范围（文件数、行数）
-2. 按以下规则选择模式：
-
-| 条件 | 模式 | 理由 |
-|------|------|------|
-| ≤20 行、≤2 文件、纯重构/改参数/改文案/fix typo（无类型变更、无新分支逻辑、无跨函数影响） | turbo | build+test 足够，不需要 tribunal |
-| 21-50 行、≤3 文件、不涉及新接口或 schema 变更 | quick（+ --skip-e2e） | 需要代码审查但不需要完整设计 |
-| >50 行、或涉及新接口/schema/跨模块交互 | full | 需要完整设计和审查流程 |
-
-3. 输出选择结果和理由，然后调用 `auto_dev_init(mode=xxx)`
-4. 用户显式指定的 flag（--turbo/--quick/--full）优先于自动判断
+1. 主 Agent 分析任务描述，估算改动范围
+2. 调用 `auto_dev_init` 时传入估算参数（不传 mode）：
+   - `estimatedLines`: 预估改动行数
+   - `estimatedFiles`: 预估改动文件数
+   - `changeType`: refactor / bugfix / feature / config / docs
+3. **框架根据估算数据内部决定模式**，通过返回值中的 `mode` 字段告知主 Agent
+4. 主 Agent 根据返回的 mode 执行对应流程
+5. 用户显式指定的 flag（--turbo/--quick/--full）传入 `mode` 参数，覆盖框架自动判断
 
 ## TDD Mode (默认开启, --no-tdd 关闭)
 

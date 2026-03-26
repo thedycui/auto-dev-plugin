@@ -86,7 +86,10 @@ server.tool(
   {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick", "turbo"]),
+    mode: z.enum(["full", "quick", "turbo"]).optional(),
+    estimatedLines: z.number().optional(),
+    estimatedFiles: z.number().optional(),
+    changeType: z.enum(["refactor", "bugfix", "feature", "config", "docs"]).optional(),
     startPhase: z.number().optional(),
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
@@ -96,7 +99,7 @@ server.tool(
     costMode: z.enum(["economy", "beast"]).optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
   },
-  async ({ projectRoot, topic, mode, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict }) => {
+  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -162,6 +165,23 @@ server.tool(
       }
       if (onConflict === "overwrite") {
         await sm.backupExistingDir();
+      }
+    }
+
+    // --- Mode decision: explicit override or framework auto-select ---
+    let mode: "full" | "quick" | "turbo";
+    if (explicitMode) {
+      mode = explicitMode;
+    } else {
+      const lines = estimatedLines ?? 999;
+      const files = estimatedFiles ?? 999;
+      const isLowRisk = changeType === "refactor" || changeType === "config" || changeType === "docs";
+      if (isLowRisk && lines <= 20 && files <= 2) {
+        mode = "turbo";
+      } else if (lines <= 50 && files <= 3 && changeType !== "feature") {
+        mode = "quick";
+      } else {
+        mode = "full";
       }
     }
 
