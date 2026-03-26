@@ -7,6 +7,9 @@ import {
   containsFrameworkTerms,
   buildRevisionPrompt,
   translateFailureToFeedback,
+  parseApproachPlan,
+  extractOneLineReason,
+  buildCircuitBreakPrompt,
 } from "../orchestrator-prompts.js";
 
 // ---------------------------------------------------------------------------
@@ -174,5 +177,279 @@ describe("translateFailureToFeedback", () => {
     const result = translateFailureToFeedback("UNKNOWN_CODE", "");
     expect(result).toContain("UNKNOWN_CODE");
     expect(containsFrameworkTerms(result)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseApproachPlan (Task 7)
+// ---------------------------------------------------------------------------
+
+describe("parseApproachPlan", () => {
+  it("parses standard format with primary + 2 alternatives", () => {
+    const content = [
+      "## 主方案",
+      "- **方法**: 使用 vitest mock 进行单元测试",
+      "- **核心工具**: vitest",
+      "- **风险**: 低",
+      "",
+      "## 备选方案 A",
+      "- **方法**: 使用 jest 进行集成测试",
+      "- **核心工具**: jest",
+      "- **风险**: 中",
+      "",
+      "## 备选方案 B",
+      "- **方法**: 使用 mocha + chai 进行端到端测试",
+      "- **核心工具**: mocha",
+      "- **风险**: 高",
+    ].join("\n");
+
+    const result = parseApproachPlan(content);
+
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(3);
+    expect(result![0]).toEqual({ id: "primary", summary: "使用 vitest mock 进行单元测试", failCount: 0 });
+    expect(result![1]).toEqual({ id: "alt-a", summary: "使用 jest 进行集成测试", failCount: 0 });
+    expect(result![2]).toEqual({ id: "alt-b", summary: "使用 mocha + chai 进行端到端测试", failCount: 0 });
+  });
+
+  it("returns null when only primary approach (no alternatives)", () => {
+    const content = [
+      "## 主方案",
+      "- **方法**: 使用 vitest mock",
+      "- **核心工具**: vitest",
+    ].join("\n");
+
+    const result = parseApproachPlan(content);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseApproachPlan("")).toBeNull();
+  });
+
+  it("handles format variant with extra blank lines around headings", () => {
+    const content = [
+      "",
+      "## 主方案",
+      "",
+      "- **方法**: 直接调用 API",
+      "",
+      "",
+      "## 备选方案 A",
+      "",
+      "- **方法**: 通过代理层间接调用",
+      "",
+    ].join("\n");
+
+    const result = parseApproachPlan(content);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(2);
+    expect(result![0].summary).toBe("直接调用 API");
+    expect(result![1].summary).toBe("通过代理层间接调用");
+  });
+
+  it("returns null when content has no recognized headings (AC-6)", () => {
+    const content = "这是一段普通文本，没有方案格式。\n随便写的内容。";
+    expect(parseApproachPlan(content)).toBeNull();
+  });
+
+  // TC-01: Standard format with goal section, primary + 2 alternatives
+  it("TC-01: parses standard format with goal + primary + 2 alternatives (AC-1)", () => {
+    const content = [
+      "## 目标",
+      "为 Guide.vue 编写验证测试",
+      "",
+      "## 主方案",
+      "- **方法**: 安装 vitest + @vue/test-utils，编写组件单元测试",
+      "- **核心工具**: vitest, jsdom",
+      "- **风险**: Node 版本可能不兼容",
+      "",
+      "## 备选方案 A",
+      "- **方法**: 纯 Node.js 脚本，提取核心逻辑函数单独测试",
+      "- **核心工具**: node (内置)",
+      "- **适用**: 主方案安装失败时",
+      "",
+      "## 备选方案 B",
+      "- **方法**: 编译验证 + 代码静态审查",
+      "- **核心工具**: tsc, grep",
+      "- **适用**: 无法运行任何测试框架时",
+    ].join("\n");
+
+    const result = parseApproachPlan(content);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(3);
+    expect(result![0]).toEqual({ id: "primary", summary: "安装 vitest + @vue/test-utils，编写组件单元测试", failCount: 0 });
+    expect(result![1]).toEqual({ id: "alt-a", summary: "纯 Node.js 脚本，提取核心逻辑函数单独测试", failCount: 0 });
+    expect(result![2]).toEqual({ id: "alt-b", summary: "编译验证 + 代码静态审查", failCount: 0 });
+  });
+
+  // TC-02: Missing **方法** field uses fallback summary
+  it("TC-02: missing method field uses section title as fallback summary (AC-1)", () => {
+    const content = [
+      "## 主方案",
+      "- **核心工具**: vitest",
+      "",
+      "## 备选方案 A",
+      "- **核心工具**: jest",
+    ].join("\n");
+
+    const result = parseApproachPlan(content);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(2);
+    expect(result![0].summary).toBe("主方案");
+    expect(result![1].summary).toBe("备选方案 A");
+  });
+
+  // TC-10: Random text with no recognized headings
+  it("TC-10: random text without any headings returns null (AC-6)", () => {
+    const content = "这是一段无关的文本\n没有任何方案格式";
+    expect(parseApproachPlan(content)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractOneLineReason (Task 7)
+// ---------------------------------------------------------------------------
+
+describe("extractOneLineReason", () => {
+  it("extracts first line from long multi-line text", () => {
+    const feedback = "编译失败：找不到模块\n详细信息：xxx\n堆栈跟踪：yyy";
+    const result = extractOneLineReason(feedback);
+    expect(result).toBe("编译失败：找不到模块");
+  });
+
+  it("returns short text as-is", () => {
+    const feedback = "测试未通过";
+    const result = extractOneLineReason(feedback);
+    expect(result).toBe("测试未通过");
+  });
+
+  it("truncates first line longer than 120 characters", () => {
+    const longLine = "A".repeat(150);
+    const result = extractOneLineReason(longLine);
+    expect(result).toBe("A".repeat(120) + "...");
+    expect(result.length).toBe(123);
+  });
+
+  it("returns '未知原因' for empty string", () => {
+    expect(extractOneLineReason("")).toBe("未知原因");
+  });
+
+  it("skips leading blank lines and returns first non-empty line", () => {
+    const feedback = "\n\n  \n实际的错误信息\n更多细节";
+    const result = extractOneLineReason(feedback);
+    expect(result).toBe("实际的错误信息");
+  });
+
+  // TC-23: truncates super-long feedback (200 chars)
+  it("TC-23: truncates 200-char first line to 123 chars", () => {
+    const input = "A".repeat(200) + "\n第二行";
+    const result = extractOneLineReason(input);
+    expect(result).toBe("A".repeat(120) + "...");
+    expect(result.length).toBe(123);
+  });
+
+  // TC-24: all-whitespace input
+  it("TC-24: all-whitespace input returns '未知原因'", () => {
+    expect(extractOneLineReason("   \n\n  \n  ")).toBe("未知原因");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildCircuitBreakPrompt (Task 8)
+// ---------------------------------------------------------------------------
+
+describe("buildCircuitBreakPrompt", () => {
+  it("includes goal and approach description", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现用户认证模块",
+      approach: "使用 JWT token 方案",
+      prohibited: [],
+      outputDir: "/tmp/output",
+    });
+
+    expect(result).toContain("实现用户认证模块");
+    expect(result).toContain("使用 JWT token 方案");
+  });
+
+  it("includes prohibited list with '禁止' keyword (AC-2)", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现功能",
+      approach: "方案 B",
+      prohibited: [
+        { id: "primary", summary: "方案 A", failReason: "编译失败" },
+      ],
+      outputDir: "/tmp/output",
+    });
+
+    expect(result).toContain("禁止");
+    expect(result).toContain("方案 A");
+    expect(result).toContain("编译失败");
+  });
+
+  it("includes multiple prohibited approaches", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现功能",
+      approach: "方案 C",
+      prohibited: [
+        { id: "primary", summary: "方案 A", failReason: "类型错误" },
+        { id: "alt-a", summary: "方案 B", failReason: "依赖缺失" },
+      ],
+      outputDir: "/tmp/output",
+    });
+
+    expect(result).toContain("方案 A");
+    expect(result).toContain("方案 B");
+    expect(result).toContain("类型错误");
+    expect(result).toContain("依赖缺失");
+  });
+
+  it("does not contain any framework terms (AC-7)", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现数据库迁移",
+      approach: "使用 Prisma 迁移工具",
+      prohibited: [
+        { id: "primary", summary: "手动 SQL 迁移", failReason: "语法错误" },
+      ],
+      outputDir: "/tmp/output",
+    });
+
+    expect(containsFrameworkTerms(result)).toBe(false);
+  });
+
+  it("includes output directory", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现功能",
+      approach: "方案 A",
+      prohibited: [],
+      outputDir: "/tmp/my-output",
+    });
+
+    expect(result).toContain("/tmp/my-output");
+  });
+
+  // TC-11: circuit break prompt with multiple prohibited approaches has no framework terms
+  it("TC-11: multiple prohibited approaches still free of framework terms (AC-7)", () => {
+    const result = buildCircuitBreakPrompt({
+      goal: "实现数据库迁移功能",
+      approach: "使用 Prisma 迁移工具进行 schema 同步",
+      prohibited: [
+        { id: "primary", summary: "手动编写 SQL DDL", failReason: "SQL 语法错误" },
+        { id: "alt-a", summary: "使用 Knex 迁移", failReason: "依赖版本冲突" },
+      ],
+      outputDir: "/tmp/output",
+    });
+
+    expect(containsFrameworkTerms(result)).toBe(false);
+    // Should not contain specific framework terms
+    expect(result).not.toMatch(/checkpoint/i);
+    expect(result).not.toMatch(/tribunal/i);
+    expect(result).not.toMatch(/auto_dev_/i);
+    expect(result).not.toMatch(/Phase\s+\d/i);
+    expect(result).not.toMatch(/迭代限制/);
+    expect(result).not.toMatch(/回退限制/);
+    expect(result).not.toMatch(/\bsubmit\b/i);
+    expect(result).not.toMatch(/\bpreflight\b/i);
+    expect(result).not.toMatch(/\bmandate\b/i);
   });
 });

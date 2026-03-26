@@ -89,4 +89,76 @@ function formatTribunalIssues(detail) {
     lines.push("请根据以上问题逐一修复。");
     return lines.join("\n");
 }
+// ---------------------------------------------------------------------------
+// Circuit Breaker — approach-plan.md parsing
+// ---------------------------------------------------------------------------
+/** Parse approach-plan.md content into a list of ApproachEntry objects.
+ *  Returns null if fewer than 2 approaches (need primary + at least 1 alt). */
+export function parseApproachPlan(content) {
+    const approaches = [];
+    // Parse "## 主方案" section
+    const primaryMatch = content.match(/## 主方案\s*\n([\s\S]*?)(?=\n## |$)/);
+    if (primaryMatch) {
+        const methodMatch = primaryMatch[1].match(/-\s*\*\*方法\*\*:\s*(.+)/);
+        approaches.push({
+            id: "primary",
+            summary: methodMatch?.[1]?.trim() ?? "主方案",
+            failCount: 0,
+        });
+    }
+    // Parse "## 备选方案 X" sections
+    const altRegex = /## 备选方案\s+(\w)\s*\n([\s\S]*?)(?=\n## |$)/g;
+    let match;
+    while ((match = altRegex.exec(content)) !== null) {
+        const label = match[1].toLowerCase();
+        const section = match[2];
+        const methodMatch = section.match(/-\s*\*\*方法\*\*:\s*(.+)/);
+        approaches.push({
+            id: `alt-${label}`,
+            summary: methodMatch?.[1]?.trim() ?? `备选方案 ${match[1]}`,
+            failCount: 0,
+        });
+    }
+    return approaches.length >= 2 ? approaches : null;
+}
+/** Extract the first meaningful line from a long feedback string. */
+export function extractOneLineReason(feedback) {
+    const lines = feedback.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+    if (lines.length === 0)
+        return "未知原因";
+    // Return the first non-empty line, truncated to 120 chars
+    const first = lines[0];
+    return first.length > 120 ? first.slice(0, 120) + "..." : first;
+}
+// ---------------------------------------------------------------------------
+// Circuit Breaker — clean prompt builder
+// ---------------------------------------------------------------------------
+export function buildCircuitBreakPrompt(params) {
+    const lines = [];
+    lines.push("# 任务");
+    lines.push("");
+    lines.push(params.goal);
+    lines.push("");
+    lines.push("## 方案");
+    lines.push("");
+    lines.push("请按以下方案执行：");
+    lines.push(params.approach);
+    lines.push("");
+    if (params.prohibited.length > 0) {
+        lines.push("## 约束（以下方案已失败，禁止使用）");
+        lines.push("");
+        for (const p of params.prohibited) {
+            lines.push(`- 禁止: ${p.summary}（原因: ${p.failReason}）`);
+        }
+        lines.push("");
+    }
+    lines.push("## 要求");
+    lines.push("");
+    lines.push("- 不要尝试任何已禁止的方案");
+    lines.push("- 如果当前方案也遇到困难，先分析根因再决定下一步");
+    lines.push("");
+    lines.push(`输出目录: ${params.outputDir}`);
+    lines.push("");
+    return lines.join("\n");
+}
 //# sourceMappingURL=orchestrator-prompts.js.map

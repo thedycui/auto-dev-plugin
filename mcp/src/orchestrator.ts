@@ -17,7 +17,11 @@ import {
   buildRevisionPrompt,
   translateFailureToFeedback,
   containsFrameworkTerms,
+  parseApproachPlan,
+  extractOneLineReason,
+  buildCircuitBreakPrompt,
 } from "./orchestrator-prompts.js";
+import type { ApproachEntry, FailedApproach } from "./orchestrator-prompts.js";
 import { StateManager, internalCheckpoint, extractTaskList } from "./state-manager.js";
 import {
   validatePhase1ReviewArtifact,
@@ -46,6 +50,8 @@ export interface NextTaskResult {
     reason: string;
     lastFeedback: string;
   };
+  /** When true, the prompt should be executed in a fresh subagent context (clean slate, no prior failure context) */
+  freshContext?: boolean;
   /** Informational message */
   message: string;
 }
@@ -55,6 +61,7 @@ export interface NextTaskResult {
 // ---------------------------------------------------------------------------
 
 const MAX_STEP_ITERATIONS = 3;
+const MAX_APPROACH_FAILURES = 2;
 
 const PHASE_SEQUENCE: Record<string, number[]> = {
   full: [1, 2, 3, 4, 5, 6, 7],
@@ -205,11 +212,24 @@ export function parseTribunalResult(toolResult: ToolResult): { passed: boolean; 
 // Step State Helpers (raw JSON read/write for extra fields)
 // ---------------------------------------------------------------------------
 
+export interface ApproachState {
+  stepId: string;
+  approaches: ApproachEntry[];
+  currentIndex: number;
+  failedApproaches: FailedApproach[];
+}
+
 interface StepState {
   step: string | null;
   stepIteration: number;
   lastValidation: string | null;
+  approachState: ApproachState | null;
 }
+
+export type ApproachAction =
+  | { action: "CONTINUE"; approachState?: ApproachState; planFeedback?: string }
+  | { action: "CIRCUIT_BREAK"; prompt: string; approachState: ApproachState; failedApproach: string; nextApproach: string }
+  | { action: "ALL_EXHAUSTED" };
 
 async function readStepState(stateFilePath: string): Promise<StepState> {
   try {
@@ -218,9 +238,10 @@ async function readStepState(stateFilePath: string): Promise<StepState> {
       step: raw.step ?? null,
       stepIteration: raw.stepIteration ?? 0,
       lastValidation: raw.lastValidation ?? null,
+      approachState: raw.approachState ?? null,
     };
   } catch {
-    return { step: null, stepIteration: 0, lastValidation: null };
+    return { step: null, stepIteration: 0, lastValidation: null, approachState: null };
   }
 }
 
@@ -271,6 +292,108 @@ export function computeNextStep(currentStep: string, phases: number[]): string |
     }
   }
   return null; // all done
+}
+
+// ---------------------------------------------------------------------------
+// Circuit Breaker — approach failure handling
+// ---------------------------------------------------------------------------
+
+/** Extract the goal for a given step from plan.md */
+async function getStepGoal(step: string, outputDir: string): Promise<string> {
+  const planPath = join(outputDir, "plan.md");
+  const content = await readFileSafe(planPath);
+  if (!content) return `完成步骤 ${step} 的任务`;
+
+  // Try to find a task section matching the step number
+  const phase = parseInt(step.replace(/[a-z]/g, ""), 10);
+  // Look for "## Task N:" or similar patterns
+  const taskRegex = new RegExp(
+    `## Task\\s+${phase}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`,
+    "i",
+  );
+  const match = content.match(taskRegex);
+  if (match) {
+    // Extract the description line (first line after heading)
+    const descLine = match[1].split("\n").map((l) => l.trim()).filter((l) => l.length > 0)[0];
+    if (descLine) return descLine;
+  }
+
+  return `完成步骤 ${step} 的任务`;
+}
+
+export async function handleApproachFailure(
+  stepState: StepState,
+  step: string,
+  outputDir: string,
+  feedback: string,
+): Promise<ApproachAction> {
+  let approachState = stepState.approachState;
+
+  // First failure with no approach state: try to parse approach-plan.md
+  if (!approachState) {
+    const planPath = join(outputDir, "approach-plan.md");
+    const planContent = await readFileSafe(planPath);
+    if (!planContent) {
+      return { action: "CONTINUE" };
+    }
+    const approaches = parseApproachPlan(planContent);
+    if (!approaches) {
+      return {
+        action: "CONTINUE",
+        planFeedback: "你的 approach-plan.md 缺少备选方案。请补充至少 1 个与主方案技术路径有本质区别的备选方案（换参数/换 flag 不算，换工具/换思路才算）。",
+      };
+    }
+    approachState = {
+      stepId: step,
+      approaches,
+      currentIndex: 0,
+      failedApproaches: [],
+    };
+  }
+
+  // Increment current approach failCount
+  const current = approachState.approaches[approachState.currentIndex];
+  if (!current) {
+    return { action: "ALL_EXHAUSTED" };
+  }
+  current.failCount++;
+
+  // Below threshold: continue with revision
+  if (current.failCount < MAX_APPROACH_FAILURES) {
+    return { action: "CONTINUE", approachState };
+  }
+
+  // Threshold reached: circuit break current approach
+  approachState.failedApproaches.push({
+    id: current.id,
+    summary: current.summary,
+    failReason: extractOneLineReason(feedback),
+  });
+  approachState.currentIndex++;
+
+  // Check if there are more approaches
+  if (approachState.currentIndex >= approachState.approaches.length) {
+    return { action: "ALL_EXHAUSTED" };
+  }
+
+  const next = approachState.approaches[approachState.currentIndex];
+  const goal = await getStepGoal(step, outputDir);
+
+  // Build clean prompt
+  const prompt = buildCircuitBreakPrompt({
+    goal,
+    approach: next.summary,
+    prohibited: approachState.failedApproaches,
+    outputDir,
+  });
+
+  return {
+    action: "CIRCUIT_BREAK",
+    prompt,
+    approachState,
+    failedApproach: current.summary,
+    nextApproach: next.summary,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +590,12 @@ export async function buildTaskForStep(
     }) + ISOLATION_FOOTER;
   }
 
+  // Approach plan instruction for steps that may need circuit breaker
+  const APPROACH_PLAN_STEPS = ["3", "4a", "5b"];
+  const approachPlanInstruction = APPROACH_PLAN_STEPS.includes(step)
+    ? `\n\n## 执行前：方案计划\n\n在开始编码/测试之前，先输出方案计划到 ${outputDir}/approach-plan.md：\n\n1. 主方案 + 1~2 个备选方案\n2. 每个方案标注方法、核心工具、风险\n3. 备选方案应与主方案在技术路径上有本质区别\n   （换参数/换 flag 不算，换工具/换思路才算）\n`
+    : "";
+
   // Map steps to prompt templates
   const stepToTemplate: Record<string, string> = {
     "1a": "phase1-architect",
@@ -486,7 +615,7 @@ export async function buildTaskForStep(
 
     if (!planContent) {
       // Turbo mode without plan.md — use topic directly
-      return `请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` + ISOLATION_FOOTER;
+      return `请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
     }
 
     const taskListStr = extractTaskList(planContent);
@@ -496,7 +625,7 @@ export async function buildTaskForStep(
     }
 
     const allTasks = taskLines.join("\n");
-    return `请完成以下任务：\n\n${allTasks}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}` + ISOLATION_FOOTER;
+    return `请完成以下任务：\n\n${allTasks}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}` + approachPlanInstruction + ISOLATION_FOOTER;
   }
 
   // Step 4a: implementation fix/verify
@@ -506,14 +635,15 @@ export async function buildTaskForStep(
         originalTask: `代码验证：${topic}`,
         feedback,
         artifacts: [],
-      }) + ISOLATION_FOOTER;
+      }) + approachPlanInstruction + ISOLATION_FOOTER;
     }
-    return `请检查并修复代码，确保编译和测试通过。\n\n项目根目录: ${projectRoot}` + ISOLATION_FOOTER;
+    return `请检查并修复代码，确保编译和测试通过。\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
   }
 
   const template = stepToTemplate[step];
   if (template) {
-    return renderPrompt(template, variables);
+    const rendered = await renderPrompt(template, variables);
+    return rendered + approachPlanInstruction;
   }
 
   // Fallback
@@ -578,8 +708,58 @@ export async function computeNextTask(
   );
 
   if (!validation.passed) {
-    // Check iteration limit
-    if (currentIteration >= MAX_STEP_ITERATIONS) {
+    // Circuit breaker: check approach failure before iteration limit
+    const approachResult = await handleApproachFailure(
+      stepState, currentStep, outputDir, validation.feedback,
+    );
+
+    if (approachResult.action === "CIRCUIT_BREAK") {
+      // Reset stepIteration for new approach
+      await writeStepState(sm.stateFilePath, {
+        stepIteration: 0,
+        lastValidation: "CIRCUIT_BREAK",
+        approachState: approachResult.approachState,
+      });
+
+      return {
+        done: false,
+        step: currentStep,
+        agent: STEP_AGENTS[currentStep] ?? null,
+        prompt: approachResult.prompt,
+        freshContext: true,
+        message: `方案 "${approachResult.failedApproach}" 已熔断，切换到 "${approachResult.nextApproach}"。`,
+      };
+    }
+
+    if (approachResult.action === "ALL_EXHAUSTED") {
+      await writeStepState(sm.stateFilePath, {
+        lastValidation: "ALL_APPROACHES_EXHAUSTED",
+      });
+      await sm.atomicUpdate({ status: "BLOCKED" });
+
+      return {
+        done: false,
+        step: currentStep,
+        agent: null,
+        prompt: null,
+        escalation: {
+          reason: "all_approaches_exhausted",
+          lastFeedback: validation.feedback,
+        },
+        message: `Step ${currentStep} 所有方案均已失败，需要人工介入。`,
+      };
+    }
+
+    // CONTINUE: persist approachState if present, then check iteration limit
+    if (approachResult.approachState) {
+      await writeStepState(sm.stateFilePath, {
+        approachState: approachResult.approachState,
+      });
+    }
+
+    // Check iteration limit (skip if approachState exists — circuit breaker manages limits)
+    const hasApproachState = !!(approachResult.approachState || stepState.approachState);
+    if (!hasApproachState && currentIteration >= MAX_STEP_ITERATIONS) {
       // Escalation
       await writeStepState(sm.stateFilePath, {
         lastValidation: "ESCALATED",
@@ -621,8 +801,14 @@ export async function computeNextTask(
       });
     }
 
+    // Append planFeedback from circuit breaker if approach-plan.md was malformed
+    let combinedFeedback = validation.feedback;
+    if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
+      combinedFeedback += `\n\n${approachResult.planFeedback}`;
+    }
+
     const prompt = await buildTaskForStep(
-      revisionStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback,
+      revisionStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback,
     );
 
     // For review failures (1b, 2b), after revision go back to review step
@@ -668,6 +854,7 @@ export async function computeNextTask(
     step: nextStep,
     stepIteration: 0,
     lastValidation: null,
+    approachState: null,
   });
   await sm.atomicUpdate({ phase: nextPhase, status: "IN_PROGRESS" });
 
