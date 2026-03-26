@@ -20,7 +20,7 @@ import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
 import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
 import { getClaudePath } from "./tribunal.js";
-import { runOrchestrator } from "./orchestrator.js";
+import { computeNextTask } from "./orchestrator.js";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1402,26 +1402,13 @@ server.tool("auto_dev_tribunal_verdict", "Submit tribunal verdict from fallback 
     });
 });
 // ===========================================================================
-// 16. auto_dev_orchestrate (Invisible Framework Entry Point)
+// 16. auto_dev_next (Step Orchestrator — Invisible Framework)
 // ===========================================================================
-server.tool("auto_dev_orchestrate", "Launch autonomous development loop. Orchestrates design → plan → implement → verify → test → accept → retrospect as isolated task agents. Returns progress or escalation when human input needed.", {
+server.tool("auto_dev_next", "Get the next task in the autonomous development loop. Returns a task prompt for a subagent, or done=true when complete. Call in a loop: dispatch Agent(task) then call next again.", {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick", "turbo"]).optional(),
-    skipE2e: z.boolean().optional(),
-    tdd: z.boolean().optional(),
-    costMode: z.enum(["economy", "beast"]).optional(),
-    interactive: z.boolean().optional(),
-}, async ({ projectRoot, topic, mode, skipE2e, tdd, costMode, interactive }) => {
-    const result = await runOrchestrator({
-        projectRoot,
-        topic,
-        mode: mode ?? "full",
-        skipE2e,
-        tdd,
-        costMode,
-        interactive,
-    });
+}, async ({ projectRoot, topic }) => {
+    const result = await computeNextTask(projectRoot, topic);
     return textResult(result);
 });
 // ===========================================================================

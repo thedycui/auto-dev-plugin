@@ -1598,20 +1598,15 @@ server.tool(
 );
 
 // ===========================================================================
-// 16. auto_dev_orchestrate (Invisible Framework Entry Point)
+// 16. auto_dev_next (Step Orchestrator — Invisible Framework)
 // ===========================================================================
 
 server.tool(
-  "auto_dev_orchestrate",
-  "Launch autonomous development loop. Orchestrates design → plan → implement → verify → test → accept → retrospect as isolated task agents. Returns progress or escalation when human input needed.",
+  "auto_dev_next",
+  "Get the next task in the autonomous development loop. Returns a task prompt for a subagent, or done=true when complete. Call in a loop: dispatch Agent(task) then call next again.",
   {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick", "turbo"]).optional(),
-    skipE2e: z.boolean().optional(),
-    tdd: z.boolean().optional(),
-    costMode: z.enum(["economy", "beast"]).optional(),
-    interactive: z.boolean().optional(),
   },
   async ({ projectRoot, topic }) => {
     const result = await computeNextTask(projectRoot, topic);
