@@ -578,7 +578,6 @@ server.tool(
     // ===================================================================
 
     const result = await internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, {
-      tddWarning: null,
       regressTo,
     });
 
@@ -684,7 +683,7 @@ server.tool(
       const { execFile: execFileTest } = await import("node:child_process");
       const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
         execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.red }, (err, _stdout, stderrOut) => {
-          const code = err ? (err as any).code ?? 1 : 0;
+          const code = err ? (typeof (err as any).code === "number" ? (err as any).code : 1) : 0;
           resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
         });
       });
@@ -799,7 +798,7 @@ server.tool(
       const { execFile: execFileTest } = await import("node:child_process");
       const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
         execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.green }, (err, _stdout, stderrOut) => {
-          const code = err ? (err as any).code ?? 1 : 0;
+          const code = err ? (typeof (err as any).code === "number" ? (err as any).code : 1) : 0;
           resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
         });
       });

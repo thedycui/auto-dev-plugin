@@ -108,7 +108,6 @@ export declare const StateJsonSchema: z.ZodObject<{
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     tdd: z.ZodOptional<z.ZodBoolean>;
-    tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     tddTaskStates: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         status: z.ZodEnum<{
             PENDING: "PENDING";
@@ -163,7 +162,6 @@ export declare const InitInputSchema: z.ZodObject<{
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
     tdd: z.ZodOptional<z.ZodBoolean>;
-    tddWarnings: z.ZodOptional<z.ZodArray<z.ZodString>>;
     brainstorm: z.ZodOptional<z.ZodBoolean>;
     onConflict: z.ZodOptional<z.ZodEnum<{
         resume: "resume";

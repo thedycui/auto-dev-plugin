@@ -524,7 +524,6 @@ export async function internalCheckpoint(
   task?: number,
   tokenEstimate?: number,
   opts?: {
-    tddWarning?: null;
     regressTo?: number;
   },
 ): Promise<{

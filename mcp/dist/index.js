@@ -526,7 +526,6 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     // COMMIT PHASE — all pre-validations passed, now persist state
     // ===================================================================
     const result = await internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, {
-        tddWarning: null,
         regressTo,
     });
     if (!result.ok) {
@@ -618,7 +617,7 @@ server.tool("auto_dev_task_red", "TDD RED phase: validate that only test files w
         const { execFile: execFileTest } = await import("node:child_process");
         const result = await new Promise((resolve) => {
             execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.red }, (err, _stdout, stderrOut) => {
-                const code = err ? err.code ?? 1 : 0;
+                const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
                 resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
             });
         });
@@ -717,7 +716,7 @@ server.tool("auto_dev_task_green", "TDD GREEN phase: verify that tests now pass 
         const { execFile: execFileTest } = await import("node:child_process");
         const result = await new Promise((resolve) => {
             execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.green }, (err, _stdout, stderrOut) => {
-                const code = err ? err.code ?? 1 : 0;
+                const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
                 resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
             });
         });
