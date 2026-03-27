@@ -1409,8 +1409,15 @@ server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Ph
             message: "Phase 7 复盘完成，无需独立裁决。",
         });
     }
-    // DEPRECATED: tribunal execution now handled by orchestrator via auto_dev_next.
-    // For backward compatibility, delegate to executeTribunal (legacy path).
+    // Block if orchestrator is active — tribunal is handled by auto_dev_next
+    if (state.step != null) {
+        return textResult({
+            status: "DEPRECATED",
+            message: "当前 session 使用 orchestrator 模式，tribunal 由 auto_dev_next 自动执行。请调用 auto_dev_next 代替 auto_dev_submit。",
+            mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
+        });
+    }
+    // Legacy path (non-orchestrator sessions)
     const outputDir = sm.outputDir;
     const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
     return { content: tribunalResult.content };
