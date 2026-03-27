@@ -8,6 +8,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StateJson } from "./types.js";
+import { isTestFile } from "./tdd-gate.js";
 
 /** Phase 元数据 */
 const PHASE_META: Record<number, { name: string; description: string }> = {
@@ -375,16 +376,7 @@ export function validatePhase6Artifacts(
  * 通过扫描 git diff 输出中的文件名模式判断。
  */
 export function countTestFiles(diffFileNames: string[]): number {
-  const testPatterns = [
-    /[Tt]est\.(java|py|ts|js|kt|go|rs)$/,
-    /\.test\.(ts|js|tsx|jsx)$/,
-    /\.spec\.(ts|js|tsx|jsx)$/,
-    /_test\.(go|py)$/,
-    /tests?\//i,
-  ];
-  return diffFileNames.filter((f) =>
-    testPatterns.some((p) => p.test(f))
-  ).length;
+  return diffFileNames.filter(f => isTestFile(f)).length;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,10 +9,11 @@
 // ---------------------------------------------------------------------------
 
 const TEST_PATTERNS = [
-  /[Tt]est\.(java|ts|js|py)$/,
+  /[Tt]est\.(java|ts|js|py|kt|go|rs)$/,
   /\.test\.(ts|js|tsx|jsx)$/,
-  /\.spec\.(ts|js)$/,
-  /_test\.(go|py)$/,
+  /\.spec\.(ts|js|tsx|jsx)$/,
+  /_test\.(go|py|rs)$/,
+  /(?:^|\/)test_\w+\.py$/,
 ];
 
 const TEST_RESOURCE_EXT = /\.(json|yml|yaml|xml|sql|txt|csv)$/;

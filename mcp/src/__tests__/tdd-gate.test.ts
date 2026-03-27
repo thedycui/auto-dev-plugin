@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { isTestFile, isImplFile, buildTestCommand, validateRedPhase, TDD_TIMEOUTS } from "../tdd-gate.js";
+import { countTestFiles } from "../phase-enforcer.js";
 import { StateJsonSchema } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,34 @@ describe("isTestFile", () => {
   it("does NOT match config.yml outside test directory", () => {
     expect(isTestFile("config/app.yml")).toBe(false);
   });
+
+  it("matches foo.test.tsx", () => {
+    expect(isTestFile("foo.test.tsx")).toBe(true);
+  });
+
+  it("matches foo.spec.jsx", () => {
+    expect(isTestFile("foo.spec.jsx")).toBe(true);
+  });
+
+  it("matches foo_test.rs", () => {
+    expect(isTestFile("foo_test.rs")).toBe(true);
+  });
+
+  it("matches FooTest.kt", () => {
+    expect(isTestFile("FooTest.kt")).toBe(true);
+  });
+
+  it("matches test_foo.py", () => {
+    expect(isTestFile("test_foo.py")).toBe(true);
+  });
+
+  it("matches tests/test_bar.py", () => {
+    expect(isTestFile("tests/test_bar.py")).toBe(true);
+  });
+
+  it("does NOT match src/main/java/TestDataFactory.java as false positive", () => {
+    expect(isTestFile("src/main/java/TestDataFactory.java")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -91,6 +120,10 @@ describe("isImplFile", () => {
 
   it("does NOT match package.json (non-source)", () => {
     expect(isImplFile("package.json")).toBe(false);
+  });
+
+  it("does NOT match FooTest.java (isImplFile)", () => {
+    expect(isImplFile("FooTest.java")).toBe(false);
   });
 });
 
@@ -268,6 +301,34 @@ describe("StateJsonSchema tddTaskStates", () => {
     const stateWithOld = makeState({ tddWarnings: ["some warning"] });
     // Zod v4 passthrough: unknown fields should not fail (depends on schema strictness)
     // The important thing is the field is no longer in the schema definition
+  });
+});
+
+// ---------------------------------------------------------------------------
+// countTestFiles (AC-9)
+// ---------------------------------------------------------------------------
+
+describe("countTestFiles", () => {
+  it("counts test files in a diff list", () => {
+    const files = [
+      "src/main/java/Foo.java",
+      "src/test/java/FooTest.java",
+      "src/utils.ts",
+      "src/__tests__/bar.test.ts",
+      "lib/baz.spec.jsx",
+      "pkg/handler_test.go",
+      "tests/test_foo.py",
+    ];
+    expect(countTestFiles(files)).toBe(5);
+  });
+
+  it("returns 0 for empty list", () => {
+    expect(countTestFiles([])).toBe(0);
+  });
+
+  it("returns 0 when no test files present", () => {
+    const files = ["src/Foo.java", "src/utils.ts", "README.md"];
+    expect(countTestFiles(files)).toBe(0);
   });
 });
 

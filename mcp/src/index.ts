@@ -17,7 +17,7 @@ import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
 import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective } from "./phase-enforcer.js";
-import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS } from "./tdd-gate.js";
+import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS, isImplFile } from "./tdd-gate.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
@@ -527,11 +527,7 @@ server.tool(
         const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
         testFileCount = countTestFiles(newFiles);
         // Count new implementation files (non-test source files)
-        const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/, /\.go$/, /\.rs$/, /\.kt$/];
-        const testPatterns = [/[Tt]est\.(java|py|ts|js|kt|go|rs)$/, /\.test\.(ts|js|tsx|jsx)$/, /\.spec\.(ts|js|tsx|jsx)$/, /_test\.(go|py)$/, /tests?\//i];
-        implFileCount = newFiles.filter(f =>
-          implPatterns.some(p => p.test(f)) && !testPatterns.some(p => p.test(f))
-        ).length;
+        implFileCount = newFiles.filter(f => isImplFile(f)).length;
       } catch { /* ignore git errors */ }
 
       let resultsContent: string | null = null;

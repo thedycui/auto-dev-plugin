@@ -28,6 +28,7 @@ import {
   computeNextDirective,
 } from "./phase-enforcer.js";
 import { LessonsManager } from "./lessons-manager.js";
+import { isTestFile, isImplFile } from "./tdd-gate.js";
 import type { NextDirective } from "./phase-enforcer.js";
 import { getClaudePath } from "./agent-spawner.js";
 
@@ -451,18 +452,8 @@ export async function crossValidate(
       }, (err, stdout) => resolve(err ? "" : stdout || ""));
     });
     const files = diffOutput.trim().split("\n").filter((f) => f.length > 0);
-    const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/];
-    const testPatterns = [
-      /[Tt]est\.(java|ts|js|py)$/,
-      /\.test\.(ts|js)$/,
-      /\.spec\.(ts|js)$/,
-    ];
-    const implCount = files.filter(
-      (f) => implPatterns.some((p) => p.test(f)) && !testPatterns.some((p) => p.test(f)),
-    ).length;
-    const testCount = files.filter(
-      (f) => testPatterns.some((p) => p.test(f)),
-    ).length;
+    const implCount = files.filter(f => isImplFile(f)).length;
+    const testCount = files.filter(f => isTestFile(f)).length;
     if (implCount > 0 && testCount === 0) {
       return `${implCount} 个新增实现文件但 0 个测试文件，裁决 Agent 不应判定 PASS`;
     }
@@ -668,15 +659,7 @@ async function runQuickPreCheck(
       resultsContent = await readFile(join(outputDir, "e2e-test-results.md"), "utf-8");
     } catch { /* file doesn't exist */ }
 
-    const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/];
-    const testPatterns = [
-      /[Tt]est\.(java|ts|js|py)$/,
-      /\.test\.(ts|js)$/,
-      /\.spec\.(ts|js)$/,
-    ];
-    const implFileCount = files.filter(
-      (f) => implPatterns.some((p) => p.test(f)) && !testPatterns.some((p) => p.test(f)),
-    ).length;
+    const implFileCount = files.filter(f => isImplFile(f)).length;
 
     const result = await validatePhase5Artifacts(outputDir, testFileCount, resultsContent, implFileCount);
     if (!result.valid) {
