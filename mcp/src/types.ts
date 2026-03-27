@@ -156,6 +156,22 @@ export const StateJsonSchema = z.object({
   // Phase-level escalation counter (Issue #2: ESCALATE auto-regress)
   phaseEscalateCount: z.record(z.string(), z.number()).optional(),
 
+  // Ship (Phase 8) — optional delivery verification
+  ship: z.boolean().optional(),
+  deployTarget: z.string().optional(),
+  deployBranch: z.string().optional(),
+  deployEnv: z.string().optional(),
+  verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
+  verifyConfig: z.object({
+    endpoint: z.string().optional(),
+    expectedPattern: z.string().optional(),
+    logPath: z.string().optional(),
+    logKeyword: z.string().optional(),
+    sshHost: z.string().optional(),
+  }).optional(),
+  shipRound: z.number().int().optional(),
+  shipMaxRounds: z.number().int().optional(),
+
   // Timestamps
   startedAt: z.string(),
   updatedAt: z.string(),
@@ -186,6 +202,20 @@ export const InitInputSchema = z.object({
   tdd: z.boolean().optional(),          // --tdd: RED-GREEN-REFACTOR in Phase 3
   brainstorm: z.boolean().optional(),   // --brainstorm: enable Phase 0
   onConflict: OnConflictSchema.optional(),
+  // Ship (Phase 8) parameters
+  ship: z.boolean().optional(),
+  deployTarget: z.string().optional(),
+  deployBranch: z.string().optional(),
+  deployEnv: z.string().optional(),
+  verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
+  verifyConfig: z.object({
+    endpoint: z.string().optional(),
+    expectedPattern: z.string().optional(),
+    logPath: z.string().optional(),
+    logKeyword: z.string().optional(),
+    sshHost: z.string().optional(),
+  }).optional(),
+  shipMaxRounds: z.number().int().optional(),
 });
 
 export type InitInput = z.infer<typeof InitInputSchema>;

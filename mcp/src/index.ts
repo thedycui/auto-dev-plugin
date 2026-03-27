@@ -101,8 +101,21 @@ server.tool(
     costMode: z.enum(["economy", "beast"]).optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
     designDoc: z.string().optional(),
+    ship: z.boolean().optional(),
+    deployTarget: z.string().optional(),
+    deployBranch: z.string().optional(),
+    deployEnv: z.string().optional(),
+    verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
+    verifyConfig: z.object({
+      endpoint: z.string().optional(),
+      expectedPattern: z.string().optional(),
+      logPath: z.string().optional(),
+      logKeyword: z.string().optional(),
+      sshHost: z.string().optional(),
+    }).optional(),
+    shipMaxRounds: z.number().int().optional(),
   },
-  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc }) => {
+  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds }) => {
     const sm = new StateManager(projectRoot, topic);
 
     // Handle existing directory
@@ -193,6 +206,14 @@ server.tool(
       }
     }
 
+    // --- Ship parameter validation ---
+    if (ship === true && !deployTarget) {
+      return textResult({
+        error: "MISSING_DEPLOY_TARGET",
+        message: "ship=true requires deployTarget parameter.",
+      });
+    }
+
     // --- Mode decision: explicit override or framework auto-select ---
     let mode: "full" | "quick" | "turbo";
     if (explicitMode) {
@@ -260,6 +281,16 @@ server.tool(
     behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
     behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
+    if (ship === true) {
+      behaviorUpdates["ship"] = true;
+      behaviorUpdates["deployTarget"] = deployTarget;
+      if (deployBranch) behaviorUpdates["deployBranch"] = deployBranch;
+      if (deployEnv) behaviorUpdates["deployEnv"] = deployEnv;
+      if (verifyMethod) behaviorUpdates["verifyMethod"] = verifyMethod;
+      if (verifyConfig) behaviorUpdates["verifyConfig"] = verifyConfig;
+      behaviorUpdates["shipRound"] = 0;
+      behaviorUpdates["shipMaxRounds"] = shipMaxRounds ?? 5;
+    }
     await sm.atomicUpdate(behaviorUpdates);
 
     // --- Design doc binding (Issue #7) ---
@@ -1306,6 +1337,7 @@ server.tool(
       state.mode,
       state.dryRun === true,
       state.skipE2e === true,
+      state.ship === true,
     );
 
     // State consistency check: state.phase must match max passed phase in progress-log

@@ -19,6 +19,7 @@ const PHASE_META: Record<number, { name: string; description: string }> = {
   5: { name: "E2E_TEST", description: "端到端测试" },
   6: { name: "ACCEPTANCE", description: "验收" },
   7: { name: "RETROSPECTIVE", description: "经验萃取" },
+  8: { name: "SHIP", description: "交付验证" },
 };
 
 /** full 模式的必需 Phase */
@@ -108,7 +109,7 @@ export function computeNextDirective(
 ): NextDirective {
   const mode = state.mode;
   const isDryRun = state.dryRun === true;
-  const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : 7;
+  const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : state.ship === true ? 8 : 7;
 
   // REGRESS 分支必须在守卫之前
   if (status === "REGRESS") {
@@ -199,6 +200,7 @@ export function validateCompletion(
   mode: "full" | "quick" | "turbo",
   isDryRun: boolean,
   skipE2e: boolean = false,
+  ship: boolean = false,
 ): CompletionValidation {
   const basePhases = isDryRun
     ? [1, 2]
@@ -207,9 +209,12 @@ export function validateCompletion(
       : mode === "quick"
         ? REQUIRED_PHASES_QUICK
         : REQUIRED_PHASES_FULL;
-  const requiredPhases = skipE2e
+  let requiredPhases = skipE2e
     ? basePhases.filter((p) => p !== 5)
     : basePhases;
+  if (ship) {
+    requiredPhases = [...requiredPhases, 8];
+  }
 
   // 从 progress-log 中提取所有 PASS 的 phase
   const passedPhases = new Set<number>();

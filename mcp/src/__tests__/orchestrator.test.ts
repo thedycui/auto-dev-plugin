@@ -1377,4 +1377,344 @@ describe("computeNextStep — skipE2e phase filtering", () => {
     const phases = [1, 2, 3, 4, 6, 7];
     expect(computeNextStep("5a", phases)).toBe("6");
   });
+
+  // Phase 8 ship steps
+  it("AC-4: full + ship phases: step 7 → 8a", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7, 8];
+    expect(computeNextStep("7", phases)).toBe("8a");
+  });
+
+  it("AC-5: skipE2e + ship: step 4a → 6 (skip 5), step 7 → 8a", () => {
+    const phases = [1, 2, 3, 4, 6, 7, 8];
+    expect(computeNextStep("4a", phases)).toBe("6");
+    expect(computeNextStep("7", phases)).toBe("8a");
+  });
+
+  it("ship phases: step 8a → 8b → 8c → 8d", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7, 8];
+    expect(computeNextStep("8a", phases)).toBe("8b");
+    expect(computeNextStep("8b", phases)).toBe("8c");
+    expect(computeNextStep("8c", phases)).toBe("8d");
+  });
+
+  it("step 8d is terminal when phase 8 is last", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7, 8];
+    expect(computeNextStep("8d", phases)).toBeNull();
+  });
+
+  it("no ship: step 7 is terminal", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7];
+    expect(computeNextStep("7", phases)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 8 Ship Integration Tests
+// ---------------------------------------------------------------------------
+
+describe("Phase 8 ship integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteFile.mockResolvedValue(undefined);
+    mockAtomicUpdate.mockResolvedValue(undefined);
+    mockInternalCheckpoint.mockResolvedValue({
+      ok: true,
+      nextDirective: { phaseCompleted: true, nextPhase: null, nextPhaseName: null, mandate: "", canDeclareComplete: true },
+      stateUpdates: {},
+    });
+  });
+
+  // AC-4: full + ship=true: Phase 7 PASS -> advance to 8a
+  it("AC-4: Phase 7 PASS with ship=true advances to step 8a", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 7, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "7", stepIteration: 0 });
+      }
+      if (path.includes("retrospective.md")) {
+        return ("x\n").repeat(35); // >30 lines
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8a");
+    expect(result.agent).toBe("auto-dev-developer");
+  });
+
+  // AC-6: Step 8a validation - unpushed commits
+  it("AC-6: Step 8a fails when there are unpushed commits", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8a", stepIteration: 0 });
+      }
+      throw new Error("ENOENT");
+    });
+
+    // git log returns unpushed commits
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "abc1234 some unpushed commit\n", "");
+      },
+    );
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8a");
+    // Should be a revision (failed validation)
+    expect(result.prompt).not.toBeNull();
+  });
+
+  it("AC-6: Step 8a passes when no unpushed commits", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8a", stepIteration: 0 });
+      }
+      throw new Error("ENOENT");
+    });
+
+    // git log returns empty (all pushed)
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "", "");
+      },
+    );
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8b");
+    expect(result.message).toContain("8a");
+    expect(result.message).toContain("passed");
+  });
+
+  // AC-7: Step 8b validation
+  it("AC-7: Step 8b fails when ship-build-result.md missing", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8b", stepIteration: 0 });
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8b");
+    expect(result.prompt).not.toBeNull();
+  });
+
+  it("AC-7: Step 8b passes when ship-build-result.md contains SUCCEED", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8b", stepIteration: 0 });
+      }
+      if (path.includes("ship-build-result.md")) {
+        return "Build SUCCEED at 2026-03-27T10:00:00Z";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8c");
+  });
+
+  // AC-8: Step 8c validation
+  it("AC-8: Step 8c passes when ship-deploy-result.md contains SUCCEED", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8c", stepIteration: 0 });
+      }
+      if (path.includes("ship-deploy-result.md")) {
+        return "Deploy SUCCEED to green environment";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("8d");
+  });
+
+  // AC-9: Step 8d validation - PASS
+  it("AC-9: Step 8d PASS completes all phases", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8d", stepIteration: 0 });
+      }
+      if (path.includes("ship-verify-result.md")) {
+        return "Verification PASS - all checks green";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(true);
+    expect(result.step).toBeNull();
+  });
+
+  // AC-9: Step 8d CODE_BUG -> regressToPhase=3
+  it("AC-9: Step 8d CODE_BUG triggers regress to Phase 3", async () => {
+    const state = makeState({
+      mode: "full", ship: true, phase: 8, deployTarget: "my-app",
+      shipRound: 0, shipMaxRounds: 5,
+    });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8d", stepIteration: 0 });
+      }
+      if (path.includes("ship-verify-result.md")) {
+        return "Verification failed: CODE_BUG - NullPointerException in UserService";
+      }
+      if (path.includes("plan.md")) {
+        return "## Task 3: Fix code\nFix the NullPointerException";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.step).toBe("3");
+    expect(result.agent).toBe("auto-dev-developer");
+    expect(result.message).toContain("CODE_BUG");
+    expect(result.message).toContain("round 1");
+
+    // Verify atomicUpdate was called with regress state
+    const regressCall = mockAtomicUpdate.mock.calls.find(
+      (call: unknown[]) => (call[0] as Record<string, unknown>).lastValidation === "SHIP_REGRESS",
+    );
+    expect(regressCall).toBeDefined();
+    const regressData = regressCall![0] as Record<string, unknown>;
+    expect(regressData.phase).toBe(3);
+    expect(regressData.step).toBe("3");
+    expect(regressData.stepIteration).toBe(0);
+    expect(regressData.shipRound).toBe(1);
+    expect(regressData.approachState).toBeNull();
+  });
+
+  // AC-9: Step 8d ENV_ISSUE -> no regress
+  it("AC-9: Step 8d ENV_ISSUE returns failure without regress", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8d", stepIteration: 0 });
+      }
+      if (path.includes("ship-verify-result.md")) {
+        return "Verification failed: ENV_ISSUE - connection refused to database";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    // ENV_ISSUE goes to normal failure handling (not regress)
+    expect(result.step).toBe("8d");
+  });
+
+  // AC-10: shipRound >= shipMaxRounds -> ESCALATE
+  it("AC-10: shipRound >= shipMaxRounds returns ESCALATE with BLOCKED", async () => {
+    const state = makeState({
+      mode: "full", ship: true, phase: 8, deployTarget: "my-app",
+      shipRound: 4, shipMaxRounds: 5,
+    });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8d", stepIteration: 0 });
+      }
+      if (path.includes("ship-verify-result.md")) {
+        return "Verification failed: CODE_BUG - still broken";
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(false);
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation?.reason).toBe("ship_max_rounds");
+    expect(result.prompt).toBeNull();
+
+    // Verify BLOCKED status
+    const blockedCall = mockAtomicUpdate.mock.calls.find(
+      (call: unknown[]) => (call[0] as Record<string, unknown>).status === "BLOCKED",
+    );
+    expect(blockedCall).toBeDefined();
+  });
+
+  // AC-12: Phase 8 steps do NOT trigger tribunal
+  it("AC-12: Phase 8 steps do not call evaluateTribunal", async () => {
+    const state = makeState({ mode: "full", ship: true, phase: 8, deployTarget: "my-app" });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    // Step 8b passes
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "8b", stepIteration: 0 });
+      }
+      if (path.includes("ship-build-result.md")) {
+        return "Build SUCCEED";
+      }
+      throw new Error("ENOENT");
+    });
+
+    await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(mockEvaluateTribunal).not.toHaveBeenCalled();
+  });
+
+  // No ship: Phase 7 is terminal (step 7 -> done=true)
+  it("AC-3: no ship: Phase 7 last step completes successfully", async () => {
+    const state = makeState({ mode: "full", phase: 7 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "7", stepIteration: 0 });
+      }
+      if (path.includes("retrospective.md")) {
+        return ("x\n").repeat(35);
+      }
+      throw new Error("ENOENT");
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.done).toBe(true);
+    expect(result.step).toBeNull();
+  });
 });

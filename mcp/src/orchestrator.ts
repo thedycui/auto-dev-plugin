@@ -85,10 +85,14 @@ const STEP_AGENTS: Record<string, string> = {
   "5c": "auto-dev-developer",
   "6": "auto-dev-acceptance-validator",
   "7": "auto-dev-reviewer",
+  "8a": "auto-dev-developer",
+  "8b": "auto-dev-developer",
+  "8c": "auto-dev-developer",
+  "8d": "auto-dev-developer",
 };
 
 /** Ordered step transitions (happy path) */
-const STEP_ORDER = ["1a", "1b", "2a", "2b", "3", "4a", "5a", "5b", "6", "7"];
+const STEP_ORDER = ["1a", "1b", "2a", "2b", "3", "4a", "5a", "5b", "6", "7", "8a", "8b", "8c", "8d"];
 
 const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
 
@@ -260,7 +264,7 @@ export function phaseForStep(step: string): number {
 /** Return the first sub-step for a given phase */
 export function firstStepForPhase(phase: number): string {
   const map: Record<number, string> = {
-    1: "1a", 2: "2a", 3: "3", 4: "4a", 5: "5a", 6: "6", 7: "7",
+    1: "1a", 2: "2a", 3: "3", 4: "4a", 5: "5a", 6: "6", 7: "7", 8: "8a",
   };
   return map[phase] ?? String(phase);
 }
@@ -544,6 +548,68 @@ export async function validateStep(
       return { passed: true, feedback: "" };
     }
 
+    // Phase 8: Ship (delivery verification) — no tribunal
+    case "8a": {
+      // Check all commits are pushed
+      try {
+        const gitResult = await shell("git log --oneline --branches --not --remotes", projectRoot, 10_000);
+        if (gitResult.exitCode !== 0) {
+          return { passed: false, feedback: `git 命令执行失败: ${gitResult.stderr}` };
+        }
+        const unpushed = gitResult.stdout.trim();
+        if (unpushed.length > 0) {
+          return { passed: false, feedback: `存在未 push 的 commit:\n${unpushed}\n请执行 git push 推送所有变更。` };
+        }
+      } catch (err) {
+        return { passed: false, feedback: `git 命令执行异常: ${(err as Error).message}` };
+      }
+      return { passed: true, feedback: "" };
+    }
+
+    case "8b": {
+      const buildResultContent = await readFileSafe(join(outputDir, "ship-build-result.md"));
+      if (!buildResultContent || !buildResultContent.includes("SUCCEED")) {
+        return {
+          passed: false,
+          feedback: "ship-build-result.md 不存在或不含 'SUCCEED'，请确认构建成功后写入结果。",
+        };
+      }
+      return { passed: true, feedback: "" };
+    }
+
+    case "8c": {
+      const deployResultContent = await readFileSafe(join(outputDir, "ship-deploy-result.md"));
+      if (!deployResultContent || !deployResultContent.includes("SUCCEED")) {
+        return {
+          passed: false,
+          feedback: "ship-deploy-result.md 不存在或不含 'SUCCEED'，请确认部署成功后写入结果。",
+        };
+      }
+      return { passed: true, feedback: "" };
+    }
+
+    case "8d": {
+      const verifyContent = await readFileSafe(join(outputDir, "ship-verify-result.md"));
+      if (!verifyContent) {
+        return { passed: false, feedback: "ship-verify-result.md 不存在，请完成远程验证后写入结果。" };
+      }
+      if (verifyContent.includes("PASS")) {
+        return { passed: true, feedback: "" };
+      }
+      if (verifyContent.includes("CODE_BUG")) {
+        return {
+          passed: false,
+          feedback: "远程验证发现代码问题（CODE_BUG），需要回退到 Phase 3 修复。",
+          regressToPhase: 3,
+        };
+      }
+      // ENV_ISSUE or other failure — no regress, escalate
+      return {
+        passed: false,
+        feedback: "远程验证失败（ENV_ISSUE 或其他环境问题），需要人工介入排查环境。",
+      };
+    }
+
     default:
       return { passed: true, feedback: "" };
   }
@@ -579,6 +645,7 @@ export async function buildTaskForStep(
   buildCmd: string,
   testCmd: string,
   feedback?: string,
+  extraVars?: Record<string, string>,
 ): Promise<string> {
   const variables: Record<string, string> = {
     topic,
@@ -586,6 +653,7 @@ export async function buildTaskForStep(
     project_root: projectRoot,
     build_cmd: buildCmd,
     test_cmd: testCmd,
+    ...extraVars,
   };
 
   // Revision steps (1c, 2c, 5c) — build revision prompt
@@ -629,6 +697,10 @@ export async function buildTaskForStep(
     "5b": "phase5-test-developer",
     "6": "phase6-acceptance",
     "7": "phase7-retrospective",
+    "8a": "phase8-ship",
+    "8b": "phase8-ship",
+    "8c": "phase8-ship",
+    "8d": "phase8-ship",
   };
 
   // Step 3: implementation — special handling
@@ -689,8 +761,35 @@ export async function computeNextTask(
   if (state.skipE2e === true) {
     phases = phases.filter(p => p !== 5);
   }
+  if (state.ship === true) {
+    phases = [...phases, 8];
+  }
   const buildCmd = state.stack.buildCmd;
   const testCmd = state.stack.testCmd;
+
+  // Ship extra variables for Phase 8 prompt rendering
+  const shipExtraVars: Record<string, string> | undefined = state.ship === true
+    ? {
+        substep: "",  // will be overridden per call
+        deployTarget: state.deployTarget ?? "",
+        deployBranch: state.deployBranch ?? "",
+        deployEnv: state.deployEnv ?? "green",
+        verifyMethod: state.verifyMethod ?? "",
+        verifyEndpoint: state.verifyConfig?.endpoint ?? "",
+        verifyExpectedPattern: state.verifyConfig?.expectedPattern ?? "",
+        verifyLogPath: state.verifyConfig?.logPath ?? "",
+        verifyLogKeyword: state.verifyConfig?.logKeyword ?? "",
+        verifySshHost: state.verifyConfig?.sshHost ?? "",
+      }
+    : undefined;
+
+  /** Build extraVars for a specific step, adding substep for Phase 8 */
+  function getExtraVars(step: string): Record<string, string> | undefined {
+    if (shipExtraVars && step.startsWith("8")) {
+      return { ...shipExtraVars, substep: step };
+    }
+    return undefined;
+  }
 
   // 2. Read step state
   const stepState = await readStepState(sm.stateFilePath);
@@ -707,7 +806,7 @@ export async function computeNextTask(
     });
 
     const prompt = await buildTaskForStep(
-      firstStep, outputDir, projectRoot, topic, buildCmd, testCmd,
+      firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep),
     );
 
     return {
@@ -734,7 +833,28 @@ export async function computeNextTask(
       const submits = state.tribunalSubmits ?? {};
       const count = (submits[phaseKey] ?? 0) + 1;
 
-      // Crashed tribunal → fallback needed
+      // Parse failure: LLM responded but JSON was malformed.
+      // Return raw output for the main agent to extract the verdict itself.
+      if (validation.tribunalResult.rawParseFailure && validation.tribunalResult.rawOutput) {
+        await sm.atomicUpdate({
+          tribunalSubmits: { ...submits, [phaseKey]: count },
+        });
+        return {
+          done: false,
+          step: currentStep,
+          agent: null,
+          prompt: null,
+          escalation: {
+            reason: "tribunal_parse_failure",
+            lastFeedback: "Tribunal 返回了裁决内容但 JSON 格式不合法。请从以下原始输出中提取 verdict 和 issues，然后调用 auto_dev_tribunal_verdict 提交。",
+            digest: validation.tribunalResult.rawOutput,
+            digestHash: validation.tribunalResult.digestHash,
+          },
+          message: `Step ${currentStep} tribunal JSON 解析失败，原始输出已返回，请 agent 自行提取裁决结果。`,
+        };
+      }
+
+      // Crashed tribunal → full fallback needed (process-level failure)
       if (validation.tribunalResult.crashed) {
         await sm.atomicUpdate({
           tribunalSubmits: { ...submits, [phaseKey]: count },
@@ -800,6 +920,45 @@ export async function computeNextTask(
         agent: STEP_AGENTS[currentStep] ?? null,
         prompt,
         message: `Step ${currentStep} tribunal FAIL (attempt ${count}/3). Revision needed.`,
+      };
+    }
+
+    // --- regressToPhase handling (Phase 8 CODE_BUG -> regress to Phase 3) ---
+    if (validation.regressToPhase !== undefined) {
+      const currentShipRound = (state.shipRound ?? 0) + 1;
+      const maxRounds = state.shipMaxRounds ?? 5;
+      if (currentShipRound >= maxRounds) {
+        await sm.atomicUpdate({ status: "BLOCKED" });
+        return {
+          done: false, step: currentStep, agent: null, prompt: null,
+          escalation: {
+            reason: "ship_max_rounds",
+            lastFeedback: validation.feedback,
+          },
+          message: `Ship 已达最大轮次 (${currentShipRound}/${maxRounds})，需要人工介入。`,
+        };
+      }
+
+      const regressStep = firstStepForPhase(validation.regressToPhase);
+      await sm.atomicUpdate({
+        phase: validation.regressToPhase,
+        step: regressStep,
+        stepIteration: 0,
+        shipRound: currentShipRound,
+        lastValidation: "SHIP_REGRESS",
+        approachState: null,
+        status: "IN_PROGRESS",
+      });
+
+      const prompt = await buildTaskForStep(
+        regressStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback,
+      );
+      return {
+        done: false,
+        step: regressStep,
+        agent: STEP_AGENTS[regressStep] ?? null,
+        prompt,
+        message: `Step ${currentStep} 远程验证失败 (CODE_BUG)，回退到 Phase ${validation.regressToPhase} (round ${currentShipRound})。`,
       };
     }
 
@@ -880,7 +1039,7 @@ export async function computeNextTask(
     }
 
     const prompt = await buildTaskForStep(
-      effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback,
+      effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback, getExtraVars(effectiveStep),
     );
 
     return {
@@ -935,7 +1094,7 @@ export async function computeNextTask(
   });
 
   const prompt = await buildTaskForStep(
-    nextStep, outputDir, projectRoot, topic, buildCmd, testCmd,
+    nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep),
   );
 
   return {

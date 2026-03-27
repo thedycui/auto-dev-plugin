@@ -6,6 +6,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isTestFile } from "./tdd-gate.js";
 /** Phase 元数据 */
 const PHASE_META = {
     1: { name: "DESIGN", description: "设计审查" },
@@ -15,6 +16,7 @@ const PHASE_META = {
     5: { name: "E2E_TEST", description: "端到端测试" },
     6: { name: "ACCEPTANCE", description: "验收" },
     7: { name: "RETROSPECTIVE", description: "经验萃取" },
+    8: { name: "SHIP", description: "交付验证" },
 };
 /** full 模式的必需 Phase */
 const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6, 7];
@@ -65,7 +67,7 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
 export function computeNextDirective(currentPhase, status, state, regressTo) {
     const mode = state.mode;
     const isDryRun = state.dryRun === true;
-    const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : 7;
+    const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : state.ship === true ? 8 : 7;
     // REGRESS 分支必须在守卫之前
     if (status === "REGRESS") {
         if (!regressTo || regressTo >= currentPhase) {
@@ -134,7 +136,7 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
  * 验证是否所有必需 Phase 都已完成。
  * 通过解析 progress-log.md 中的 CHECKPOINT 注释来判断。
  */
-export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e = false) {
+export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e = false, ship = false) {
     const basePhases = isDryRun
         ? [1, 2]
         : mode === "turbo"
@@ -142,9 +144,12 @@ export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e =
             : mode === "quick"
                 ? REQUIRED_PHASES_QUICK
                 : REQUIRED_PHASES_FULL;
-    const requiredPhases = skipE2e
+    let requiredPhases = skipE2e
         ? basePhases.filter((p) => p !== 5)
         : basePhases;
+    if (ship) {
+        requiredPhases = [...requiredPhases, 8];
+    }
     // 从 progress-log 中提取所有 PASS 的 phase
     const passedPhases = new Set();
     const checkpointRegex = /<!-- CHECKPOINT phase=(\d+).*?status=PASS/g;
@@ -266,14 +271,7 @@ export function validatePhase6Artifacts(reportContent) {
  * 通过扫描 git diff 输出中的文件名模式判断。
  */
 export function countTestFiles(diffFileNames) {
-    const testPatterns = [
-        /[Tt]est\.(java|py|ts|js|kt|go|rs)$/,
-        /\.test\.(ts|js|tsx|jsx)$/,
-        /\.spec\.(ts|js|tsx|jsx)$/,
-        /_test\.(go|py)$/,
-        /tests?\//i,
-    ];
-    return diffFileNames.filter((f) => testPatterns.some((p) => p.test(f))).length;
+    return diffFileNames.filter(f => isTestFile(f)).length;
 }
 /**
  * 验证前置阶段是否已通过。

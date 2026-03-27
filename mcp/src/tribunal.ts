@@ -251,6 +251,10 @@ export async function prepareTribunalInput(
 /** Known error strings that indicate a crash (not a legitimate verdict) */
 const CRASH_INDICATORS = [
   "裁决进程执行失败",
+];
+
+/** Error strings that indicate JSON parse failure (raw output may still be usable) */
+const PARSE_FAILURE_INDICATORS = [
   "JSON 解析失败",
   "未返回有效的 structured_output",
 ];
@@ -356,16 +360,28 @@ export async function runTribunal(
  * Run tribunal with 1 retry for crash (not legitimate FAIL).
  * Uses crash detection via known error strings.
  * 3s backoff between attempts.
- * Returns { verdict, crashed } — crashed=true means process crashed, not a real verdict.
+ * Returns { verdict, crashed, rawParseFailure } —
+ *   crashed=true means process-level crash (needs full fallback),
+ *   rawParseFailure=true means LLM responded but JSON was malformed (agent can parse raw).
  */
 export async function runTribunalWithRetry(
   digestContent: string,
   phase: number,
-): Promise<{ verdict: TribunalVerdict; crashed: boolean }> {
+): Promise<{ verdict: TribunalVerdict; crashed: boolean; rawParseFailure?: boolean }> {
   const MAX_RETRIES = 1;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const result = await runTribunal(digestContent, phase);
+
+    // Check if it's a JSON parse failure (LLM responded but output wasn't valid JSON).
+    // The raw output likely contains the verdict in a readable form — return it
+    // immediately for the main agent to extract, no retry needed.
+    const isParseFailure = result.issues.some((i) =>
+      PARSE_FAILURE_INDICATORS.some((indicator) => i.description.includes(indicator)),
+    );
+    if (isParseFailure) {
+      return { verdict: result, crashed: false, rawParseFailure: true };
+    }
 
     // Distinguish legitimate verdict from process crash
     const isCrash = result.issues.some((i) =>
@@ -528,7 +544,11 @@ export interface EvalTribunalResult {
   advisory?: Array<{ description: string; suggestion?: string }>;
   /** Whether the tribunal process crashed (needs fallback) */
   crashed?: boolean;
-  /** Digest content for fallback (only when crashed) */
+  /** Whether JSON parse failed but raw LLM output is available for agent extraction */
+  rawParseFailure?: boolean;
+  /** Raw LLM output when parse failed (agent can extract verdict from this) */
+  rawOutput?: string;
+  /** Digest content for fallback (only when crashed or rawParseFailure) */
   digest?: string;
   digestHash?: string;
   /** Pre-check failure message (no tribunal was run) */
@@ -561,13 +581,28 @@ export async function evaluateTribunal(
   const { digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
 
   // 3. Run tribunal with retry
-  const { verdict, crashed } = await runTribunalWithRetry(digestContent, phase);
+  const { verdict, crashed, rawParseFailure } = await runTribunalWithRetry(digestContent, phase);
 
   // 4. Write tribunal log (audit trail — not state)
   const tribunalLog = buildTribunalLog(phase, verdict, "claude-p");
   await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
 
-  // 5. Crashed → return for fallback
+  // 5a. Parse failure → return raw output for main agent to extract verdict
+  // The LLM responded but output wasn't valid JSON. The raw text likely contains
+  // the verdict in a readable form that the main agent can parse.
+  if (rawParseFailure && verdict.raw) {
+    const digestHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
+    return {
+      verdict: "FAIL",
+      issues: [],
+      rawParseFailure: true,
+      rawOutput: verdict.raw,
+      digest: digestContent,
+      digestHash,
+    };
+  }
+
+  // 5b. Crashed → return for fallback (process-level failure, no raw output available)
   if (crashed) {
     const digestHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
     return { verdict: "FAIL", issues: [], crashed: true, digest: digestContent, digestHash };

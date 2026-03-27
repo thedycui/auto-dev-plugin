@@ -52,6 +52,7 @@ export declare const LessonEntrySchema: z.ZodObject<{
         technical: "technical";
         pattern: "pattern";
         "iteration-limit": "iteration-limit";
+        tribunal: "tribunal";
     }>;
     severity: z.ZodOptional<z.ZodEnum<{
         critical: "critical";
@@ -148,6 +149,30 @@ export declare const StateJsonSchema: z.ZodObject<{
     }, z.core.$strip>>;
     injectedLessonIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     tribunalSubmits: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    step: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    stepIteration: z.ZodOptional<z.ZodNumber>;
+    lastValidation: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    approachState: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
+    phaseEscalateCount: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
+    ship: z.ZodOptional<z.ZodBoolean>;
+    deployTarget: z.ZodOptional<z.ZodString>;
+    deployBranch: z.ZodOptional<z.ZodString>;
+    deployEnv: z.ZodOptional<z.ZodString>;
+    verifyMethod: z.ZodOptional<z.ZodEnum<{
+        api: "api";
+        log: "log";
+        test: "test";
+        combined: "combined";
+    }>>;
+    verifyConfig: z.ZodOptional<z.ZodObject<{
+        endpoint: z.ZodOptional<z.ZodString>;
+        expectedPattern: z.ZodOptional<z.ZodString>;
+        logPath: z.ZodOptional<z.ZodString>;
+        logKeyword: z.ZodOptional<z.ZodString>;
+        sshHost: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    shipRound: z.ZodOptional<z.ZodNumber>;
+    shipMaxRounds: z.ZodOptional<z.ZodNumber>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
@@ -177,6 +202,24 @@ export declare const InitInputSchema: z.ZodObject<{
         resume: "resume";
         overwrite: "overwrite";
     }>>;
+    ship: z.ZodOptional<z.ZodBoolean>;
+    deployTarget: z.ZodOptional<z.ZodString>;
+    deployBranch: z.ZodOptional<z.ZodString>;
+    deployEnv: z.ZodOptional<z.ZodString>;
+    verifyMethod: z.ZodOptional<z.ZodEnum<{
+        api: "api";
+        log: "log";
+        test: "test";
+        combined: "combined";
+    }>>;
+    verifyConfig: z.ZodOptional<z.ZodObject<{
+        endpoint: z.ZodOptional<z.ZodString>;
+        expectedPattern: z.ZodOptional<z.ZodString>;
+        logPath: z.ZodOptional<z.ZodString>;
+        logKeyword: z.ZodOptional<z.ZodString>;
+        sshHost: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+    shipMaxRounds: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type InitInput = z.infer<typeof InitInputSchema>;
 export declare const InitOutputSchema: z.ZodObject<{
@@ -259,6 +302,11 @@ export interface TribunalVerdict {
         severity: "P0" | "P1" | "P2";
         description: string;
         file?: string;
+        suggestion?: string;
+        acRef?: string;
+    }>;
+    advisory?: Array<{
+        description: string;
         suggestion?: string;
     }>;
     traces?: Array<{
