@@ -422,6 +422,45 @@ export async function handleApproachFailure(
 // Step Validation
 // ---------------------------------------------------------------------------
 
+/**
+ * Run a command (build or test) and check if failure is pre-existing.
+ * If the command fails but also fails at the baseline (startCommit),
+ * it's a pre-existing issue — returns null (pass through).
+ * If it's a new failure introduced by our changes, returns the failure result.
+ */
+async function checkBuildWithBaseline(
+  cmd: string,
+  projectRoot: string,
+  startCommit: string | undefined,
+  failType: string = "BUILD_FAILED",
+): Promise<{ passed: false; feedback: string } | null> {
+  const result = await shell(cmd, projectRoot);
+  if (result.exitCode === 0) return null; // Success, no issue
+
+  // Command failed — check if it was already broken before our changes.
+  // Only attempt if startCommit exists and git stash succeeds (real git repo).
+  if (startCommit) {
+    const stashResult = await shell("git stash --include-untracked -q", projectRoot, 10_000);
+    if (stashResult.exitCode === 0) {
+      try {
+        const baselineResult = await shell(cmd, projectRoot, 300_000);
+        if (baselineResult.exitCode !== 0) {
+          // Pre-existing failure — not caused by our changes, pass through
+          return null;
+        }
+      } finally {
+        await shell("git stash pop -q", projectRoot, 10_000);
+      }
+    }
+    // git stash failed (no git repo, nothing to stash, etc.) — skip baseline check
+  }
+
+  return {
+    passed: false,
+    feedback: translateFailureToFeedback(failType, result.stdout + "\n" + result.stderr),
+  };
+}
+
 export async function validateStep(
   step: string,
   outputDir: string,
@@ -485,40 +524,20 @@ export async function validateStep(
     }
 
     case "3": {
-      // Build + test
-      const buildResult = await shell(buildCmd, projectRoot);
-      if (buildResult.exitCode !== 0) {
-        return {
-          passed: false,
-          feedback: translateFailureToFeedback("BUILD_FAILED", buildResult.stdout + "\n" + buildResult.stderr),
-        };
-      }
-      const testResult = await shell(testCmd, projectRoot);
-      if (testResult.exitCode !== 0) {
-        return {
-          passed: false,
-          feedback: translateFailureToFeedback("TEST_FAILED", testResult.stdout + "\n" + testResult.stderr),
-        };
-      }
+      // Build + test (with pre-existing failure detection)
+      const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit);
+      if (buildFail3) return buildFail3;
+      const testFail3 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED");
+      if (testFail3) return testFail3;
       return { passed: true, feedback: "" };
     }
 
     case "4a": {
-      // Build + test first
-      const buildResult = await shell(buildCmd, projectRoot);
-      if (buildResult.exitCode !== 0) {
-        return {
-          passed: false,
-          feedback: translateFailureToFeedback("BUILD_FAILED", buildResult.stdout + "\n" + buildResult.stderr),
-        };
-      }
-      const testResult = await shell(testCmd, projectRoot);
-      if (testResult.exitCode !== 0) {
-        return {
-          passed: false,
-          feedback: translateFailureToFeedback("TEST_FAILED", testResult.stdout + "\n" + testResult.stderr),
-        };
-      }
+      // Build + test first (with pre-existing failure detection)
+      const buildFail4 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit);
+      if (buildFail4) return buildFail4;
+      const testFail4 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED");
+      if (testFail4) return testFail4;
       // Tribunal (pure evaluation — no state side effects)
       const eval4 = await evaluateTribunal(projectRoot, outputDir, 4, topic, "Phase 4 verify", state.startCommit);
       return {

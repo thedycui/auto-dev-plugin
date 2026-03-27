@@ -468,6 +468,16 @@ server.tool(
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
+    // Guard 0: In orchestrator mode, checkpoint is managed by auto_dev_next.
+    // Only allow non-PASS checkpoints (e.g. IN_PROGRESS) or tribunal-forced overrides.
+    if (state.step != null && status === "PASS" && (TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+      return textResult({
+        error: "USE_AUTO_DEV_NEXT",
+        message: `当前使用 orchestrator 模式，Phase ${phase} 的验证和推进由 auto_dev_next 自动处理。请调用 auto_dev_next(projectRoot, topic) 推进流程，不要手动调用 checkpoint 或 submit。`,
+        mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
+      });
+    }
+
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
       return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
@@ -1620,9 +1630,9 @@ server.tool(
     // Block if orchestrator is active — tribunal is handled by auto_dev_next
     if (state.step != null) {
       return textResult({
-        status: "DEPRECATED",
-        message: "当前 session 使用 orchestrator 模式，tribunal 由 auto_dev_next 自动执行。请调用 auto_dev_next 代替 auto_dev_submit。",
-        mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
+        error: "USE_AUTO_DEV_NEXT",
+        message: "当前 session 使用 orchestrator 模式。所有阶段推进（包括 tribunal 裁决）都由 auto_dev_next 自动处理。请勿调用 auto_dev_submit 或 auto_dev_checkpoint，直接调用 auto_dev_next(projectRoot, topic) 即可。",
+        mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。禁止调用 auto_dev_submit 和 auto_dev_checkpoint。",
       });
     }
 

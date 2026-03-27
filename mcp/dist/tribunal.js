@@ -162,7 +162,12 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
             maxBuffer: 1 * 1024 * 1024,
         }, (err, stdout) => resolve(err ? "(git diff --stat failed)" : stdout));
     });
-    content += `## 框架统计（可信数据）\n\`\`\`\n${diffStat}\n\`\`\`\n\n`;
+    // Truncate diffStat if too large (monorepos can produce thousands of lines)
+    const diffStatLines = diffStat.split("\n");
+    const truncatedDiffStat = diffStatLines.length > 100
+        ? diffStatLines.slice(0, 100).join("\n") + `\n... (${diffStatLines.length - 100} more files omitted)`
+        : diffStat;
+    content += `## 框架统计（可信数据）\n\`\`\`\n${truncatedDiffStat}\n\`\`\`\n\n`;
     // 2. Inline review materials (truncated to reasonable length)
     const filesToInline = getPhaseFiles(phase, outputDir);
     for (const { label, path, maxLines } of filesToInline) {
@@ -190,6 +195,14 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     catch { /* lessons not available, skip */ }
     // 5. Checklist
     content += `## 检查清单\n\n${getTribunalChecklist(phase)}\n`;
+    // 6. Size guard: truncate digest to prevent MCP token limit errors.
+    // 93K+ char digests have been observed in large projects (monorepos with binary diffs).
+    const MAX_DIGEST_CHARS = 40_000;
+    if (content.length > MAX_DIGEST_CHARS) {
+        const truncatePoint = content.lastIndexOf("\n", MAX_DIGEST_CHARS);
+        content = content.slice(0, truncatePoint > 0 ? truncatePoint : MAX_DIGEST_CHARS)
+            + `\n\n... (digest truncated from ${content.length} to ~${MAX_DIGEST_CHARS} chars to avoid token limits)\n`;
+    }
     await writeFile(digestFile, content, "utf-8");
     return { digestPath: digestFile, digestContent: content };
 }
