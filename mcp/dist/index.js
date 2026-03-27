@@ -152,7 +152,33 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
             });
         }
         if (onConflict === "overwrite") {
+            // Bug 6 fix: if designDoc is inside outputDir, save it before backup deletes the dir
+            let savedDesignDoc;
+            if (designDoc) {
+                const resolvedDoc = resolve(projectRoot, designDoc);
+                if (resolvedDoc.startsWith(sm.outputDir)) {
+                    const { mkdtemp } = await import("node:fs/promises");
+                    const { copyFile: cpFile } = await import("node:fs/promises");
+                    const tmpDir = await mkdtemp(join(projectRoot, ".auto-dev-tmp-"));
+                    savedDesignDoc = join(tmpDir, "design.md");
+                    try {
+                        await cpFile(resolvedDoc, savedDesignDoc);
+                    }
+                    catch {
+                        savedDesignDoc = undefined;
+                    }
+                }
+            }
+            // Bug 7 fix: preserve progress-log from previous session
+            let savedProgressLog;
+            try {
+                savedProgressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8");
+            }
+            catch { /* no progress-log to preserve */ }
             await sm.backupExistingDir();
+            // Stash saved values for use after sm.init()
+            sm._savedDesignDoc = savedDesignDoc;
+            sm._savedProgressLog = savedProgressLog;
         }
     }
     // --- Mode decision: explicit override or framework auto-select ---
@@ -179,6 +205,29 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     const git = await gitManager.getStatus();
     const startCommit = await gitManager.getHeadCommit();
     await sm.init(mode, stack, startPhase);
+    // Restore saved data from overwrite (Bug 6 + Bug 7)
+    if (sm._savedDesignDoc) {
+        const { copyFile: cpFile2 } = await import("node:fs/promises");
+        try {
+            await cpFile2(sm._savedDesignDoc, join(sm.outputDir, "design.md"));
+            designDoc = join(sm.outputDir, "design.md"); // point to restored copy
+        }
+        catch { /* restore failed — will fall through to normal designDoc handling */ }
+    }
+    if (sm._savedProgressLog) {
+        // Append old progress-log checkpoints to new one for completion validation
+        try {
+            const newLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8");
+            const oldCheckpoints = sm._savedProgressLog
+                .split("\n")
+                .filter((l) => l.includes("<!-- CHECKPOINT"))
+                .join("\n");
+            if (oldCheckpoints) {
+                await writeFile(join(sm.outputDir, "progress-log.md"), newLog + "\n<!-- RESTORED FROM PREVIOUS SESSION -->\n" + oldCheckpoints + "\n", "utf-8");
+            }
+        }
+        catch { /* restore failed — non-fatal */ }
+    }
     // Create a lightweight git tag as rollback anchor (best-effort, non-blocking)
     try {
         const { execFile: execFileSync } = await import("node:child_process");
