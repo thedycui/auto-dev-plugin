@@ -516,18 +516,110 @@ export function textResult(obj: Record<string, unknown>): ToolResult {
 }
 
 // ---------------------------------------------------------------------------
-// Full Tribunal Execution
+// Pure Tribunal Evaluation (no state side effects)
+// ---------------------------------------------------------------------------
+
+export interface EvalTribunalResult {
+  /** Final verdict after auto-override and cross-validation */
+  verdict: "PASS" | "FAIL";
+  /** Issues found */
+  issues: TribunalVerdict["issues"];
+  /** Advisory items (downgraded from P0/P1 without acRef) */
+  advisory?: Array<{ description: string; suggestion?: string }>;
+  /** Whether the tribunal process crashed (needs fallback) */
+  crashed?: boolean;
+  /** Digest content for fallback (only when crashed) */
+  digest?: string;
+  digestHash?: string;
+  /** Pre-check failure message (no tribunal was run) */
+  preCheckError?: string;
+  /** Cross-validation override message */
+  crossValidateOverride?: string;
+}
+
+/**
+ * Pure tribunal evaluation — runs tribunal and returns verdict WITHOUT writing
+ * any state (no checkpoint, no phase advancement, no counter updates).
+ *
+ * The orchestrator is responsible for all state changes based on this result.
+ */
+export async function evaluateTribunal(
+  projectRoot: string,
+  outputDir: string,
+  phase: number,
+  topic: string,
+  summary: string,
+  startCommit?: string,
+): Promise<EvalTribunalResult> {
+  // 1. Quick pre-checks
+  const preCheckError = await runQuickPreCheck(phase, outputDir, projectRoot, startCommit);
+  if (preCheckError) {
+    return { verdict: "FAIL", issues: [{ severity: "P0", description: preCheckError }], preCheckError };
+  }
+
+  // 2. Prepare tribunal input
+  const { digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
+
+  // 3. Run tribunal with retry
+  const { verdict, crashed } = await runTribunalWithRetry(digestContent, phase);
+
+  // 4. Write tribunal log (audit trail — not state)
+  const tribunalLog = buildTribunalLog(phase, verdict, "claude-p");
+  await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
+
+  // 5. Crashed → return for fallback
+  if (crashed) {
+    const digestHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
+    return { verdict: "FAIL", issues: [], crashed: true, digest: digestContent, digestHash };
+  }
+
+  // 6. Auto-override: FAIL without P0/P1 acRef → PASS
+  const advisory: Array<{ description: string; suggestion?: string }> = [];
+  if (verdict.verdict === "FAIL") {
+    const remaining = verdict.issues.filter((issue) => {
+      if ((issue.severity === "P0" || issue.severity === "P1") && !(issue as any).acRef) {
+        advisory.push({ description: issue.description, suggestion: issue.suggestion });
+        return false;
+      }
+      return true;
+    });
+    const hasBlockingIssues = remaining.some(
+      (i) => i.severity === "P0" || i.severity === "P1",
+    );
+    if (!hasBlockingIssues) {
+      verdict.verdict = "PASS";
+      verdict.issues = remaining;
+    }
+  }
+
+  // 7. Cross-validate on PASS
+  if (verdict.verdict === "PASS") {
+    const crossCheckFail = await crossValidate(phase, outputDir, projectRoot, startCommit);
+    if (crossCheckFail) {
+      return {
+        verdict: "FAIL",
+        issues: [{ severity: "P0", description: crossCheckFail }],
+        crossValidateOverride: crossCheckFail,
+        advisory,
+      };
+    }
+  }
+
+  return {
+    verdict: verdict.verdict as "PASS" | "FAIL",
+    issues: verdict.issues,
+    advisory: advisory.length > 0 ? advisory : undefined,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Full Tribunal Execution (DEPRECATED — use evaluateTribunal + orchestrator)
 // ---------------------------------------------------------------------------
 
 /**
- * Full tribunal orchestration:
- *   1. Quick pre-check (reuse existing validate* functions)
- *   2. prepareTribunalInput
- *   3. runTribunalWithRetry
- *   4. Write tribunal log
- *   5. crossValidate on PASS
- *   6. internalCheckpoint on PASS
- *   7. Return TRIBUNAL_PASS / TRIBUNAL_FAIL / TRIBUNAL_OVERRIDDEN / TRIBUNAL_PENDING
+ * @deprecated Use evaluateTribunal() instead. This function has side effects
+ * (writes checkpoint, advances phase) that conflict with the orchestrator.
+ * Kept for backward compatibility with auto_dev_tribunal_verdict fallback path.
  */
 export async function executeTribunal(
   projectRoot: string,

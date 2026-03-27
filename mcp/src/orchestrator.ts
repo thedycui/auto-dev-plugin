@@ -22,13 +22,13 @@ import {
   buildCircuitBreakPrompt,
 } from "./orchestrator-prompts.js";
 import type { ApproachEntry, FailedApproach } from "./orchestrator-prompts.js";
-import { StateManager, internalCheckpoint, extractTaskList } from "./state-manager.js";
+import { StateManager, extractTaskList } from "./state-manager.js";
 import {
   validatePhase1ReviewArtifact,
   validatePhase2ReviewArtifact,
 } from "./phase-enforcer.js";
-import { executeTribunal } from "./tribunal.js";
-import type { ToolResult } from "./tribunal.js";
+import { evaluateTribunal } from "./tribunal.js";
+import type { EvalTribunalResult } from "./tribunal.js";
 import { TemplateRenderer } from "./template-renderer.js";
 import type { StateJson } from "./types.js";
 
@@ -49,6 +49,8 @@ export interface NextTaskResult {
   escalation?: {
     reason: string;
     lastFeedback: string;
+    digest?: string;
+    digestHash?: string;
   };
   /** When true, the prompt should be executed in a fresh subagent context (clean slate, no prior failure context) */
   freshContext?: boolean;
@@ -173,7 +175,8 @@ export async function renderPrompt(
 // Tribunal Result Parser
 // ---------------------------------------------------------------------------
 
-export function parseTribunalResult(toolResult: ToolResult): { passed: boolean; feedback: string } {
+/** @deprecated No longer used — tribunal results handled directly via EvalTribunalResult */
+export function parseTribunalResult(toolResult: { content: Array<{ type: string; text: string }> }): { passed: boolean; feedback: string } {
   const text = toolResult.content[0]?.text;
   if (!text) {
     return { passed: false, feedback: "Tribunal returned empty result." };
@@ -243,20 +246,6 @@ async function readStepState(stateFilePath: string): Promise<StepState> {
   } catch {
     return { step: null, stepIteration: 0, lastValidation: null, approachState: null };
   }
-}
-
-async function writeStepState(
-  stateFilePath: string,
-  updates: Partial<StepState>,
-): Promise<void> {
-  let raw: Record<string, unknown> = {};
-  try {
-    raw = JSON.parse(await readFile(stateFilePath, "utf-8"));
-  } catch {
-    // file doesn't exist or is corrupt — we'll just write what we have
-  }
-  Object.assign(raw, updates, { updatedAt: new Date().toISOString() });
-  await writeFile(stateFilePath, JSON.stringify(raw, null, 2), "utf-8");
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +398,7 @@ export async function validateStep(
   sm: StateManager,
   state: StateJson,
   topic: string,
-): Promise<{ passed: boolean; feedback: string }> {
+): Promise<{ passed: boolean; feedback: string; tribunalResult?: EvalTribunalResult; regressToPhase?: number }> {
   switch (step) {
     case "1a": {
       const designPath = join(outputDir, "design.md");
@@ -497,11 +486,15 @@ export async function validateStep(
           feedback: translateFailureToFeedback("TEST_FAILED", testResult.stdout + "\n" + testResult.stderr),
         };
       }
-      // Then tribunal
-      const tribunalResult = await executeTribunal(
-        projectRoot, outputDir, 4, topic, "Phase 4 verify", sm, state,
-      );
-      return parseTribunalResult(tribunalResult);
+      // Tribunal (pure evaluation — no state side effects)
+      const eval4 = await evaluateTribunal(projectRoot, outputDir, 4, topic, "Phase 4 verify", state.startCommit);
+      return {
+        passed: eval4.verdict === "PASS",
+        feedback: eval4.verdict === "FAIL"
+          ? eval4.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
+          : "",
+        tribunalResult: eval4,
+      };
     }
 
     case "5a": {
@@ -511,32 +504,43 @@ export async function validateStep(
 
     case "5b": {
       // Run tests first
-      const testResult = await shell(testCmd, projectRoot);
-      if (testResult.exitCode !== 0) {
+      const testResult5 = await shell(testCmd, projectRoot);
+      if (testResult5.exitCode !== 0) {
         return {
           passed: false,
-          feedback: translateFailureToFeedback("TEST_FAILED", testResult.stdout + "\n" + testResult.stderr),
+          feedback: translateFailureToFeedback("TEST_FAILED", testResult5.stdout + "\n" + testResult5.stderr),
         };
       }
-      // Then tribunal
-      const tribunalResult = await executeTribunal(
-        projectRoot, outputDir, 5, topic, "Phase 5 E2E test", sm, state,
-      );
-      return parseTribunalResult(tribunalResult);
+      const eval5 = await evaluateTribunal(projectRoot, outputDir, 5, topic, "Phase 5 E2E test", state.startCommit);
+      return {
+        passed: eval5.verdict === "PASS",
+        feedback: eval5.verdict === "FAIL"
+          ? eval5.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
+          : "",
+        tribunalResult: eval5,
+      };
     }
 
     case "6": {
-      const tribunalResult = await executeTribunal(
-        projectRoot, outputDir, 6, topic, "Phase 6 acceptance", sm, state,
-      );
-      return parseTribunalResult(tribunalResult);
+      const eval6 = await evaluateTribunal(projectRoot, outputDir, 6, topic, "Phase 6 acceptance", state.startCommit);
+      return {
+        passed: eval6.verdict === "PASS",
+        feedback: eval6.verdict === "FAIL"
+          ? eval6.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
+          : "",
+        tribunalResult: eval6,
+      };
     }
 
     case "7": {
-      const tribunalResult = await executeTribunal(
-        projectRoot, outputDir, 7, topic, "Phase 7 retrospective", sm, state,
-      );
-      return parseTribunalResult(tribunalResult);
+      const eval7 = await evaluateTribunal(projectRoot, outputDir, 7, topic, "Phase 7 retrospective", state.startCommit);
+      return {
+        passed: eval7.verdict === "PASS",
+        feedback: eval7.verdict === "FAIL"
+          ? eval7.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
+          : "",
+        tribunalResult: eval7,
+      };
     }
 
     default:
@@ -695,15 +699,11 @@ export async function computeNextTask(
     const firstPhase = phases[0]!;
     const firstStep = firstStepForPhase(firstPhase);
 
-    // Persist step state
-    await writeStepState(sm.stateFilePath, {
-      step: firstStep,
-      stepIteration: 0,
-      lastValidation: null,
+    // Single atomicUpdate: step + phase
+    await sm.atomicUpdate({
+      step: firstStep, stepIteration: 0, lastValidation: null,
+      phase: firstPhase, status: "IN_PROGRESS",
     });
-
-    // Also update phase in state.json via atomicUpdate
-    await sm.atomicUpdate({ phase: firstPhase, status: "IN_PROGRESS" });
 
     const prompt = await buildTaskForStep(
       firstStep, outputDir, projectRoot, topic, buildCmd, testCmd,
@@ -727,16 +727,89 @@ export async function computeNextTask(
   );
 
   if (!validation.passed) {
-    // Circuit breaker: check approach failure before iteration limit
+    // --- Tribunal FAIL: handle counter + ESCALATE ---
+    if (validation.tribunalResult) {
+      const phaseKey = String(phaseForStep(currentStep));
+      const submits = state.tribunalSubmits ?? {};
+      const count = (submits[phaseKey] ?? 0) + 1;
+
+      // Crashed tribunal → fallback needed
+      if (validation.tribunalResult.crashed) {
+        await sm.atomicUpdate({
+          tribunalSubmits: { ...submits, [phaseKey]: count },
+        });
+        return {
+          done: false,
+          step: currentStep,
+          agent: null,
+          prompt: null,
+          escalation: {
+            reason: "tribunal_crashed",
+            lastFeedback: "Tribunal 进程崩溃，需要 fallback 裁决。",
+            digest: validation.tribunalResult.digest,
+            digestHash: validation.tribunalResult.digestHash,
+          },
+          message: `Step ${currentStep} tribunal 崩溃，需要 fallback。`,
+        };
+      }
+
+      if (count >= 3) {
+        // ESCALATE_REGRESS — regress to Phase 3
+        const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
+        if (escCount >= 2) {
+          await sm.atomicUpdate({ status: "BLOCKED" });
+          return {
+            done: false, step: currentStep, agent: null, prompt: null,
+            escalation: {
+              reason: "tribunal_max_escalations",
+              lastFeedback: `Phase ${phaseKey} 已 ${escCount + 1} 次 ESCALATE，需要人工介入。`,
+            },
+            message: `Phase ${phaseKey} 多次 ESCALATE，BLOCKED。`,
+          };
+        }
+
+        await sm.atomicUpdate({
+          phase: 3, status: "IN_PROGRESS",
+          step: "3", stepIteration: 0, lastValidation: "ESCALATE_REGRESS", approachState: null,
+          tribunalSubmits: {},  // Reset ALL counters
+          phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
+        });
+
+        return {
+          done: false,
+          step: "3",
+          agent: STEP_AGENTS["3"] ?? null,
+          prompt: await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback),
+          message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
+        };
+      }
+
+      // Tribunal FAIL but under limit — increment counter and return revision
+      await sm.atomicUpdate({
+        stepIteration: currentIteration + 1, lastValidation: "FAILED",
+        tribunalSubmits: { ...submits, [phaseKey]: count },
+      });
+
+      const prompt = await buildTaskForStep(
+        currentStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback,
+      );
+      return {
+        done: false,
+        step: currentStep,
+        agent: STEP_AGENTS[currentStep] ?? null,
+        prompt,
+        message: `Step ${currentStep} tribunal FAIL (attempt ${count}/3). Revision needed.`,
+      };
+    }
+
+    // --- Non-tribunal failure: circuit breaker + iteration logic ---
     const approachResult = await handleApproachFailure(
       stepState, currentStep, outputDir, validation.feedback,
     );
 
     if (approachResult.action === "CIRCUIT_BREAK") {
-      // Reset stepIteration for new approach
-      await writeStepState(sm.stateFilePath, {
-        stepIteration: 0,
-        lastValidation: "CIRCUIT_BREAK",
+      await sm.atomicUpdate({
+        stepIteration: 0, lastValidation: "CIRCUIT_BREAK",
         approachState: approachResult.approachState,
       });
 
@@ -751,16 +824,12 @@ export async function computeNextTask(
     }
 
     if (approachResult.action === "ALL_EXHAUSTED") {
-      await writeStepState(sm.stateFilePath, {
-        lastValidation: "ALL_APPROACHES_EXHAUSTED",
+      await sm.atomicUpdate({
+        lastValidation: "ALL_APPROACHES_EXHAUSTED", status: "BLOCKED",
       });
-      await sm.atomicUpdate({ status: "BLOCKED" });
 
       return {
-        done: false,
-        step: currentStep,
-        agent: null,
-        prompt: null,
+        done: false, step: currentStep, agent: null, prompt: null,
         escalation: {
           reason: "all_approaches_exhausted",
           lastFeedback: validation.feedback,
@@ -769,27 +838,19 @@ export async function computeNextTask(
       };
     }
 
-    // CONTINUE: persist approachState if present, then check iteration limit
+    // CONTINUE: persist approachState if present
     if (approachResult.approachState) {
-      await writeStepState(sm.stateFilePath, {
-        approachState: approachResult.approachState,
-      });
+      await sm.atomicUpdate({ approachState: approachResult.approachState });
     }
 
-    // Check iteration limit (skip if approachState exists — circuit breaker manages limits)
+    // Check iteration limit (skip if approachState exists)
     const hasApproachState = !!(approachResult.approachState || stepState.approachState);
     if (!hasApproachState && currentIteration >= MAX_STEP_ITERATIONS) {
-      // Escalation
-      await writeStepState(sm.stateFilePath, {
-        lastValidation: "ESCALATED",
+      await sm.atomicUpdate({
+        lastValidation: "ESCALATED", status: "BLOCKED",
       });
-      await sm.atomicUpdate({ status: "BLOCKED" });
-
       return {
-        done: false,
-        step: currentStep,
-        agent: null,
-        prompt: null,
+        done: false, step: currentStep, agent: null, prompt: null,
         escalation: {
           reason: "iteration_limit_exceeded",
           lastFeedback: validation.feedback,
@@ -798,41 +859,28 @@ export async function computeNextTask(
       };
     }
 
-    // Return revision prompt, increment stepIteration
+    // Return revision prompt
     const newIteration = currentIteration + 1;
-    await writeStepState(sm.stateFilePath, {
-      stepIteration: newIteration,
-      lastValidation: "FAILED",
-    });
 
-    // Determine revision step (1b fail -> 1c, 2b fail -> 2c, else same step)
+    // Determine revision step (1b fail -> 1c, 2b fail -> 2c, etc)
     let revisionStep = currentStep;
     if (currentStep === "1b") revisionStep = "1c";
     if (currentStep === "2b") revisionStep = "2c";
     if (currentStep === "5b") revisionStep = "5c";
 
-    // For revision steps, update step state to the revision step
-    if (revisionStep !== currentStep) {
-      await writeStepState(sm.stateFilePath, {
-        step: revisionStep,
-        stepIteration: newIteration,
-        lastValidation: "FAILED",
-      });
-    }
+    const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
+    await sm.atomicUpdate({
+      step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
+    });
 
-    // Append planFeedback from circuit breaker if approach-plan.md was malformed
     let combinedFeedback = validation.feedback;
     if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
       combinedFeedback += `\n\n${approachResult.planFeedback}`;
     }
 
     const prompt = await buildTaskForStep(
-      revisionStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback,
+      effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback,
     );
-
-    // For review failures (1b, 2b), after revision go back to review step
-    // The step stays as revision step; next call will validate and move back to review
-    const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
 
     return {
       done: false,
@@ -845,18 +893,28 @@ export async function computeNextTask(
 
   // 5. Validation passed — advance to next step
   const currentPhase = phaseForStep(currentStep);
-  await internalCheckpoint(sm, state, currentPhase, "PASS", `Step ${currentStep} passed.`);
+
+  // Write progress-log checkpoint (audit only)
+  await sm.appendToProgressLog(
+    "\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Step ${currentStep} passed.`) + "\n",
+  );
+
+  // Reset tribunal counter on PASS
+  const tribunalUpdates: Record<string, unknown> = {};
+  if (validation.tribunalResult) {
+    const phaseKey = String(currentPhase);
+    tribunalUpdates.tribunalSubmits = { ...(state.tribunalSubmits ?? {}), [phaseKey]: 0 };
+  }
 
   const nextStep = computeNextStep(currentStep, phases);
 
   if (!nextStep) {
-    // All steps done
-    await writeStepState(sm.stateFilePath, {
-      step: null,
-      stepIteration: 0,
-      lastValidation: "DONE",
+    // All steps done — single atomicUpdate
+    await sm.atomicUpdate({
+      step: null, stepIteration: 0, lastValidation: "DONE",
+      status: "COMPLETED",
+      ...tribunalUpdates,
     });
-    await sm.atomicUpdate({ status: "COMPLETED" });
 
     return {
       done: true,
@@ -867,15 +925,13 @@ export async function computeNextTask(
     };
   }
 
-  // Set up next step
+  // Advance to next step — single atomicUpdate
   const nextPhase = phaseForStep(nextStep);
-  await writeStepState(sm.stateFilePath, {
-    step: nextStep,
-    stepIteration: 0,
-    lastValidation: null,
-    approachState: null,
+  await sm.atomicUpdate({
+    step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
+    phase: nextPhase, status: "IN_PROGRESS",
+    ...tribunalUpdates,
   });
-  await sm.atomicUpdate({ phase: nextPhase, status: "IN_PROGRESS" });
 
   const prompt = await buildTaskForStep(
     nextStep, outputDir, projectRoot, topic, buildCmd, testCmd,

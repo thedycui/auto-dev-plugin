@@ -17,9 +17,9 @@ vi.mock("node:child_process", () => ({
 }));
 
 // Mock tribunal
-const mockExecuteTribunal = vi.fn();
+const mockEvaluateTribunal = vi.fn();
 vi.mock("../tribunal.js", () => ({
-  executeTribunal: (...args: unknown[]) => mockExecuteTribunal(...args),
+  evaluateTribunal: (...args: unknown[]) => mockEvaluateTribunal(...args),
 }));
 
 // Mock state-manager
@@ -47,6 +47,10 @@ vi.mock("../state-manager.js", async (importOriginal) => {
       async atomicUpdate(updates: Record<string, unknown>) { return mockAtomicUpdate(updates); }
       async init() {}
       getFullState() { return mockLoadAndValidate(); }
+      getCheckpointLine(phase: number, _task: number | undefined, status: string, summary: string) {
+        return `<!-- CHECKPOINT phase=${phase} status=${status} summary="${summary}" -->`;
+      }
+      async appendToProgressLog() {}
     },
     internalCheckpoint: (...args: unknown[]) => mockInternalCheckpoint(...args),
     extractTaskList: actual["extractTaskList"],
@@ -449,12 +453,12 @@ describe("computeNextTask", () => {
 
       expect(result.step).toBe("3");
       expect(result.prompt).toContain("禁止");
-      // Verify writeStepState was called with stepIteration: 0
-      const writeStepCalls = mockWriteFile.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes("state.json"),
+      // Verify atomicUpdate was called with stepIteration: 0
+      const circuitBreakCall = mockAtomicUpdate.mock.calls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).lastValidation === "CIRCUIT_BREAK",
       );
-      const lastWriteData = JSON.parse(writeStepCalls[writeStepCalls.length - 1][1] as string);
-      expect(lastWriteData.stepIteration).toBe(0);
+      expect(circuitBreakCall).toBeDefined();
+      expect((circuitBreakCall![0] as Record<string, unknown>).stepIteration).toBe(0);
     });
 
     it("all approaches exhausted returns escalation with status BLOCKED (AC-4)", async () => {
@@ -499,7 +503,10 @@ describe("computeNextTask", () => {
       expect(result.escalation?.reason).toBe("all_approaches_exhausted");
       expect(result.prompt).toBeNull();
       // Verify atomicUpdate was called with BLOCKED status
-      expect(mockAtomicUpdate).toHaveBeenCalledWith({ status: "BLOCKED" });
+      const blockedCall = mockAtomicUpdate.mock.calls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).status === "BLOCKED",
+      );
+      expect(blockedCall).toBeDefined();
     });
 
     it("step '3' prompt includes approach plan instruction, step '1a' does not (AC-8)", async () => {
@@ -598,22 +605,17 @@ describe("computeNextTask", () => {
       );
     }
 
-    // Helper: get the last written state.json content
+    // Helper: get the last atomicUpdate call
     function getLastWrittenState(): Record<string, unknown> | null {
-      const writeStepCalls = mockWriteFile.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes("state.json"),
-      );
-      if (writeStepCalls.length === 0) return null;
-      return JSON.parse(writeStepCalls[writeStepCalls.length - 1][1] as string);
+      const calls = mockAtomicUpdate.mock.calls;
+      if (calls.length === 0) return null;
+      return calls[calls.length - 1][0] as Record<string, unknown>;
     }
 
-    // Helper: find the state.json write containing approachState
+    // Helper: find atomicUpdate call containing approachState
     function getWrittenStateWithApproachState(): Record<string, unknown> | null {
-      const writeStepCalls = mockWriteFile.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes("state.json"),
-      );
-      for (const call of writeStepCalls) {
-        const data = JSON.parse(call[1] as string);
+      for (const call of mockAtomicUpdate.mock.calls) {
+        const data = call[0] as Record<string, unknown>;
         if (data.approachState) return data;
       }
       return null;
@@ -742,7 +744,9 @@ describe("computeNextTask", () => {
       expect(result.escalation).toBeDefined();
       expect(result.escalation?.reason).toBe("all_approaches_exhausted");
       expect(result.escalation?.lastFeedback).toBeTruthy();
-      expect(mockAtomicUpdate).toHaveBeenCalledWith({ status: "BLOCKED" });
+      expect(mockAtomicUpdate.mock.calls.some(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).status === "BLOCKED",
+      )).toBe(true);
       // lastValidation written
       const written = getLastWrittenState();
       expect(written!.lastValidation).toBe("ALL_APPROACHES_EXHAUSTED");
@@ -791,7 +795,9 @@ describe("computeNextTask", () => {
       expect(result.escalation).toBeDefined();
       expect(result.escalation?.reason).toBe("iteration_limit_exceeded");
       expect(result.prompt).toBeNull();
-      expect(mockAtomicUpdate).toHaveBeenCalledWith({ status: "BLOCKED" });
+      expect(mockAtomicUpdate.mock.calls.some(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).status === "BLOCKED",
+      )).toBe(true);
     });
 
     // TC-09: Only primary approach (no alternatives) -> planFeedback with "备选方案"
@@ -876,18 +882,12 @@ describe("computeNextTask", () => {
 
       // Should advance to step 4a (quick mode: 3, 4, 5, 7)
       expect(result.step).toBe("4a");
-      // approachState should be null in the new step
-      const writeCalls = mockWriteFile.mock.calls.filter(
-        (call: unknown[]) => (call[0] as string).includes("state.json"),
+      // approachState should be null in the step-advance atomicUpdate
+      const advanceCall = mockAtomicUpdate.mock.calls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).step === "4a",
       );
-      // The step-advance write should have approachState: null
-      const advanceWrite = writeCalls.find((call: unknown[]) => {
-        const data = JSON.parse(call[1] as string);
-        return data.step === "4a";
-      });
-      expect(advanceWrite).toBeDefined();
-      const advanceData = JSON.parse(advanceWrite![1] as string);
-      expect(advanceData.approachState).toBeNull();
+      expect(advanceCall).toBeDefined();
+      expect((advanceCall![0] as Record<string, unknown>).approachState).toBeNull();
     });
 
     // TC-19: approachState present skips MAX_STEP_ITERATIONS check
@@ -1168,7 +1168,9 @@ describe("computeNextTask", () => {
       expect(result.done).toBe(false);
       expect(result.prompt).toBeNull();
       expect(result.escalation?.reason).toBe("all_approaches_exhausted");
-      expect(mockAtomicUpdate).toHaveBeenCalledWith({ status: "BLOCKED" });
+      expect(mockAtomicUpdate.mock.calls.some(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).status === "BLOCKED",
+      )).toBe(true);
     });
 
     // TC-25: getStepGoal fallback when plan.md is missing
@@ -1261,13 +1263,9 @@ describe("computeNextTask", () => {
       );
 
       // tribunal PASS for phase 4
-      mockExecuteTribunal.mockResolvedValue({
-        content: [{ type: "text", text: JSON.stringify({
-          status: "TRIBUNAL_PASS",
-          phase: 4,
-          nextPhase: 6,
-          mandate: "Proceed",
-        }) }],
+      mockEvaluateTribunal.mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
       });
 
       const result = await computeNextTask("/tmp/test-project", "test-topic");
@@ -1307,13 +1305,9 @@ describe("computeNextTask", () => {
         },
       );
 
-      mockExecuteTribunal.mockResolvedValue({
-        content: [{ type: "text", text: JSON.stringify({
-          status: "TRIBUNAL_PASS",
-          phase: 4,
-          nextPhase: 5,
-          mandate: "Proceed",
-        }) }],
+      mockEvaluateTribunal.mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
       });
 
       const result = await computeNextTask("/tmp/test-project", "test-topic");
