@@ -33,6 +33,35 @@ import { TemplateRenderer } from "./template-renderer.js";
 import type { StateJson } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// Design Doc Compliance Check
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if an existing design.md already has the required sections for auto-dev.
+ * Required: AC table (≥3 AC-N entries) + solution comparison (≥2 solutions).
+ * If compliant, Phase 1a (architect rewrite) can be skipped — go straight to 1b (review).
+ */
+export function checkDesignDocCompliance(content: string): { compliant: boolean; missing: string[] } {
+  const missing: string[] = [];
+
+  // Check AC table: look for "AC-N" pattern (at least 3)
+  const acMatches = content.match(/AC-\d+/g);
+  if (!acMatches || acMatches.length < 3) {
+    missing.push(`验收标准不足（需要 ≥3 条 AC-N，当前 ${acMatches?.length ?? 0} 条）`);
+  }
+
+  // Check solution comparison: look for "方案" with A/B/1/2 or comparison table
+  const hasSolutionComparison =
+    /方案\s*[A-Z12]|方案选型|方案对比|方案设计/.test(content) &&
+    (content.includes("|") && /\|.*方案.*\|/.test(content));  // table with "方案"
+  if (!hasSolutionComparison) {
+    missing.push("缺少方案对比（需要 ≥2 个方案的对比表格）");
+  }
+
+  return { compliant: missing.length === 0, missing };
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -797,7 +826,34 @@ export async function computeNextTask(
   // 3. If no step: determine first phase, set step, return first task prompt
   if (!stepState.step) {
     const firstPhase = phases[0]!;
-    const firstStep = firstStepForPhase(firstPhase);
+    let firstStep = firstStepForPhase(firstPhase);
+
+    // Skip Phase 1a if design doc already exists and is compliant
+    // (has AC table with ≥3 entries + solution comparison)
+    if (firstStep === "1a" && state.designDocBound) {
+      const designContent = await readFileSafe(join(outputDir, "design.md"));
+      if (designContent && designContent.length >= 100) {
+        const { compliant } = checkDesignDocCompliance(designContent);
+        if (compliant) {
+          // Design doc is compliant — skip 1a (architect rewrite), go to 1b (review)
+          firstStep = "1b";
+          await sm.atomicUpdate({
+            step: firstStep, stepIteration: 0, lastValidation: null,
+            phase: firstPhase, status: "IN_PROGRESS",
+          });
+          const prompt = await buildTaskForStep(
+            firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep),
+          );
+          return {
+            done: false,
+            step: firstStep,
+            agent: STEP_AGENTS[firstStep] ?? null,
+            prompt,
+            message: `Design doc is compliant (has AC table + solution comparison). Skipping 1a, starting at 1b (review).`,
+          };
+        }
+      }
+    }
 
     // Single atomicUpdate: step + phase
     await sm.atomicUpdate({

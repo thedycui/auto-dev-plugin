@@ -119,6 +119,10 @@ export const StateJsonSchema = z.object({
   brainstorm: z.boolean().optional(),   // --brainstorm mode (Phase 0 enabled)
   costMode: z.enum(["economy", "beast"]).optional(), // economy=按阶段选模型(默认), beast=全部最强模型
 
+  // Design doc binding — tracks whether an external design doc was provided
+  designDocSource: z.string().optional(),  // original path of the design doc
+  designDocBound: z.boolean().optional(),  // true if design.md was copied from external source
+
   // Git baseline for accurate Phase 5 diff
   startCommit: z.string().optional(),
 

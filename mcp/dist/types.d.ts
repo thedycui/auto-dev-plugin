@@ -136,6 +136,8 @@ export declare const StateJsonSchema: z.ZodObject<{
         economy: "economy";
         beast: "beast";
     }>>;
+    designDocSource: z.ZodOptional<z.ZodString>;
+    designDocBound: z.ZodOptional<z.ZodBoolean>;
     startCommit: z.ZodOptional<z.ZodString>;
     regressionCount: z.ZodOptional<z.ZodNumber>;
     phaseTimings: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
