@@ -394,6 +394,21 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
 // ---------------------------------------------------------------------------
 // Build Task Prompt for Step
 // ---------------------------------------------------------------------------
+/**
+ * Extract task details including completion criteria from plan.md.
+ * Falls back to extractTaskList if parsing fails.
+ */
+function extractTaskDetails(planContent) {
+    // Match ## Task N: title ... - **完成标准**: ...
+    const taskPattern = /^## Task \d+[：:].+(?:\n(?!## Task).)*/gm;
+    const matches = planContent.match(taskPattern);
+    if (!matches || matches.length === 0) {
+        // Fallback to simple task list
+        const taskList = extractTaskList(planContent);
+        return taskList || "实现 plan.md 中描述的所有功能";
+    }
+    return matches.join("\n\n");
+}
 export async function buildTaskForStep(step, outputDir, projectRoot, topic, buildCmd, testCmd, feedback) {
     const variables = {
         topic,
@@ -448,13 +463,11 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
             // Turbo mode without plan.md — use topic directly
             return `请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
         }
-        const taskListStr = extractTaskList(planContent);
-        const taskLines = taskListStr.split("\n").filter((l) => l.trim().length > 0);
-        if (taskLines.length === 0) {
-            taskLines.push("实现 plan.md 中描述的所有功能");
-        }
-        const allTasks = taskLines.join("\n");
-        return `请完成以下任务：\n\n${allTasks}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}` + approachPlanInstruction + ISOLATION_FOOTER;
+        // Extract task details with completion criteria (task-level contract)
+        const taskDetails = extractTaskDetails(planContent);
+        return `请完成以下任务：\n\n${taskDetails}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
+            `**重要：每完成一个 task，先验证其完成标准是否满足，再开始下一个。**` +
+            approachPlanInstruction + ISOLATION_FOOTER;
     }
     // Step 4a: implementation fix/verify
     if (step === "4a") {
@@ -484,10 +497,13 @@ export async function computeNextTask(projectRoot, topic) {
     const state = await sm.loadAndValidate();
     const outputDir = sm.outputDir;
     const mode = state.mode;
-    const phases = PHASE_SEQUENCE[mode] ?? [3];
+    let phases = PHASE_SEQUENCE[mode] ?? [3];
+    if (state.skipE2e === true) {
+        phases = phases.filter(p => p !== 5);
+    }
     const buildCmd = state.stack.buildCmd;
     const testCmd = state.stack.testCmd;
-    // 2. Read step state (extra fields not in Zod schema)
+    // 2. Read step state
     const stepState = await readStepState(sm.stateFilePath);
     // 3. If no step: determine first phase, set step, return first task prompt
     if (!stepState.step) {

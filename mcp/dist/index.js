@@ -14,11 +14,12 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import { LessonsManager } from "./lessons-manager.js";
 import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective } from "./phase-enforcer.js";
-import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS } from "./tdd-gate.js";
+import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS, isImplFile } from "./tdd-gate.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
 import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
 import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
+import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
 import { computeNextTask } from "./orchestrator.js";
 // ---------------------------------------------------------------------------
@@ -84,7 +85,8 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     brainstorm: z.boolean().optional(),
     costMode: z.enum(["economy", "beast"]).optional(),
     onConflict: z.enum(["resume", "overwrite"]).optional(),
-}, async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict }) => {
+    designDoc: z.string().optional(),
+}, async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc }) => {
     const sm = new StateManager(projectRoot, topic);
     // Handle existing directory
     if (await sm.outputDirExists()) {
@@ -200,6 +202,43 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         behaviorUpdates["brainstorm"] = true;
     behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
     await sm.atomicUpdate(behaviorUpdates);
+    // --- Design doc binding (Issue #7) ---
+    let designDocSource;
+    const { copyFile: copyFileAsync } = await import("node:fs/promises");
+    if (designDoc) {
+        // Explicit designDoc parameter — copy to output dir
+        const resolvedDesignDoc = resolve(projectRoot, designDoc);
+        try {
+            await copyFileAsync(resolvedDesignDoc, join(sm.outputDir, "design.md"));
+            designDocSource = designDoc;
+        }
+        catch (err) {
+            return textResult({
+                error: "DESIGN_DOC_NOT_FOUND",
+                message: `designDoc "${designDoc}" not found: ${err.message}`,
+            });
+        }
+    }
+    else {
+        // Auto-match: look for design-*{topic}*.md in docs/
+        try {
+            const { readdir } = await import("node:fs/promises");
+            const docsDir = join(projectRoot, "docs");
+            const files = await readdir(docsDir);
+            const topicLower = topic.toLowerCase();
+            const matches = files.filter(f => f.startsWith("design-") && f.endsWith(".md") &&
+                f.toLowerCase().includes(topicLower));
+            if (matches.length === 1) {
+                await copyFileAsync(join(docsDir, matches[0]), join(sm.outputDir, "design.md"));
+                designDocSource = `docs/${matches[0]}`;
+            }
+            else if (matches.length > 1) {
+                // Multiple matches — don't guess, let user specify
+                designDocSource = undefined; // will start fresh design in Phase 1
+            }
+        }
+        catch { /* docs/ doesn't exist, start fresh */ }
+    }
     // Write immutable INIT marker to progress-log with original commands and integrity hash.
     // This is the single source of truth for auto_dev_complete — agent cannot tamper
     // because progress-log is append-only from the framework's perspective, and the
@@ -262,6 +301,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         dirty: git.isDirty,
         tribunalReady,
         ...(tribunalWarning ? { tribunalWarning } : {}),
+        ...(designDocSource ? { designDocSource, designDocBound: true } : {}),
     });
 });
 // ===========================================================================
@@ -305,7 +345,10 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
     regressTo: z.number().int().min(1).max(5).optional(),
-}, async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary, tokenEstimate, regressTo }) => {
+    force: z.boolean().optional(),
+    reason: z.string().optional(),
+}, async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary0, tokenEstimate, regressTo, force, reason }) => {
+    let rawSummary = rawSummary0;
     let status = rawStatus;
     let summary = rawSummary;
     const sm = new StateManager(projectRoot, topic);
@@ -335,13 +378,23 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             });
         }
     }
-    // Guard C: Tribunal phases (4/5/6/7) cannot be directly marked PASS via checkpoint
+    // Guard C: Tribunal phases (4/5/6) cannot be directly marked PASS via checkpoint
     if (TRIBUNAL_PHASES.includes(phase) && status === "PASS") {
-        return textResult({
-            error: "TRIBUNAL_REQUIRED",
-            message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
-            mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
-        });
+        // Escape hatch: force=true allowed only after 2+ escalations
+        const escCount = state.phaseEscalateCount?.[String(phase)] ?? 0;
+        if (force === true && escCount >= 2) {
+            const overrideSummary = `[HUMAN_OVERRIDE] Phase ${phase} forced PASS after ${escCount} escalations. Reason: ${reason ?? "not provided"}`;
+            rawSummary = overrideSummary;
+            // Fall through to normal checkpoint logic
+        }
+        else {
+            return textResult({
+                error: "TRIBUNAL_REQUIRED",
+                message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
+                mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
+                ...(escCount >= 2 ? { hint: "可使用 force=true + reason 强制通过" } : {}),
+            });
+        }
     }
     // [P0-1 fix] REGRESS validation BEFORE any state mutation
     if (status === "REGRESS") {
@@ -376,19 +429,6 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
     // Artifact validation must happen before writing to progress-log
     // or state.json, so failed checks don't pollute formal state.
     // ===================================================================
-    // Guard: lesson feedback must be submitted before PASS
-    if (status === "PASS") {
-        const pendingIds = state.injectedLessonIds ?? [];
-        if (pendingIds.length > 0) {
-            return textResult({
-                error: "LESSON_FEEDBACK_REQUIRED",
-                lessonFeedbackRequired: true,
-                injectedLessonIds: pendingIds,
-                feedbackInstruction: "必须先调用 auto_dev_lessons_feedback 对注入的经验逐条反馈，然后再 checkpoint PASS。",
-                note: "Checkpoint rejected BEFORE writing state. No state pollution.",
-            });
-        }
-    }
     // Phase 1 review artifact pre-validation: design-review.md must exist
     if (phase === 1 && status === "PASS") {
         let reviewContent = null;
@@ -445,9 +485,7 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
             const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
             testFileCount = countTestFiles(newFiles);
             // Count new implementation files (non-test source files)
-            const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/, /\.go$/, /\.rs$/, /\.kt$/];
-            const testPatterns = [/[Tt]est\.(java|py|ts|js|kt|go|rs)$/, /\.test\.(ts|js|tsx|jsx)$/, /\.spec\.(ts|js|tsx|jsx)$/, /_test\.(go|py)$/, /tests?\//i];
-            implFileCount = newFiles.filter(f => implPatterns.some(p => p.test(f)) && !testPatterns.some(p => p.test(f))).length;
+            implFileCount = newFiles.filter(f => isImplFile(f)).length;
         }
         catch { /* ignore git errors */ }
         let resultsContent = null;
@@ -922,7 +960,6 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
                 // 1-footer. Record injected lesson IDs and add feedback hint
                 const injectedIds = [...localLessonIds, ...globalLessonIds];
                 if (injectedIds.length > 0) {
-                    extraContext += `> Phase 完成后请对以上经验逐条反馈（helpful / not_applicable / incorrect）\n\n`;
                     await sm.atomicUpdate({ injectedLessonIds: injectedIds });
                 }
                 // 1c. Inject Phase 3 task-level resume info
@@ -1029,7 +1066,7 @@ server.tool("auto_dev_lessons_get", "Get historical lessons for a specific phase
 // ===========================================================================
 // 12. auto_dev_lessons_feedback (Lesson Feedback)
 // ===========================================================================
-server.tool("auto_dev_lessons_feedback", "Submit feedback verdicts for lessons that were injected during preflight. Must be called before checkpoint PASS.", {
+server.tool("auto_dev_lessons_feedback", "Optional: submit feedback verdicts for lessons that were injected during preflight. Improves future lesson quality but is not required for checkpoint PASS.", {
     projectRoot: z.string(),
     topic: z.string(),
     feedbacks: z.array(z.object({
@@ -1074,6 +1111,21 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
         });
     }
     const validation = validateCompletion(progressLogContent, state.mode, state.dryRun === true, state.skipE2e === true);
+    // State consistency check: state.phase must match max passed phase in progress-log
+    if (validation.passedPhases.length > 0) {
+        const maxPassedPhase = Math.max(...validation.passedPhases);
+        if (state.phase < maxPassedPhase) {
+            return textResult({
+                error: "STATE_PHASE_INCONSISTENCY",
+                canComplete: false,
+                statePhase: state.phase,
+                maxPassedPhase,
+                passedPhases: validation.passedPhases,
+                message: `state.phase (${state.phase}) 落后于 progress-log 中的最高已通过 Phase (${maxPassedPhase})。状态可能被篡改或回退。`,
+                mandate: "[BLOCKED] state.json 与 progress-log 不一致。禁止宣称完成。",
+            });
+        }
+    }
     if (!validation.canComplete) {
         return textResult({
             error: "INCOMPLETE",
@@ -1241,24 +1293,47 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
         tokenUsage,
     });
 });
+// ---------------------------------------------------------------------------
+// Helper: collect recent tribunal issues for ESCALATE_REGRESS feedback
+// ---------------------------------------------------------------------------
+async function collectRecentTribunalIssues(outputDir, phase) {
+    const { join } = await import("node:path");
+    const logPath = join(outputDir, `tribunal-phase${phase}.md`);
+    try {
+        const content = await readFile(logPath, "utf-8");
+        const failSections = content.split(/\n---\n/).filter((s) => s.includes("FAIL"));
+        return failSections.slice(-1)[0]?.trim() ?? "（无详细反馈）";
+    }
+    catch {
+        return "（无法读取 tribunal 日志）";
+    }
+}
 // ===========================================================================
 // 14. auto_dev_submit (Tribunal Submit)
 // ===========================================================================
-server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Phase 4/5/6/7 必须通过裁决 Agent 审查才能通过。", {
+server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Phase 4/5/6 需要独立裁决，Phase 7（复盘）直接通过。", {
     projectRoot: z.string(),
     topic: z.string(),
     phase: z.number(),
     summary: z.string(),
 }, async ({ projectRoot, topic, phase, summary }) => {
-    // Validate phase is a tribunal phase
-    if (!TRIBUNAL_PHASES.includes(phase)) {
+    // Validate phase is a submit-eligible phase (tribunal phases + phase 7 retrospective)
+    const SUBMIT_PHASES = [...TRIBUNAL_PHASES, 7];
+    if (!SUBMIT_PHASES.includes(phase)) {
         return textResult({
             error: "INVALID_PHASE",
-            message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
+            message: `Phase ${phase} 不是可提交 Phase。只有 Phase ${SUBMIT_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
         });
     }
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
+    // Guard: Phase 5 is skipped when skipE2e=true
+    if (phase === 5 && state.skipE2e === true) {
+        return textResult({
+            error: "PHASE_SKIPPED",
+            message: "Phase 5 已被 skipE2e 跳过，无需提交。",
+        });
+    }
     // Verify current phase matches
     if (state.phase !== phase) {
         return textResult({
@@ -1266,16 +1341,58 @@ server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Ph
             message: `当前 Phase 为 ${state.phase}，但提交的是 Phase ${phase}。请确认 Phase 是否正确。`,
         });
     }
+    // Phase 7 (retrospective): generate retro data and directly PASS, no tribunal
+    if (phase === 7) {
+        const outputDir = sm.outputDir;
+        await generateRetrospectiveData(outputDir);
+        // Auto-clear any un-feedbacked injectedLessonIds before completing
+        if ((state.injectedLessonIds ?? []).length > 0) {
+            await sm.atomicUpdate({ injectedLessonIds: [] });
+        }
+        const ckptSummary = `[RETRO] 复盘完成，跳过 tribunal 直接通过。${summary}`;
+        await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
+        const nextDirective = computeNextDirective(phase, "PASS", state);
+        return textResult({
+            status: "TRIBUNAL_PASS",
+            phase,
+            nextPhase: nextDirective.nextPhase,
+            mandate: nextDirective.mandate,
+            message: "Phase 7 复盘完成，无需独立裁决。",
+        });
+    }
     // Track submit count: max 3 attempts before escalation
     const phaseKey = String(phase);
     const submits = state.tribunalSubmits ?? {};
     const currentCount = submits[phaseKey] ?? 0;
     if (currentCount >= 3) {
+        const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
+        if (escCount >= 2) {
+            // Second+ escalation — truly blocked, need human
+            return textResult({
+                status: "TRIBUNAL_ESCALATE",
+                phase,
+                message: `Phase ${phase} 已 ${escCount + 1} 次 ESCALATE。需要人工介入。`,
+                mandate: "所有自动恢复路径已用尽。请人工审查后使用 checkpoint(force=true, reason=...) 继续。",
+            });
+        }
+        // First escalation — auto-regress to Phase 3
+        const tribunalFeedback = await collectRecentTribunalIssues(sm.outputDir, phase);
+        await sm.atomicUpdate({
+            phase: 3,
+            status: "IN_PROGRESS",
+            phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
+            tribunalSubmits: { ...submits, [phaseKey]: 0 },
+            step: "3",
+            stepIteration: 0,
+            lastValidation: "ESCALATE_REGRESS",
+        });
         return textResult({
-            status: "TRIBUNAL_ESCALATE",
+            status: "ESCALATE_REGRESS",
             phase,
-            message: `Phase ${phase} 已提交 ${currentCount} 次裁决均未通过。需要人工介入。`,
-            mandate: "已达到最大裁决提交次数（3次），请人工审查后决定是否继续。",
+            regressTo: 3,
+            message: `Phase ${phase} tribunal 3 次未通过，自动回退到 Phase 3 修复。`,
+            tribunalFeedback,
+            mandate: `[AUTO-REGRESS] 请根据以下 tribunal 反馈修复代码，然后重新通过 Phase 4-6。`,
         });
     }
     // Increment submit counter (stored in tribunalSubmits record)

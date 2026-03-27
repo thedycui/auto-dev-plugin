@@ -77,7 +77,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 
 // Now import modules under test (after mocks)
-import { computeNextTask, handleApproachFailure, buildTaskForStep } from "../orchestrator.js";
+import { computeNextTask, computeNextStep, handleApproachFailure, buildTaskForStep } from "../orchestrator.js";
 import type { NextTaskResult, ApproachState } from "../orchestrator.js";
 
 // ---------------------------------------------------------------------------
@@ -1231,6 +1231,96 @@ describe("computeNextTask", () => {
       }
     });
   });
+
+  // -----------------------------------------------------------------------
+  // skipE2e — orchestrator must skip Phase 5 steps
+  // -----------------------------------------------------------------------
+
+  describe("skipE2e phase 5 skipping", () => {
+    it("TC-27: skipE2e=true skips step 5a/5b, advances from 4a to 6", async () => {
+      const state = makeState({ mode: "full", skipE2e: true, phase: 4 });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({
+            ...state,
+            step: "4a",
+            stepIteration: 0,
+          });
+        }
+        if (path.includes("plan.md")) return "## Task\n";
+        throw new Error("ENOENT");
+      });
+
+      // Build + test must pass for step 4a validation
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+          cb(null, "ok", "");
+        },
+      );
+
+      // tribunal PASS for phase 4
+      mockExecuteTribunal.mockResolvedValue({
+        content: [{ type: "text", text: JSON.stringify({
+          status: "TRIBUNAL_PASS",
+          phase: 4,
+          nextPhase: 6,
+          mandate: "Proceed",
+        }) }],
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      // Should advance to step 6, NOT 5a
+      expect(result.step).toBe("6");
+      expect(result.done).toBe(false);
+
+      // Verify phase was set to 6 in atomicUpdate
+      const updateCalls = mockAtomicUpdate.mock.calls;
+      const phaseUpdate = updateCalls.find(
+        (call: unknown[]) => (call[0] as Record<string, unknown>).phase === 6,
+      );
+      expect(phaseUpdate).toBeDefined();
+    });
+
+    it("TC-28: skipE2e=false does NOT skip step 5a", async () => {
+      const state = makeState({ mode: "full", skipE2e: false, phase: 4 });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({
+            ...state,
+            step: "4a",
+            stepIteration: 0,
+          });
+        }
+        if (path.includes("plan.md")) return "## Task\n";
+        throw new Error("ENOENT");
+      });
+
+      // Build + test must pass for step 4a validation
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+          cb(null, "ok", "");
+        },
+      );
+
+      mockExecuteTribunal.mockResolvedValue({
+        content: [{ type: "text", text: JSON.stringify({
+          status: "TRIBUNAL_PASS",
+          phase: 4,
+          nextPhase: 5,
+          mandate: "Proceed",
+        }) }],
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.step).toBe("5a");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1265,5 +1355,32 @@ describe("buildTaskForStep", () => {
     );
 
     expect(result).not.toContain("方案计划");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeNextStep — skipE2e phase filtering
+// ---------------------------------------------------------------------------
+
+describe("computeNextStep — skipE2e phase filtering", () => {
+  it("full phases: step 4a → 5a (phase 5 included)", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7];
+    expect(computeNextStep("4a", phases)).toBe("5a");
+  });
+
+  it("full phases minus 5: step 4a → 6 (phase 5 excluded)", () => {
+    const phases = [1, 2, 3, 4, 6, 7];
+    expect(computeNextStep("4a", phases)).toBe("6");
+  });
+
+  it("quick phases minus 5: step 4a → 7 (phases [3,4,7])", () => {
+    const phases = [3, 4, 7];
+    expect(computeNextStep("4a", phases)).toBe("7");
+  });
+
+  it("step 5b with phase 5 excluded: skips to 6", () => {
+    // Edge case: if somehow at 5a, next candidate 5b also filtered
+    const phases = [1, 2, 3, 4, 6, 7];
+    expect(computeNextStep("5a", phases)).toBe("6");
   });
 });

@@ -680,7 +680,10 @@ export async function computeNextTask(
 
   const outputDir = sm.outputDir;
   const mode = state.mode;
-  const phases = PHASE_SEQUENCE[mode] ?? [3];
+  let phases = PHASE_SEQUENCE[mode] ?? [3];
+  if (state.skipE2e === true) {
+    phases = phases.filter(p => p !== 5);
+  }
   const buildCmd = state.stack.buildCmd;
   const testCmd = state.stack.testCmd;
 

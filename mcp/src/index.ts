@@ -1499,6 +1499,14 @@ server.tool(
     const sm = new StateManager(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
+    // Guard: Phase 5 is skipped when skipE2e=true
+    if (phase === 5 && state.skipE2e === true) {
+      return textResult({
+        error: "PHASE_SKIPPED",
+        message: "Phase 5 已被 skipE2e 跳过，无需提交。",
+      });
+    }
+
     // Verify current phase matches
     if (state.phase !== phase) {
       return textResult({
