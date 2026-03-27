@@ -25,7 +25,7 @@ import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js"
 import type { ToolResult } from "./tribunal.js";
 import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
-import { computeNextTask } from "./orchestrator.js";
+import { computeNextTask, computeNextStep, phaseForStep } from "./orchestrator.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1564,6 +1564,7 @@ server.tool(
         step: "3",
         stepIteration: 0,
         lastValidation: "ESCALATE_REGRESS",
+        approachState: null,
       });
 
       return textResult({
@@ -1583,6 +1584,37 @@ server.tool(
     // Execute tribunal
     const outputDir = sm.outputDir;
     const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
+
+    // Bug fix: on PASS, reset submit counter and sync orchestrator step state
+    try {
+      const resultText = tribunalResult.content[0]?.text ?? "";
+      const resultObj = JSON.parse(resultText);
+      if (resultObj.status === "TRIBUNAL_PASS") {
+        // Reset submit counter for this phase
+        const freshState = await sm.loadAndValidate();
+        const freshSubmits = { ...(freshState.tribunalSubmits ?? {}), [phaseKey]: 0 };
+
+        // Advance orchestrator step state to next step
+        const currentStep = freshState.step;
+        if (currentStep && phaseForStep(currentStep) === phase) {
+          const modePhases: Record<string, number[]> = {
+            full: [1, 2, 3, 4, 5, 6, 7], quick: [3, 4, 5, 7], turbo: [3],
+          };
+          let phases = modePhases[freshState.mode] ?? [3];
+          if (freshState.skipE2e === true) phases = phases.filter(p => p !== 5);
+          const nextStep = computeNextStep(currentStep, phases);
+          await sm.atomicUpdate({
+            tribunalSubmits: freshSubmits,
+            step: nextStep,
+            stepIteration: 0,
+            lastValidation: null,
+          });
+        } else {
+          await sm.atomicUpdate({ tribunalSubmits: freshSubmits });
+        }
+      }
+    } catch { /* parse failed — non-fatal, don't block tribunal result */ }
+
     // Convert tribunal ToolResult to MCP-compatible format
     return { content: tribunalResult.content };
   },
@@ -1687,12 +1719,33 @@ server.tool(
     const tribunalLog = buildTribunalLog(phase, tribunalVerdict, "fallback-subagent");
     await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
 
-    // 7. PASS: write checkpoint
+    // 7. PASS: write checkpoint + reset counter + sync step
     if (verdict === "PASS") {
       const ckpt = internalCheckpoint;
       const computeND = computeNextDirective;
       const ckptSummary = `[TRIBUNAL-FALLBACK] Fallback 裁决通过。${issues.length} 个建议项。`;
       const ckptResult = await ckpt(sm, state, phase, "PASS", ckptSummary);
+
+      // Reset submit counter and advance step state
+      const phaseKey = String(phase);
+      const freshSubmits = { ...(state.tribunalSubmits ?? {}), [phaseKey]: 0 };
+      const currentStep = state.step;
+      if (currentStep && phaseForStep(currentStep) === phase) {
+        const modePhases: Record<string, number[]> = {
+          full: [1, 2, 3, 4, 5, 6, 7], quick: [3, 4, 5, 7], turbo: [3],
+        };
+        let phases = modePhases[state.mode] ?? [3];
+        if (state.skipE2e === true) phases = phases.filter(p => p !== 5);
+        const nextStep = computeNextStep(currentStep, phases);
+        await sm.atomicUpdate({
+          tribunalSubmits: freshSubmits,
+          step: nextStep,
+          stepIteration: 0,
+          lastValidation: null,
+        });
+      } else {
+        await sm.atomicUpdate({ tribunalSubmits: freshSubmits });
+      }
 
       const nextDirective = ckptResult.ok
         ? ckptResult.nextDirective
