@@ -444,14 +444,28 @@ export async function crossValidate(
       }
     } catch { /* no exit code file — skip this check */ }
 
-    // Check impl files vs test files ratio
+    // Check impl files vs test files ratio (committed + staged + untracked)
     const diffBase = startCommit ?? "HEAD~20";
     const diffOutput = await new Promise<string>((resolve) => {
       execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
         cwd: projectRoot,
-      }, (err, stdout) => resolve(err ? "" : stdout || ""));
+      }, (err, stdout) => {
+        const committed = err ? "" : (stdout || "");
+        // Also check staged (cached) and untracked files
+        execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
+          cwd: projectRoot,
+        }, (err2, stdout2) => {
+          const staged = err2 ? "" : (stdout2 || "");
+          execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+            cwd: projectRoot,
+          }, (err3, stdout3) => {
+            const untracked = err3 ? "" : (stdout3 || "");
+            resolve(committed + "\n" + staged + "\n" + untracked);
+          });
+        });
+      });
     });
-    const files = diffOutput.trim().split("\n").filter((f) => f.length > 0);
+    const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
     const implCount = files.filter(f => isImplFile(f)).length;
     const testCount = files.filter(f => isTestFile(f)).length;
     if (implCount > 0 && testCount === 0) {
@@ -643,14 +657,27 @@ async function runQuickPreCheck(
   startCommit?: string,
 ): Promise<string | null> {
   if (phase === 5) {
-    // Get test file count from git diff
+    // Get test file count from git diff (committed + staged + untracked)
     const diffBase = startCommit ?? "HEAD~20";
     const diffOutput = await new Promise<string>((resolve) => {
       execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
         cwd: projectRoot,
-      }, (err, stdout) => resolve(err ? "" : stdout || ""));
+      }, (err, stdout) => {
+        const committed = err ? "" : (stdout || "");
+        execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
+          cwd: projectRoot,
+        }, (err2, stdout2) => {
+          const staged = err2 ? "" : (stdout2 || "");
+          execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+            cwd: projectRoot,
+          }, (err3, stdout3) => {
+            const untracked = err3 ? "" : (stdout3 || "");
+            resolve(committed + "\n" + staged + "\n" + untracked);
+          });
+        });
+      });
     });
-    const files = diffOutput.trim().split("\n").filter((f) => f.length > 0);
+    const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
     const testFileCount = countTestFiles(files);
 
     // Read e2e-test-results.md

@@ -1560,7 +1560,7 @@ server.tool(
         phase: 3,
         status: "IN_PROGRESS",
         phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
-        tribunalSubmits: { ...submits, [phaseKey]: 0 },
+        tribunalSubmits: {},  // Reset ALL phases — regress restarts from Phase 3
         step: "3",
         stepIteration: 0,
         lastValidation: "ESCALATE_REGRESS",

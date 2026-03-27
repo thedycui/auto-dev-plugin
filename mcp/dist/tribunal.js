@@ -18,6 +18,8 @@ import { getTribunalChecklist } from "./tribunal-checklists.js";
 import { generateRetrospectiveData } from "./retrospective-data.js";
 import { internalCheckpoint, StateManager } from "./state-manager.js";
 import { parseInitMarker, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, computeNextDirective, } from "./phase-enforcer.js";
+import { LessonsManager } from "./lessons-manager.js";
+import { isTestFile, isImplFile } from "./tdd-gate.js";
 import { getClaudePath } from "./agent-spawner.js";
 // Re-export for backward compatibility
 export { getClaudePath, resolveClaudePath } from "./agent-spawner.js";
@@ -148,6 +150,10 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     content += `你是独立裁决者。你的默认立场是 FAIL。\n`;
     content += `PASS 必须对每条检查项提供证据（文件名:行号），FAIL 只需说明理由。\n`;
     content += `PASS 的举证成本远大于 FAIL —— 如果你不确定，判 FAIL。\n\n`;
+    content += `## 范围限制\n\n`;
+    content += `- 你只能审查本次 diff 涉及的变更，不得对 diff 之外的代码提出阻塞性问题（P0/P1）。\n`;
+    content += `- P0/P1 问题必须提供 acRef（关联验收标准编号），否则将被降级为 advisory。\n`;
+    content += `- 不在本次任务范围内的改进建议请放入 advisory 字段。\n\n`;
     // 1. Framework statistics (hard data — git diff --stat)
     const diffBase = startCommit ?? "HEAD";
     const diffStat = await new Promise((resolve) => {
@@ -167,7 +173,22 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     // 3. Key code diff (excluding test/config/dist, truncated)
     const keyDiff = await getKeyDiff(projectRoot, startCommit, 300);
     content += `## 关键代码变更\n\`\`\`diff\n${keyDiff}\n\`\`\`\n\n`;
-    // 4. Checklist
+    // 4. Inject tribunal-category lessons (calibration)
+    try {
+        const lessonsManager = new LessonsManager(outputDir, projectRoot);
+        const tribunalLessons = (await lessonsManager.get(undefined, "tribunal"))
+            .filter((l) => !l.retired)
+            .slice(0, 5);
+        if (tribunalLessons.length > 0) {
+            content += `## 裁决校准经验（历史积累）\n\n`;
+            for (const l of tribunalLessons) {
+                content += `- [${l.severity ?? "minor"}] ${l.lesson}\n`;
+            }
+            content += `\n`;
+        }
+    }
+    catch { /* lessons not available, skip */ }
+    // 5. Checklist
     content += `## 检查清单\n\n${getTribunalChecklist(phase)}\n`;
     await writeFile(digestFile, content, "utf-8");
     return { digestPath: digestFile, digestContent: content };
@@ -338,22 +359,30 @@ export async function crossValidate(phase, outputDir, projectRoot, startCommit) 
             }
         }
         catch { /* no exit code file — skip this check */ }
-        // Check impl files vs test files ratio
+        // Check impl files vs test files ratio (committed + staged + untracked)
         const diffBase = startCommit ?? "HEAD~20";
         const diffOutput = await new Promise((resolve) => {
             execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
                 cwd: projectRoot,
-            }, (err, stdout) => resolve(err ? "" : stdout || ""));
+            }, (err, stdout) => {
+                const committed = err ? "" : (stdout || "");
+                // Also check staged (cached) and untracked files
+                execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
+                    cwd: projectRoot,
+                }, (err2, stdout2) => {
+                    const staged = err2 ? "" : (stdout2 || "");
+                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+                        cwd: projectRoot,
+                    }, (err3, stdout3) => {
+                        const untracked = err3 ? "" : (stdout3 || "");
+                        resolve(committed + "\n" + staged + "\n" + untracked);
+                    });
+                });
+            });
         });
-        const files = diffOutput.trim().split("\n").filter((f) => f.length > 0);
-        const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/];
-        const testPatterns = [
-            /[Tt]est\.(java|ts|js|py)$/,
-            /\.test\.(ts|js)$/,
-            /\.spec\.(ts|js)$/,
-        ];
-        const implCount = files.filter((f) => implPatterns.some((p) => p.test(f)) && !testPatterns.some((p) => p.test(f))).length;
-        const testCount = files.filter((f) => testPatterns.some((p) => p.test(f))).length;
+        const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
+        const implCount = files.filter(f => isImplFile(f)).length;
+        const testCount = files.filter(f => isTestFile(f)).length;
         if (implCount > 0 && testCount === 0) {
             return `${implCount} 个新增实现文件但 0 个测试文件，裁决 Agent 不应判定 PASS`;
         }
@@ -435,6 +464,25 @@ export async function executeTribunal(projectRoot, outputDir, phase, topic, summ
             mandate: "[FALLBACK] 请调用 auto-dev-reviewer subagent 审查上述材料，然后提交 auto_dev_tribunal_verdict。",
         });
     }
+    // ------- Auto-override: FAIL without P0/P1 -> PASS -------
+    if (verdict.verdict === "FAIL") {
+        // Downgrade P0/P1 issues without acRef to advisory
+        const advisory = [];
+        const remaining = verdict.issues.filter((issue) => {
+            if ((issue.severity === "P0" || issue.severity === "P1") && !issue.acRef) {
+                advisory.push({ description: issue.description, suggestion: issue.suggestion });
+                return false;
+            }
+            return true;
+        });
+        const hasBlockingIssues = remaining.some((i) => i.severity === "P0" || i.severity === "P1");
+        if (!hasBlockingIssues) {
+            // Override FAIL to PASS — no real P0/P1 with acRef
+            verdict.verdict = "PASS";
+            verdict.issues = remaining;
+            verdict.advisory = advisory;
+        }
+    }
     // ------- Cross-validate on PASS -------
     if (verdict.verdict === "PASS") {
         const crossCheckFail = await crossValidate(phase, outputDir, projectRoot, startCommit);
@@ -482,14 +530,27 @@ export async function executeTribunal(projectRoot, outputDir, phase, topic, summ
  */
 async function runQuickPreCheck(phase, outputDir, projectRoot, startCommit) {
     if (phase === 5) {
-        // Get test file count from git diff
+        // Get test file count from git diff (committed + staged + untracked)
         const diffBase = startCommit ?? "HEAD~20";
         const diffOutput = await new Promise((resolve) => {
             execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
                 cwd: projectRoot,
-            }, (err, stdout) => resolve(err ? "" : stdout || ""));
+            }, (err, stdout) => {
+                const committed = err ? "" : (stdout || "");
+                execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
+                    cwd: projectRoot,
+                }, (err2, stdout2) => {
+                    const staged = err2 ? "" : (stdout2 || "");
+                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+                        cwd: projectRoot,
+                    }, (err3, stdout3) => {
+                        const untracked = err3 ? "" : (stdout3 || "");
+                        resolve(committed + "\n" + staged + "\n" + untracked);
+                    });
+                });
+            });
         });
-        const files = diffOutput.trim().split("\n").filter((f) => f.length > 0);
+        const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
         const testFileCount = countTestFiles(files);
         // Read e2e-test-results.md
         let resultsContent = null;
@@ -497,13 +558,7 @@ async function runQuickPreCheck(phase, outputDir, projectRoot, startCommit) {
             resultsContent = await readFile(join(outputDir, "e2e-test-results.md"), "utf-8");
         }
         catch { /* file doesn't exist */ }
-        const implPatterns = [/\.java$/, /\.ts$/, /\.js$/, /\.py$/];
-        const testPatterns = [
-            /[Tt]est\.(java|ts|js|py)$/,
-            /\.test\.(ts|js)$/,
-            /\.spec\.(ts|js)$/,
-        ];
-        const implFileCount = files.filter((f) => implPatterns.some((p) => p.test(f)) && !testPatterns.some((p) => p.test(f))).length;
+        const implFileCount = files.filter(f => isImplFile(f)).length;
         const result = await validatePhase5Artifacts(outputDir, testFileCount, resultsContent, implFileCount);
         if (!result.valid) {
             return result.mandate;

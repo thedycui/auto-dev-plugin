@@ -1381,7 +1381,7 @@ server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Ph
             phase: 3,
             status: "IN_PROGRESS",
             phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
-            tribunalSubmits: { ...submits, [phaseKey]: 0 },
+            tribunalSubmits: {}, // Reset ALL phases — regress restarts from Phase 3
             step: "3",
             stepIteration: 0,
             lastValidation: "ESCALATE_REGRESS",
