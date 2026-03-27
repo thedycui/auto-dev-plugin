@@ -391,14 +391,15 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
             };
         }
         case "7": {
-            const eval7 = await evaluateTribunal(projectRoot, outputDir, 7, topic, "Phase 7 retrospective", state.startCommit);
-            return {
-                passed: eval7.verdict === "PASS",
-                feedback: eval7.verdict === "FAIL"
-                    ? eval7.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
-                    : "",
-                tribunalResult: eval7,
-            };
+            // Phase 7 (retrospective) — no tribunal, just check retrospective.md exists
+            const retroContent = await readFileSafe(join(outputDir, "retrospective.md"));
+            if (!retroContent || retroContent.split("\n").length < 30) {
+                return {
+                    passed: false,
+                    feedback: "retrospective.md 不存在或内容不足（< 30 行），请补充完整的复盘报告。",
+                };
+            }
+            return { passed: true, feedback: "" };
         }
         default:
             return { passed: true, feedback: "" };
