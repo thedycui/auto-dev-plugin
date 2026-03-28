@@ -60,6 +60,74 @@ function formatDuration(ms) {
         return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
 }
+const TOPIC_PATTERNS = [
+    // Bugfix signals
+    { pattern: /\bfix\b|修复|bug|缺陷|问题|报错|异常|crash|error|故障|hotfix/i, type: "bugfix" },
+    // Refactor / performance signals
+    { pattern: /refactor|重构|优化|性能|perf|cleanup|clean.?up|提升|降低耗时|减少内存/i, type: "refactor" },
+    // Docs signals
+    { pattern: /\bdoc[s]?\b|文档|注释|readme|changelog|wiki/i, type: "docs" },
+    // Config signals
+    { pattern: /\bconfig\b|配置|环境变量|\.env|\.yml|\.yaml|\.properties|settings/i, type: "config" },
+    // Test-only signals (treat as refactor — skip full design)
+    { pattern: /补充测试|添加测试|单元测试|集成测试|测试覆盖|test.?coverage|add.?test|write.?test/i, type: "refactor" },
+];
+function inferChangeTypeFromTopic(topic) {
+    for (const { pattern, type } of TOPIC_PATTERNS) {
+        if (pattern.test(topic))
+            return type;
+    }
+    return undefined; // no match → caller uses default logic
+}
+// ---------------------------------------------------------------------------
+// Design doc content → changeType inference
+// ---------------------------------------------------------------------------
+/**
+ * Analyze the first ~2000 chars of a design doc (title, background, goals)
+ * to infer what kind of change this is. Uses weighted keyword scoring
+ * to avoid false positives from a single stray word.
+ */
+function inferChangeTypeFromContent(content) {
+    // Only scan the top portion — title + background + goals section
+    const head = content.slice(0, 2000);
+    const SIGNALS = [
+        // Bugfix — strong signals
+        { pattern: /修复|bug\s*fix|缺陷|故障|hotfix|问题修复|错误修复/gi, type: "bugfix", weight: 3 },
+        { pattern: /报错|异常|crash|error|失败|不生效|不正确|不一致/gi, type: "bugfix", weight: 2 },
+        { pattern: /回归|regression|排查|根因|root.?cause/gi, type: "bugfix", weight: 2 },
+        // Refactor / performance
+        { pattern: /重构|refactor|性能优化|performance/gi, type: "refactor", weight: 3 },
+        { pattern: /优化|提升性能|降低耗时|减少内存|瓶颈|慢查询/gi, type: "refactor", weight: 2 },
+        { pattern: /代码质量|tech.?debt|技术债|cleanup|clean.?up/gi, type: "refactor", weight: 2 },
+        // Test
+        { pattern: /测试计划|测试方案|测试覆盖|test.?plan|test.?strategy/gi, type: "refactor", weight: 3 },
+        { pattern: /补充测试|添加测试|单元测试|集成测试|e2e.?test/gi, type: "refactor", weight: 2 },
+        // Docs
+        { pattern: /文档编写|文档更新|编写文档|API\s*文档|接口文档/gi, type: "docs", weight: 3 },
+        // Config
+        { pattern: /配置变更|环境配置|部署配置|迁移配置/gi, type: "config", weight: 3 },
+        // Feature — weakest default, only match when explicitly stated
+        { pattern: /新增功能|新功能|feature|新增接口|新增模块/gi, type: "feature", weight: 2 },
+    ];
+    const scores = { bugfix: 0, refactor: 0, feature: 0, config: 0, docs: 0 };
+    for (const { pattern, type, weight } of SIGNALS) {
+        const matches = head.match(pattern);
+        if (matches) {
+            scores[type] += matches.length * weight;
+        }
+    }
+    // Find the highest score, require a minimum threshold to avoid guessing
+    let best;
+    let bestScore = 0;
+    for (const [type, score] of Object.entries(scores)) {
+        if (score > bestScore) {
+            bestScore = score;
+            best = type;
+        }
+    }
+    // Require at least score 3 to be confident (e.g. one strong signal or multiple weak ones)
+    return bestScore >= 3 ? best : undefined;
+}
 // ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
@@ -201,23 +269,70 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
             message: "ship=true requires deployTarget parameter.",
         });
     }
+    // --- Infer changeType from design doc content or topic ---
+    let designDocContent;
+    if (!changeType) {
+        // Try to read design doc early for content-based inference
+        const candidatePath = designDoc
+            ? resolve(projectRoot, designDoc)
+            : undefined;
+        if (candidatePath) {
+            try {
+                designDocContent = await readFile(candidatePath, "utf-8");
+            }
+            catch { /* will be caught again later in design doc binding */ }
+        }
+        if (!designDocContent) {
+            // Auto-match attempt (same logic as binding below, but read-only)
+            try {
+                const { readdir } = await import("node:fs/promises");
+                const docsDir = join(projectRoot, "docs");
+                const files = await readdir(docsDir);
+                const topicLower = topic.toLowerCase();
+                const matches = files.filter(f => f.startsWith("design-") && f.endsWith(".md") &&
+                    f.toLowerCase().includes(topicLower));
+                if (matches.length === 1) {
+                    try {
+                        designDocContent = await readFile(join(docsDir, matches[0]), "utf-8");
+                    }
+                    catch { /* read failed, fall through */ }
+                }
+            }
+            catch { /* docs/ doesn't exist */ }
+        }
+    }
+    const inferredChangeType = changeType
+        ?? (designDocContent ? inferChangeTypeFromContent(designDocContent) : undefined)
+        ?? inferChangeTypeFromTopic(topic);
     // --- Mode decision: explicit override or framework auto-select ---
+    // Inferred changeType is advisory only — it suggests a mode but never
+    // overrides to a faster mode without explicit estimatedLines/Files evidence.
     let mode;
+    let suggestedMode;
     if (explicitMode) {
         mode = explicitMode;
     }
     else {
+        const hasExplicitEstimates = estimatedLines !== undefined || estimatedFiles !== undefined;
         const lines = estimatedLines ?? 999;
         const files = estimatedFiles ?? 999;
-        const isLowRisk = changeType === "refactor" || changeType === "config" || changeType === "docs";
+        const isLowRisk = inferredChangeType === "refactor" || inferredChangeType === "config" || inferredChangeType === "docs";
         if (isLowRisk && lines <= 20 && files <= 2) {
             mode = "turbo";
         }
-        else if (lines <= 50 && files <= 3 && changeType !== "feature") {
+        else if (lines <= 50 && files <= 3 && inferredChangeType !== "feature") {
+            mode = "quick";
+        }
+        else if (inferredChangeType === "bugfix" && !hasExplicitEstimates) {
+            // Bugfix defaults to quick — skip design/plan phases, start from implementation
             mode = "quick";
         }
         else {
             mode = "full";
+            // Generate suggestion when we inferred a non-feature type but lack size evidence to auto-downgrade
+            if (inferredChangeType && inferredChangeType !== "feature" && !hasExplicitEstimates) {
+                suggestedMode = "quick";
+            }
         }
     }
     const stack = await sm.detectStack();
@@ -376,6 +491,14 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         resumed: false,
         topic: state.topic,
         mode: state.mode,
+        ...(!changeType && inferredChangeType && !explicitMode ? {
+            autoInferred: {
+                changeType: inferredChangeType,
+                source: designDocContent ? "design-doc" : "topic",
+                modeReason: `${designDocContent ? "design doc content" : `topic "${topic}"`} → detected ${inferredChangeType}`,
+                ...(suggestedMode ? { suggestedMode, suggestion: `检测到 ${inferredChangeType} 类型，建议使用 mode="${suggestedMode}"。如任务简单可重新 init 并指定 mode="${suggestedMode}"` } : {}),
+            },
+        } : {}),
         language: stack.language,
         buildCmd: stack.buildCmd,
         testCmd: stack.testCmd,
