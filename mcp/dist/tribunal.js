@@ -154,13 +154,23 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     content += `- 你只能审查本次 diff 涉及的变更，不得对 diff 之外的代码提出阻塞性问题（P0/P1）。\n`;
     content += `- P0/P1 问题必须提供 acRef（关联验收标准编号），否则将被降级为 advisory。\n`;
     content += `- 不在本次任务范围内的改进建议请放入 advisory 字段。\n\n`;
-    // 1. Framework statistics (hard data — git diff --stat)
+    // 1. Framework statistics (hard data — git diff --stat + untracked files)
     const diffBase = startCommit ?? "HEAD";
     const diffStat = await new Promise((resolve) => {
         execFile("git", ["diff", "--stat", diffBase], {
             cwd: projectRoot,
             maxBuffer: 1 * 1024 * 1024,
-        }, (err, stdout) => resolve(err ? "(git diff --stat failed)" : stdout));
+        }, (err, stdout) => {
+            const tracked = err ? "" : stdout;
+            // Also list untracked files so tribunal can see new files
+            execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+                cwd: projectRoot,
+            }, (err2, stdout2) => {
+                const untracked = (err2 || !stdout2?.trim()) ? "" :
+                    stdout2.trim().split("\n").map((f) => ` ${f} (new file)`).join("\n") + "\n";
+                resolve(tracked + (untracked ? "\nUntracked new files:\n" + untracked : ""));
+            });
+        });
     });
     // Truncate diffStat if too large (monorepos can produce thousands of lines)
     const diffStatLines = diffStat.split("\n");
@@ -218,15 +228,25 @@ const PARSE_FAILURE_INDICATORS = [
     "JSON 解析失败",
     "未返回有效的 structured_output",
 ];
+/** Threshold (chars) above which we pass digest via file instead of inline -p */
+const INLINE_THRESHOLD = 8_000;
 /**
  * Spawn an independent `claude` process to judge the tribunal input.
  * Parses structured_output from JSON response.
  * Post-parse: PASS without passEvidence is overridden to FAIL (revision 4).
+ *
+ * When digestContent exceeds INLINE_THRESHOLD, the prompt references the
+ * digest file path instead of inlining it, avoiding shell argument length
+ * limits and escaping issues.
  */
-export async function runTribunal(digestContent, phase) {
+export async function runTribunal(digestContent, phase, digestPath) {
     const resolved = await getClaudePath();
     const useShell = resolved.startsWith("npx");
-    const prompt = `以下是待裁决的材料，请按照检查清单逐条裁决。\n\n${digestContent}`;
+    // Short digests inline; long digests reference the file
+    const useFile = digestPath && digestContent.length > INLINE_THRESHOLD;
+    const prompt = useFile
+        ? `你是独立裁决者。请先用 Read 工具读取文件 "${digestPath}"，然后按照其中的检查清单逐条裁决。`
+        : `以下是待裁决的材料，请按照检查清单逐条裁决。\n\n${digestContent}`;
     const schemaStr = JSON.stringify(TRIBUNAL_SCHEMA);
     const args = [
         "-p", prompt,
@@ -236,8 +256,12 @@ export async function runTribunal(digestContent, phase) {
         "--model", "sonnet",
         "--no-session-persistence",
     ];
+    // When using file mode, allow read permission on the digest file
+    if (useFile) {
+        args.push("--allowedTools", "Read");
+    }
     const spawnOpts = {
-        timeout: 180_000,
+        timeout: 600_000,
         maxBuffer: 2 * 1024 * 1024,
     };
     return new Promise((resolve) => {
@@ -311,10 +335,10 @@ export async function runTribunal(digestContent, phase) {
  *   crashed=true means process-level crash (needs full fallback),
  *   rawParseFailure=true means LLM responded but JSON was malformed (agent can parse raw).
  */
-export async function runTribunalWithRetry(digestContent, phase) {
+export async function runTribunalWithRetry(digestContent, phase, digestPath) {
     const MAX_RETRIES = 1;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const result = await runTribunal(digestContent, phase);
+        const result = await runTribunal(digestContent, phase, digestPath);
         // Check if it's a JSON parse failure (LLM responded but output wasn't valid JSON).
         // The raw output likely contains the verdict in a readable form — return it
         // immediately for the main agent to extract, no retry needed.
@@ -360,7 +384,7 @@ export async function runTribunalWithRetry(digestContent, phase) {
  * Phase 7: check retrospective.md exists and >= 50 lines.
  */
 export async function crossValidate(phase, outputDir, projectRoot, startCommit) {
-    // Phase 4: git diff non-empty check
+    // Phase 4: git diff non-empty check (committed + staged + untracked)
     if (phase === 4) {
         if (!startCommit) {
             return "startCommit 未设置（可能是旧版 state 迁移），无法校验 Phase 4 代码变更";
@@ -368,7 +392,22 @@ export async function crossValidate(phase, outputDir, projectRoot, startCommit) 
         const diffOutput = await new Promise((resolve) => {
             execFile("git", ["diff", "--stat", startCommit], {
                 cwd: projectRoot,
-            }, (err, stdout) => resolve(err ? "" : stdout || ""));
+            }, (err, stdout) => {
+                const tracked = err ? "" : (stdout || "");
+                // Check staged changes
+                execFile("git", ["diff", "--cached", "--stat"], {
+                    cwd: projectRoot,
+                }, (err2, stdout2) => {
+                    const staged = err2 ? "" : (stdout2 || "");
+                    // Check untracked new files
+                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
+                        cwd: projectRoot,
+                    }, (err3, stdout3) => {
+                        const untracked = err3 ? "" : (stdout3 || "");
+                        resolve(tracked + staged + untracked);
+                    });
+                });
+            });
         });
         if (!diffOutput.trim()) {
             return "git diff 为空，没有任何代码变更，裁决 Agent 不应判定 PASS";
@@ -457,9 +496,9 @@ export async function evaluateTribunal(projectRoot, outputDir, phase, topic, sum
         return { verdict: "FAIL", issues: [{ severity: "P0", description: preCheckError }], preCheckError };
     }
     // 2. Prepare tribunal input
-    const { digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
-    // 3. Run tribunal with retry
-    const { verdict, crashed, rawParseFailure } = await runTribunalWithRetry(digestContent, phase);
+    const { digestPath, digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
+    // 3. Run tribunal with retry (passes digestPath for file-based mode on large digests)
+    const { verdict, crashed, rawParseFailure } = await runTribunalWithRetry(digestContent, phase, digestPath);
     // 4. Write tribunal log (audit trail — not state)
     const tribunalLog = buildTribunalLog(phase, verdict, "claude-p");
     await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
@@ -540,7 +579,7 @@ export async function executeTribunal(projectRoot, outputDir, phase, topic, summ
     // ------- Prepare tribunal input files -------
     const { digestPath, digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
     // ------- Run tribunal with retry -------
-    const { verdict, crashed } = await runTribunalWithRetry(digestContent, phase);
+    const { verdict, crashed } = await runTribunalWithRetry(digestContent, phase, digestPath);
     // ------- Write tribunal log (audit trail) -------
     const tribunalLog = buildTribunalLog(phase, verdict, "claude-p");
     await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
