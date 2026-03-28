@@ -1718,3 +1718,239 @@ describe("Phase 8 ship integration", () => {
     expect(result.step).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tribunal subagentRequested branch (AC-8)
+// ---------------------------------------------------------------------------
+
+describe("tribunal_subagent escalation (AC-8)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteFile.mockResolvedValue(undefined);
+    mockAtomicUpdate.mockResolvedValue(undefined);
+  });
+
+  it("returns tribunal_subagent escalation when evaluateTribunal returns subagentRequested=true", async () => {
+    const state = makeState({ mode: "full", phase: 4 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    // State has step=4a
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0, tribunalSubmits: {} });
+      }
+      throw new Error("ENOENT");
+    });
+
+    // shell() build + test pass
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    // evaluateTribunal returns subagentRequested
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest-phase4.md",
+      digest: "digest content",
+      digestHash: "abc123",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_subagent");
+    expect(result.escalation!.digestPath).toBe("/tmp/digest-phase4.md");
+    expect(result.escalation!.digest).toBe("digest content");
+    expect(result.prompt).toBeNull();
+  });
+
+  it("tribunal_subagent does NOT count as crash", async () => {
+    const state = makeState({ mode: "full", phase: 4 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0, tribunalSubmits: {} });
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest.md",
+      digest: "content",
+      digestHash: "hash",
+    });
+
+    await computeNextTask("/tmp/test-project", "test-topic");
+
+    // Verify tribunalSubmits incremented but no crash-related state changes
+    const updateCalls = mockAtomicUpdate.mock.calls;
+    const tribunalUpdate = updateCalls.find(
+      (call: unknown[]) => (call[0] as Record<string, unknown>).tribunalSubmits !== undefined,
+    );
+    expect(tribunalUpdate).toBeDefined();
+    // Should increment tribunalSubmits for phase 4
+    const submits = (tribunalUpdate![0] as Record<string, Record<string, number>>).tribunalSubmits;
+    expect(submits["4"]).toBe(1);
+  });
+
+  it("tribunal_subagent escalation includes lastFeedback field (P1-3 fix)", async () => {
+    const state = makeState({ mode: "full", phase: 4 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0, tribunalSubmits: {} });
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest.md",
+      digest: "content",
+      digestHash: "hash",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.escalation!.lastFeedback).toBeDefined();
+    expect(result.escalation!.lastFeedback.length).toBeGreaterThan(0);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-O04: subagentRequested works for Phase 5 and Phase 6
+  // -----------------------------------------------------------------------
+
+  it("TC-O04: subagentRequested in Phase 5 returns tribunal_subagent escalation", async () => {
+    const state = makeState({ mode: "full", phase: 5 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "5b", stepIteration: 0 });
+      }
+      throw new Error("ENOENT");
+    });
+
+    // Mock build/test pass
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest-phase5.md",
+      digest: "digest content",
+      digestHash: "abc123",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_subagent");
+    expect(result.escalation!.digestPath).toBe("/tmp/digest-phase5.md");
+  });
+
+  it("TC-O04: subagentRequested in Phase 6 returns tribunal_subagent escalation", async () => {
+    const state = makeState({ mode: "full", phase: 6 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "6", stepIteration: 0 });
+      }
+      if (path.includes("acceptance-report.md")) {
+        return "## AC-1\nResult: PASS\n";
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest-phase6.md",
+      digest: "digest content",
+      digestHash: "def456",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_subagent");
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-O05: subagentRequested does not trigger ESCALATE_REGRESS
+  // -----------------------------------------------------------------------
+
+  it("TC-O05: subagentRequested after 2 prior submits still returns tribunal_subagent (not max_escalations)", async () => {
+    const state = makeState({
+      mode: "full",
+      phase: 4,
+      tribunalSubmits: { "4": 2 },
+    });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0 });
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+        cb(null, "ok", "");
+      },
+    );
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      subagentRequested: true,
+      digestPath: "/tmp/digest.md",
+      digest: "content",
+      digestHash: "hash",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_subagent");
+    // Should NOT be tribunal_max_escalations
+    expect(result.escalation!.reason).not.toBe("tribunal_max_escalations");
+  });
+});

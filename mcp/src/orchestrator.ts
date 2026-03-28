@@ -80,6 +80,7 @@ export interface NextTaskResult {
     lastFeedback: string;
     digest?: string;
     digestHash?: string;
+    digestPath?: string;
   };
   /** When true, the prompt should be executed in a fresh subagent context (clean slate, no prior failure context) */
   freshContext?: boolean;
@@ -907,6 +908,28 @@ export async function computeNextTask(
       const phaseKey = String(phaseForStep(currentStep));
       const submits = state.tribunalSubmits ?? {};
       const count = (submits[phaseKey] ?? 0) + 1;
+
+      // Subagent requested: Hub unavailable or default mode — delegate to subagent.
+      // Does NOT count as crash — intentional delegation. Still increment tribunalSubmits.
+      if (validation.tribunalResult.subagentRequested) {
+        await sm.atomicUpdate({
+          tribunalSubmits: { ...submits, [phaseKey]: count },
+        });
+        return {
+          done: false,
+          step: currentStep,
+          agent: null,
+          prompt: null,
+          escalation: {
+            reason: "tribunal_subagent",
+            lastFeedback: "裁决已委托给 subagent，请读取 digestPath 文件执行裁决后调用 auto_dev_tribunal_verdict 提交。",
+            digest: validation.tribunalResult.digest,
+            digestHash: validation.tribunalResult.digestHash,
+            digestPath: validation.tribunalResult.digestPath,
+          },
+          message: `Step ${currentStep} tribunal 委托给 subagent 执行。`,
+        };
+      }
 
       // Parse failure: LLM responded but JSON was malformed.
       // Return raw output for the main agent to extract the verdict itself.

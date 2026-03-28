@@ -63,16 +63,32 @@ export class GitManager {
   ): Promise<DiffCheckOutput> {
     this.validateRef(baseCommit);
 
+    // Committed changes
     const nameOnlyOutput = await this.execGit(
       "diff",
       "--name-only",
       `${baseCommit}..HEAD`,
       "--",
     );
-    const actualFiles = nameOnlyOutput
-      .trim()
-      .split("\n")
-      .filter((f) => f.length > 0);
+    // Staged but not yet committed
+    const stagedOutput = await this.execGit(
+      "diff",
+      "--cached",
+      "--name-only",
+    );
+    // Untracked new files (invisible to git diff)
+    const untrackedOutput = await this.execGit(
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+    );
+
+    const actualFiles = [...new Set(
+      (nameOnlyOutput + "\n" + stagedOutput + "\n" + untrackedOutput)
+        .trim()
+        .split("\n")
+        .filter((f) => f.length > 0),
+    )];
 
     const actualSet = new Set(actualFiles);
     const expectedSet = new Set(expectedFiles);

@@ -34,9 +34,23 @@ while !result.done:
   if result.task:
     Agent(subagent_type=result.agentType, prompt=result.task, model=result.model)
   elif result.escalation:
-    告知用户: result.escalation.reason + result.escalation.feedback
-    等待用户决定后继续或终止
-    break
+    if result.escalation.reason == "tribunal_subagent":
+      // 自动启动 subagent 执行裁决（不中断流程）
+      digestPath = result.escalation.digestPath
+      Agent(subagent_type="auto-dev-reviewer", prompt="""
+        你是独立裁决者。请先用 Read 工具读取文件 "{digestPath}"，
+        然后按照其中的检查清单逐条裁决。
+        裁决完成后调用 auto_dev_tribunal_verdict 提交结果。
+        PASS 必须对每条检查项提供 passEvidence（文件名:行号）。
+        如果不确定，判 FAIL。
+      """)
+      result = auto_dev_next(projectRoot, topic)
+      continue
+    else:
+      // 其他 escalation（tribunal_crashed, tribunal_parse_failure, iteration_limit 等）
+      告知用户: result.escalation.reason + result.escalation.feedback
+      等待用户决定后继续或终止
+      break
   result = auto_dev_next(projectRoot, topic)
 ```
 

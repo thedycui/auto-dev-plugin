@@ -261,10 +261,11 @@ describe("runTribunal — Output Parsing", () => {
 // TC-11/12: runTribunalWithRetry
 // ---------------------------------------------------------------------------
 
-describe("runTribunalWithRetry — Crash Detection and Retry", () => {
+describe("runTribunalWithRetry — Crash Detection and Retry (CLI mode)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubEnv("TRIBUNAL_CLAUDE_PATH", "/usr/bin/claude-mock");
+    vi.stubEnv("TRIBUNAL_MODE", "cli");
   });
 
   afterEach(() => {
@@ -1079,3 +1080,323 @@ describe("Types — tribunal category (Task 12)", () => {
 });
 
 import { TRIBUNAL_SCHEMA } from "../tribunal-schema.js";
+
+// ---------------------------------------------------------------------------
+// Mock hub-client for three-tier strategy tests
+// ---------------------------------------------------------------------------
+
+const mockGetHubClient = vi.fn();
+vi.mock("../hub-client.js", () => ({
+  getHubClient: () => mockGetHubClient(),
+  resetHubClient: vi.fn(),
+}));
+
+// ---------------------------------------------------------------------------
+// TC-30+: Three-Tier Strategy Tests (AC-1, AC-2, AC-3, AC-4, AC-5, AC-6)
+// ---------------------------------------------------------------------------
+
+describe("runTribunalWithRetry — Three-Tier Strategy", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.stubEnv("TRIBUNAL_CLAUDE_PATH", "/usr/bin/claude-mock");
+    // Default: no hub client
+    mockGetHubClient.mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("AC-1: Default mode (no env vars) returns subagentRequested=true without calling execFile", async () => {
+    // No TRIBUNAL_MODE, no TRIBUNAL_HUB_URL
+    delete process.env.TRIBUNAL_MODE;
+    delete process.env.TRIBUNAL_HUB_URL;
+    mockGetHubClient.mockReturnValue(null);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+    expect(result.crashed).toBe(false);
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("AC-5: TRIBUNAL_MODE=cli uses CLI spawn path (calls execFile)", async () => {
+    vi.stubEnv("TRIBUNAL_MODE", "cli");
+    setupExecFileCallback(null, JSON.stringify({
+      structured_output: {
+        verdict: "FAIL",
+        issues: [{ severity: "P1", description: "test issue" }],
+      },
+    }));
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBeUndefined();
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(mockExecFile).toHaveBeenCalled();
+  });
+
+  it("AC-2: Hub mode — successful execution returns verdict", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
+        passEvidence: ["file.ts:10 — tested"],
+      }),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBeUndefined();
+    expect(result.crashed).toBe(false);
+    expect(result.verdict.verdict).toBe("PASS");
+    expect(mockHubClient.executePrompt).toHaveBeenCalled();
+  });
+
+  it("AC-3: Hub unavailable — degrades to subagent", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(false),
+      ensureConnected: vi.fn(),
+      findTribunalWorker: vi.fn(),
+      executePrompt: vi.fn(),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+    expect(mockHubClient.ensureConnected).not.toHaveBeenCalled();
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  it("AC-4: Hub available but worker offline — degrades to subagent", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue(null),
+      executePrompt: vi.fn(),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+    expect(mockHubClient.executePrompt).not.toHaveBeenCalled();
+  });
+
+  it("AC-6: Hub worker timeout — degrades to subagent", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue(null), // null = timeout/failure
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T02: Default mode dummy verdict structure
+  // -----------------------------------------------------------------------
+
+  it("TC-T02: Default mode returns complete dummy verdict structure", async () => {
+    delete process.env.TRIBUNAL_MODE;
+    mockGetHubClient.mockReturnValue(null);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(result.verdict.issues).toEqual([]);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T10: Hub PASS without evidence overridden to FAIL
+  // -----------------------------------------------------------------------
+
+  it("TC-T10: Hub returns PASS with empty passEvidence — overridden to FAIL", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
+        passEvidence: [],
+      }),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.verdict.verdict).toBe("FAIL");
+    expect(result.verdict.issues[0]!.description).toContain("passEvidence 为空");
+    expect(result.verdict.issues[0]!.severity).toBe("P0");
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T11: Hub returns string result (needs JSON.parse)
+  // -----------------------------------------------------------------------
+
+  it("TC-T11: Hub returns JSON string result — correctly parsed", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue(
+        JSON.stringify({ verdict: "PASS", issues: [], passEvidence: ["evidence:1"] }),
+      ),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.verdict.verdict).toBe("PASS");
+    expect(result.crashed).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T12: Hub returns invalid result (no verdict field) — degrades
+  // -----------------------------------------------------------------------
+
+  it("TC-T12: Hub returns result without verdict field — degrades to subagent", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue({ foo: "bar" }),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T13: Hub registration failure — degrades to subagent
+  // -----------------------------------------------------------------------
+
+  it("TC-T13: Hub ensureConnected fails — degrades to subagent", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(false),
+      findTribunalWorker: vi.fn(),
+      executePrompt: vi.fn(),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    expect(result.subagentRequested).toBe(true);
+    expect(mockHubClient.findTribunalWorker).not.toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T14: Hub large digest uses file-based prompt
+  // -----------------------------------------------------------------------
+
+  it("TC-T14: Large digest (>8000 chars) — prompt references file path", async () => {
+    const largeDigest = "x".repeat(9000);
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
+        passEvidence: ["test:1"],
+      }),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    await runTribunalWithRetry(largeDigest, 5, "/tmp/digest.md");
+
+    const prompt = mockHubClient.executePrompt.mock.calls[0]![1] as string;
+    expect(prompt).toContain("Read 工具读取文件");
+    expect(prompt).toContain("/tmp/digest.md");
+    expect(prompt).not.toContain(largeDigest);
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-T15: Hub small digest uses inline prompt
+  // -----------------------------------------------------------------------
+
+  it("TC-T15: Small digest (<8000 chars) — prompt inlines digest content", async () => {
+    const smallDigest = "Short digest content for tribunal";
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue({
+        verdict: "PASS",
+        issues: [],
+        passEvidence: ["test:1"],
+      }),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    await runTribunalWithRetry(smallDigest, 5, "/tmp/digest.md");
+
+    const prompt = mockHubClient.executePrompt.mock.calls[0]![1] as string;
+    expect(prompt).toContain(smallDigest);
+    expect(prompt).not.toContain("Read 工具读取文件");
+  });
+
+  // -----------------------------------------------------------------------
+  // TC-N02: Hub returns non-JSON string — does not crash
+  // -----------------------------------------------------------------------
+
+  it("TC-N02: Hub returns non-JSON string result — degrades gracefully", async () => {
+    const mockHubClient = {
+      isAvailable: vi.fn().mockResolvedValue(true),
+      ensureConnected: vi.fn().mockResolvedValue(true),
+      findTribunalWorker: vi.fn().mockResolvedValue({ id: "w1", name: "tribunal-worker", status: "online" }),
+      executePrompt: vi.fn().mockResolvedValue("this is not valid JSON {{{"),
+    };
+    mockGetHubClient.mockReturnValue(mockHubClient);
+
+    const result = await runTribunalWithRetry("fake digest", 5);
+
+    // Should degrade to subagent (tryRunViaHub returns null due to catch block)
+    expect(result.subagentRequested).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TC-I01/I02: Interface Compatibility (AC-9)
+// ---------------------------------------------------------------------------
+
+describe("EvalTribunalResult interface compatibility (AC-9)", () => {
+  it("TC-I01: EvalTribunalResult can be constructed without subagentRequested/digestPath", () => {
+    // This is a compile-time check — if it compiles, the test passes.
+    // We also verify at runtime that the fields are indeed optional.
+    const result: import("../tribunal.js").EvalTribunalResult = {
+      verdict: "FAIL",
+      issues: [],
+    };
+
+    expect(result.subagentRequested).toBeUndefined();
+    expect(result.digestPath).toBeUndefined();
+    expect(result.verdict).toBe("FAIL");
+  });
+
+  it("TC-I02: evaluateTribunal function signature accepts 5-6 parameters", async () => {
+    // Verify function exists and accepts the expected parameters.
+    // evaluateTribunal is already imported at module level via dynamic import.
+    // We verify by importing it and checking it's a function.
+    const mod = await import("../tribunal.js");
+    expect(typeof mod.evaluateTribunal).toBe("function");
+    // evaluateTribunal(root, dir, phase, topic, summary, startCommit?)
+    // TypeScript ensures compile-time signature correctness;
+    // at runtime we verify it's callable.
+    expect(mod.evaluateTribunal.length).toBeGreaterThanOrEqual(5);
+  });
+});

@@ -1,0 +1,28 @@
+{
+  "topic": "tribunal-hub-integration",
+  "mode": "full",
+  "phase": 7,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/tribunal-hub-integration",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "startedAt": "2026-03-28T11:05:27.321Z",
+  "updatedAt": "2026-03-28T12:12:24.359Z",
+  "startCommit": "037e34435db841cdb01d803195bc697fd09b3e25",
+  "tdd": true,
+  "costMode": "beast",
+  "step": null,
+  "stepIteration": 0,
+  "lastValidation": "DONE",
+  "approachState": null,
+  "tribunalSubmits": {
+    "4": 0,
+    "5": 0,
+    "6": 0
+  }
+}

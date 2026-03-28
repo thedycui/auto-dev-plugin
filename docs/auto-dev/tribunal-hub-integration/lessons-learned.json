@@ -1,0 +1,79 @@
+{
+  "topic": "tribunal-hub-integration",
+  "date": "2026-03-28",
+  "duration_minutes": 63,
+  "lessons": [
+    {
+      "id": "L1",
+      "category": "design-review",
+      "title": "设计审查发现函数名引用错误（P0-1），避免了实现阶段的返工",
+      "description": "设计文档中 4.6 节和 AC-8 引用了不存在的 runStepValidation()，实际为 validateStep() + computeNextTask()。设计审查在 Phase 1b 捕获此问题，如果未发现会导致实现者在错误函数上浪费时间。",
+      "trigger": "代码中的函数名与设计文档不一致",
+      "resolution": "设计审查强制 cross-reference 代码库中的实际函数名",
+      "impact": "high"
+    },
+    {
+      "id": "L2",
+      "category": "design-review",
+      "title": "数据传递链路必须端到端写清（P0-2），否则实现时容易遗漏中间层",
+      "description": "subagentRequested 字段需要经过 runTribunal -> runTribunalWithRetry -> evaluateTribunal -> validateStep -> computeNextTask 五层传递，设计审查发现只写了首尾，中间三层的解构和传递未明确说明。",
+      "trigger": "新增字段需跨多层传递",
+      "resolution": "设计文档中为每个新字段画出完整的传递链路图",
+      "impact": "high"
+    },
+    {
+      "id": "L3",
+      "category": "design-review",
+      "title": "消费者端审查（SKILL.md）的重要性——P1-3 差点遗漏",
+      "description": "新增 tribunal_subagent escalation reason，但最终消费方 SKILL.md 未纳入改动范围。如果未修改 SKILL.md，新的 escalation 会导致流程中断而非自动启动 subagent。",
+      "trigger": "新增 escalation reason 但未检查所有消费方",
+      "resolution": "审查规则 1（调用方审查）在此案例完美适用——不只审生产者，必须审消费者",
+      "impact": "high"
+    },
+    {
+      "id": "L4",
+      "category": "plan-review",
+      "title": "返回类型兼容性需在 plan 阶段明确方案选择",
+      "description": "Plan P1-1 指出 runTribunal() 返回 Promise<TribunalVerdict>，不能往里塞 subagentRequested。最终方案选择在 runTribunalWithRetry() 层短路返回，runTribunal() 类型保持不变——这是更优实现。",
+      "trigger": "设计层面的类型约束在计划层面需转化为具体方案",
+      "resolution": "Plan 阶段对每个类型变更明确是改原类型还是在上层处理",
+      "impact": "medium"
+    },
+    {
+      "id": "L5",
+      "category": "plan-review",
+      "title": "subagentRequested 时跳过 tribunal log 写入，避免审计误导",
+      "description": "Plan P1-2 指出如果 subagentRequested=true 仍写 FAIL log，会造成误导性审计记录。代码中加了早返回 + 注释 'P1-2: skip tribunal log writing'。",
+      "trigger": "中间状态的副作用（log 写入）在短路路径中未被考虑",
+      "resolution": "短路返回前检查所有已执行和待执行的副作用",
+      "impact": "medium"
+    },
+    {
+      "id": "L6",
+      "category": "tribunal",
+      "title": "Phase 4 tribunal FAIL 因 TDD gate（tddTaskStates 缺失），需重新实现后 PASS",
+      "description": "Phase 4 裁决因 tdd=true 但无 tddTaskStates 字段被判 FAIL。这说明实现阶段未正确走 TDD 工具调用流程。Phase 4 后修复后 Phase 5 和 6 一次通过。",
+      "trigger": "TDD 模式开启但 TDD 工具调用未发生",
+      "resolution": "实现阶段确保 auto_dev_task_red / auto_dev_task_green 正确调用",
+      "impact": "medium"
+    },
+    {
+      "id": "L7",
+      "category": "implementation",
+      "title": "HubClient 的防御性编程模式值得复用——所有方法 catch 返回 null/false",
+      "description": "hub-client.ts 的 4 个公共方法全部用 try/catch 包裹，错误时返回 null/false 而非抛异常。这使得调用方无需 try/catch，降级逻辑自然流畅。",
+      "trigger": "外部 HTTP 依赖的不确定性",
+      "resolution": "面向降级设计：所有外部调用方法返回 nullable，由调用方决定降级策略",
+      "impact": "low"
+    },
+    {
+      "id": "L8",
+      "category": "testing",
+      "title": "新增 30 个测试用例覆盖 Hub/Subagent/CLI 三条路径，465 全量通过无回归",
+      "description": "测试分布在 3 个文件：hub-client-extended.test.ts（14 个）、tribunal.test.ts（13 个新增）、orchestrator.test.ts（3 个新增）。所有 P0 用例通过，TC-T16 因需完整文件系统 mock 被标记为间接覆盖。",
+      "trigger": "三级策略的组合场景多",
+      "resolution": "按 AC 优先级组织测试，P0 用例必须直接覆盖",
+      "impact": "medium"
+    }
+  ]
+}
