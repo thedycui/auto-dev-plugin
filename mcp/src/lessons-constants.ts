@@ -12,6 +12,11 @@ export const MAX_GLOBAL_INJECT = 10;
 export const MAX_FEEDBACK_HISTORY = 20;
 export const MIN_DISPLACEMENT_MARGIN = 2;
 
+// Cross-project (Global) layer constants (self-evolution)
+export const MAX_CROSS_PROJECT_POOL = 100;
+export const MAX_CROSS_PROJECT_INJECT = 15;
+export const GLOBAL_PROMOTE_MIN_SCORE = 6;
+
 // ---------------------------------------------------------------------------
 // Helper: initial score based on severity
 // ---------------------------------------------------------------------------

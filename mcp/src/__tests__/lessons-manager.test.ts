@@ -4,10 +4,10 @@
  * Each test gets an isolated tmp directory with pre-seeded JSON files.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir as realHomedir } from "node:os";
 import { LessonsManager, applyDecay } from "../lessons-manager.js";
 import {
   ensureDefaults,
@@ -16,9 +16,22 @@ import {
   SCORE_DELTA,
   MAX_FEEDBACK_HISTORY,
   MAX_GLOBAL_POOL,
+  MAX_CROSS_PROJECT_POOL,
+  MAX_CROSS_PROJECT_INJECT,
+  GLOBAL_PROMOTE_MIN_SCORE,
   MIN_DISPLACEMENT_MARGIN,
 } from "../lessons-constants.js";
 import type { LessonEntry } from "../types.js";
+
+// Allow overriding homedir for cross-project tests
+let mockHomedir: string | null = null;
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal() as Record<string, unknown>;
+  return {
+    ...actual,
+    homedir: () => mockHomedir ?? (actual.homedir as () => string)(),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -652,5 +665,354 @@ describe("AC-1/AC-2/AC-9: injectedLessonIds lifecycle", () => {
 
     const final = JSON.parse(await readFile(statePath, "utf-8"));
     expect(final.injectedLessonIds).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// Group 8: Cross-project Global layer (self-evolution)
+// ===========================================================================
+
+describe("Cross-project Global layer", () => {
+  let crossTmpRoot: string;
+  let crossOutputDir: string;
+  let crossProjectRoot: string;
+  let crossGlobalDir: string;
+  let crossGlobalFile: string;
+  let crossProjectGlobalFile: string;
+
+  beforeEach(async () => {
+    crossTmpRoot = await mkdtemp(join(tmpdir(), "lessons-cross-"));
+    crossProjectRoot = crossTmpRoot;
+    crossOutputDir = join(crossProjectRoot, "docs", "auto-dev", "test-topic");
+    crossGlobalDir = join(crossProjectRoot, "docs", "auto-dev", "_global");
+    crossGlobalFile = join(crossTmpRoot, ".auto-dev", "lessons-global.json");
+    crossProjectGlobalFile = join(crossGlobalDir, "lessons-global.json");
+    await mkdir(crossOutputDir, { recursive: true });
+    await mkdir(crossGlobalDir, { recursive: true });
+    await mkdir(join(crossTmpRoot, ".auto-dev"), { recursive: true });
+
+    // Override homedir for cross-project tests
+    mockHomedir = crossTmpRoot;
+  });
+
+  afterEach(async () => {
+    mockHomedir = null;
+    await rm(crossTmpRoot, { recursive: true, force: true });
+  });
+
+  function crossSeedProject(entries: LessonEntry[]): Promise<void> {
+    return writeFile(crossProjectGlobalFile, JSON.stringify(entries, null, 2));
+  }
+
+  function crossSeedGlobal(entries: LessonEntry[]): Promise<void> {
+    return writeFile(crossGlobalFile, JSON.stringify(entries, null, 2));
+  }
+
+  async function readCrossGlobal(): Promise<LessonEntry[]> {
+    return JSON.parse(await readFile(crossGlobalFile, "utf-8"));
+  }
+
+  function crossCreateManager(): LessonsManager {
+    return new LessonsManager(crossOutputDir, crossProjectRoot);
+  }
+
+  // --- getCrossProjectLessons ---
+
+  describe("getCrossProjectLessons()", () => {
+    it("returns empty array when global file does not exist", async () => {
+      const mgr = crossCreateManager();
+      const result = await mgr.getCrossProjectLessons();
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array for empty JSON array file", async () => {
+      // We need to write directly to the crossProjectFilePath
+      // Since crossProjectFilePath is private, we use the public method
+      const mgr = crossCreateManager();
+      // Write to home dir — but we can't easily without mocking
+      // Instead test via promoteToGlobal + getCrossProjectLessons round-trip
+      const result = await mgr.getCrossProjectLessons();
+      expect(result).toEqual([]);
+    });
+
+    it("returns entries sorted by decayed score descending", async () => {
+      const now = new Date();
+      // Seed the cross-project global file directly
+      await crossSeedGlobal([
+        makeEntry({ id: "g-low", score: 2, lesson: "low lesson", lastPositiveAt: now.toISOString() }),
+        makeEntry({ id: "g-high", score: 10, lesson: "high lesson", lastPositiveAt: now.toISOString() }),
+        makeEntry({ id: "g-mid", score: 5, lesson: "mid lesson", lastPositiveAt: now.toISOString() }),
+      ]);
+
+      const mgr = crossCreateManager();
+      const result = await mgr.getCrossProjectLessons(10);
+      expect(result.length).toBe(3);
+      expect(result[0].id).toBe("g-high");
+      expect(result[2].id).toBe("g-low");
+    });
+  });
+
+  // --- promoteToGlobal ---
+
+  describe("promoteToGlobal()", () => {
+    it("promotes reusable entries with score >= minScore (AC-2)", async () => {
+      const now = new Date();
+      // Seed project-level entries (these are what promoteToGlobal reads from)
+      await crossSeedProject([
+        makeEntry({
+          id: "promo-1", score: 8, lesson: "reusable high-score",
+          reusable: true, lastPositiveAt: now.toISOString(),
+        }),
+        makeEntry({
+          id: "promo-2", score: 4, lesson: "reusable low-score",
+          reusable: true, lastPositiveAt: now.toISOString(),
+        }),
+        makeEntry({
+          id: "promo-3", score: 8, lesson: "non-reusable high-score",
+          reusable: false, lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+      const promoted = await mgr.promoteToGlobal(6);
+
+      // Only promo-1 qualifies (reusable + score >= 6)
+      expect(promoted).toBe(1);
+      const globalEntries = await readCrossGlobal();
+      expect(globalEntries.length).toBe(1);
+      expect(globalEntries[0].lesson).toBe("reusable high-score");
+    });
+
+    it("rejects low-score entries (AC-11)", async () => {
+      const now = new Date();
+      // Seed project-level entries
+      await crossSeedProject([
+        makeEntry({
+          id: "low-1", score: 3, lesson: "low score entry",
+          reusable: true, lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+      const promoted = await mgr.promoteToGlobal(); // default minScore=6
+      expect(promoted).toBe(0);
+    });
+
+    it("deduplicates by lesson text", async () => {
+      const now = new Date();
+      // Seed project-level entries
+      await crossSeedProject([
+        makeEntry({
+          id: "dup-prj-1", score: 10, lesson: "same lesson text",
+          reusable: true, lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+
+      // First promotion
+      const first = await mgr.promoteToGlobal(1);
+      expect(first).toBe(1);
+
+      // Second promotion — should be deduped
+      const second = await mgr.promoteToGlobal(1);
+      expect(second).toBe(0);
+    });
+
+    it("sets sourceProject and promotionPath on promoted entries", async () => {
+      const now = new Date();
+      // Seed project-level entries
+      await crossSeedProject([
+        makeEntry({
+          id: "meta-1", score: 10, lesson: "has metadata",
+          reusable: true, lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+      await mgr.promoteToGlobal(1);
+
+      const globalEntries = await readCrossGlobal();
+      expect(globalEntries.length).toBe(1);
+      expect(globalEntries[0].sourceProject).toBeDefined();
+      expect(globalEntries[0].promotedAt).toBeDefined();
+      expect(globalEntries[0].promotionPath).toBe("project_to_global");
+    });
+  });
+
+  // --- injectGlobalLessons ---
+
+  describe("injectGlobalLessons()", () => {
+    it("returns same as getCrossProjectLessons()", async () => {
+      const mgr = crossCreateManager();
+      const result = await mgr.injectGlobalLessons();
+      expect(result).toEqual([]);
+    });
+  });
+
+  // --- backward compatibility ---
+
+  describe("backward compatibility aliases", () => {
+    it("getGlobalLessons() delegates to getProjectLessons()", async () => {
+      const now = new Date();
+      await seedGlobal([
+        makeEntry({ id: "compat-1", score: 5, lesson: "compat test", lastPositiveAt: now.toISOString() }),
+      ]);
+      const mgr = createManager();
+
+      const result = await mgr.getGlobalLessons(10);
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("compat-1");
+    });
+
+    it("addToGlobal() delegates to addToProject()", async () => {
+      await seedGlobal([]);
+      const mgr = createManager();
+      const entry = makeEntry({ id: "compat-add", lesson: "compat add test", score: 5 });
+
+      const result = await mgr.addToGlobal(entry);
+      expect(result.added).toBe(true);
+    });
+
+    it("promoteReusableLessons() delegates to promoteToProject()", async () => {
+      await seedLocal([
+        makeEntry({ id: "compat-promo", lesson: "compat promo", reusable: true, score: 5 }),
+      ]);
+      await seedGlobal([]);
+      const mgr = createManager();
+
+      const promoted = await mgr.promoteReusableLessons("test-topic");
+      expect(promoted).toBe(1);
+    });
+
+    it("readGlobalEntries() delegates to readProjectEntries()", async () => {
+      await seedGlobal([
+        makeEntry({ id: "compat-read", lesson: "compat read test" }),
+      ]);
+      const mgr = createManager();
+
+      const result = await mgr.readGlobalEntries();
+      expect(result.length).toBe(1);
+    });
+  });
+
+  // --- data compatibility ---
+
+  describe("data compatibility (AC-6)", () => {
+    it("old JSON without new fields deserializes correctly", async () => {
+      // Write a lesson entry without sourceProject/promotedAt/promotionPath
+      const oldFormatEntry = {
+        id: "old-1",
+        phase: 3,
+        category: "pitfall",
+        severity: "minor",
+        lesson: "old format lesson",
+        reusable: false,
+        appliedCount: 0,
+        timestamp: new Date().toISOString(),
+        score: 5,
+      };
+      await seedGlobal([oldFormatEntry as LessonEntry]);
+      const mgr = createManager();
+
+      const result = await mgr.getProjectLessons(10);
+      expect(result.length).toBe(1);
+      expect(result[0].sourceProject).toBeUndefined();
+      expect(result[0].promotedAt).toBeUndefined();
+      expect(result[0].promotionPath).toBeUndefined();
+    });
+
+    it("handles malformed cross-project JSON gracefully (AC-10)", async () => {
+      // Write invalid JSON to the cross-project global file
+      await writeFile(crossGlobalFile, "not valid json {", "utf-8");
+      const mgr = crossCreateManager();
+      const result = await mgr.getCrossProjectLessons();
+      expect(result).toEqual([]);
+    });
+
+    it("handles empty array cross-project JSON (AC-10)", async () => {
+      await crossSeedGlobal([]);
+      const mgr = crossCreateManager();
+      const result = await mgr.getCrossProjectLessons();
+      expect(result).toEqual([]);
+    });
+
+    it("file not found returns empty array (AC-10)", async () => {
+      // Don't seed any file — crossGlobalFile doesn't exist
+      const mgr = crossCreateManager();
+      const result = await mgr.getCrossProjectLessons();
+      expect(result).toEqual([]);
+    });
+  });
+
+  // --- cross-project pool displacement (AC-3) ---
+
+  describe("cross-project pool displacement (AC-3)", () => {
+    it("pool at limit: high-score entry displaces lowest", async () => {
+      const now = new Date();
+      // Fill cross-project pool to MAX_CROSS_PROJECT_POOL
+      const pool = Array.from({ length: MAX_CROSS_PROJECT_POOL }, (_, i) =>
+        makeEntry({
+          id: `cp-pool-${i}`,
+          score: 1,
+          lesson: `cross-project lesson ${i}`,
+          timestamp: now.toISOString(),
+          lastPositiveAt: now.toISOString(),
+        }),
+      );
+      await crossSeedGlobal(pool);
+
+      // Seed a high-score entry in the project layer
+      await crossSeedProject([
+        makeEntry({
+          id: "cp-high-scorer",
+          score: 10,
+          lesson: "high scoring cross-project lesson",
+          reusable: true,
+          timestamp: now.toISOString(),
+          lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+      const promoted = await mgr.promoteToGlobal(1);
+      expect(promoted).toBe(1);
+
+      const globalEntries = await readCrossGlobal();
+      const retired = globalEntries.filter(e => e.retired);
+      expect(retired.length).toBe(1);
+      expect(retired[0].retiredReason).toBe("displaced_by_new");
+    });
+
+    it("pool at limit: low-score entry rejected when margin not met", async () => {
+      const now = new Date();
+      // Fill pool with score=5 entries
+      const pool = Array.from({ length: MAX_CROSS_PROJECT_POOL }, (_, i) =>
+        makeEntry({
+          id: `cp-pool-${i}`,
+          score: 5,
+          lesson: `cross-project lesson ${i}`,
+          timestamp: now.toISOString(),
+          lastPositiveAt: now.toISOString(),
+        }),
+      );
+      await crossSeedGlobal(pool);
+
+      // Seed an entry with score=7 (= lowest(5) + margin(2)), needs to EXCEED
+      await crossSeedProject([
+        makeEntry({
+          id: "cp-low-scorer",
+          score: 7,
+          lesson: "marginal cross-project lesson",
+          reusable: true,
+          timestamp: now.toISOString(),
+          lastPositiveAt: now.toISOString(),
+        }),
+      ]);
+
+      const mgr = crossCreateManager();
+      const promoted = await mgr.promoteToGlobal(1);
+      expect(promoted).toBe(0);
+    });
   });
 });

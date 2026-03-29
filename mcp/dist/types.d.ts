@@ -66,6 +66,12 @@ export declare const LessonEntrySchema: z.ZodObject<{
     appliedCount: z.ZodOptional<z.ZodNumber>;
     lastAppliedAt: z.ZodOptional<z.ZodString>;
     timestamp: z.ZodString;
+    sourceProject: z.ZodOptional<z.ZodString>;
+    promotedAt: z.ZodOptional<z.ZodString>;
+    promotionPath: z.ZodOptional<z.ZodEnum<{
+        local_to_project: "local_to_project";
+        project_to_global: "project_to_global";
+    }>>;
     score: z.ZodOptional<z.ZodNumber>;
     lastPositiveAt: z.ZodOptional<z.ZodString>;
     feedbackHistory: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -150,6 +156,7 @@ export declare const StateJsonSchema: z.ZodObject<{
         byPhase: z.ZodRecord<z.ZodString, z.ZodNumber>;
     }, z.core.$strip>>;
     injectedLessonIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    injectedGlobalLessonIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     tribunalSubmits: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     step: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     stepIteration: z.ZodOptional<z.ZodNumber>;

@@ -51,6 +51,10 @@ export const LessonEntrySchema = z.object({
     appliedCount: z.number().int().optional(),
     lastAppliedAt: z.string().optional(),
     timestamp: z.string(),
+    // Cross-project promotion tracking (self-evolution)
+    sourceProject: z.string().optional(),
+    promotedAt: z.string().optional(),
+    promotionPath: z.enum(["local_to_project", "project_to_global"]).optional(),
     // Scoring & feedback fields (lessons-evolution)
     score: z.number().optional(),
     lastPositiveAt: z.string().optional(),
@@ -114,6 +118,8 @@ export const StateJsonSchema = z.object({
     }).optional(),
     // Injected lesson IDs for feedback tracking (lessons-evolution)
     injectedLessonIds: z.array(z.string()).optional(),
+    // Injected global (cross-project) lesson IDs (self-evolution)
+    injectedGlobalLessonIds: z.array(z.string()).optional(),
     // Tribunal submit counters per phase (tribunal feature)
     tribunalSubmits: z.record(z.string(), z.number()).optional(),
     // Step orchestrator state (persisted across auto_dev_next calls)

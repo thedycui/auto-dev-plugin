@@ -21,14 +21,31 @@ export declare class LessonsManager {
         localUpdated: string[];
         globalUpdated: string[];
     }>;
-    getGlobalLessons(limit?: number): Promise<LessonEntry[]>;
-    promoteReusableLessons(topic: string): Promise<number>;
-    private globalFilePath;
-    addToGlobal(entry: LessonEntry): Promise<{
+    getProjectLessons(limit?: number): Promise<LessonEntry[]>;
+    promoteToProject(topic: string): Promise<number>;
+    private projectFilePath;
+    addToProject(entry: LessonEntry): Promise<{
         added: boolean;
         displaced?: LessonEntry;
     }>;
     private readEntries;
+    readProjectEntries(): Promise<LessonEntry[]>;
+    /** @deprecated Use getProjectLessons() */
+    getGlobalLessons(limit?: number): Promise<LessonEntry[]>;
+    /** @deprecated Use addToProject() */
+    addToGlobal(entry: LessonEntry): Promise<{
+        added: boolean;
+        displaced?: LessonEntry;
+    }>;
+    /** @deprecated Use promoteToProject() */
+    promoteReusableLessons(topic: string): Promise<number>;
+    /** @deprecated Use readProjectEntries() */
     readGlobalEntries(): Promise<LessonEntry[]>;
+    private crossProjectFilePath;
+    getCrossProjectLessons(limit?: number): Promise<LessonEntry[]>;
+    promoteToGlobal(minScore?: number): Promise<number>;
+    injectGlobalLessons(): Promise<LessonEntry[]>;
+    private addToCrossProject;
+    private readCrossProjectEntries;
     private writeAtomic;
 }

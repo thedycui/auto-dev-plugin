@@ -21,6 +21,7 @@ import { parseInitMarker, validatePhase5Artifacts, validatePhase6Artifacts, vali
 import { LessonsManager } from "./lessons-manager.js";
 import { isTestFile, isImplFile } from "./tdd-gate.js";
 import { getClaudePath } from "./agent-spawner.js";
+import { getHubClient } from "./hub-client.js";
 // Re-export for backward compatibility
 export { getClaudePath, resolveClaudePath } from "./agent-spawner.js";
 // ---------------------------------------------------------------------------
@@ -328,20 +329,91 @@ export async function runTribunal(digestContent, phase, digestPath) {
 // Retry Logic
 // ---------------------------------------------------------------------------
 /**
- * Run tribunal with 1 retry for crash (not legitimate FAIL).
- * Uses crash detection via known error strings.
- * 3s backoff between attempts.
- * Returns { verdict, crashed, rawParseFailure } —
- *   crashed=true means process-level crash (needs full fallback),
- *   rawParseFailure=true means LLM responded but JSON was malformed (agent can parse raw).
+ * Run tribunal with three-tier strategy:
+ *   Level 1: Hub mode (TRIBUNAL_HUB_URL set) — execute via Agent Hub
+ *   Level 2: Subagent mode (default) — return subagentRequested=true for orchestrator
+ *   Level 3: CLI mode (TRIBUNAL_MODE=cli) — spawn claude CLI process with retry
+ *
+ * Returns { verdict, crashed, rawParseFailure, subagentRequested }.
  */
 export async function runTribunalWithRetry(digestContent, phase, digestPath) {
+    // --- Level 3: CLI mode (explicit opt-in via TRIBUNAL_MODE=cli) ---
+    if (process.env.TRIBUNAL_MODE === "cli") {
+        return runTribunalWithRetryCli(digestContent, phase, digestPath);
+    }
+    // --- Level 1: Hub mode (TRIBUNAL_HUB_URL set) ---
+    const hubClient = getHubClient();
+    if (hubClient) {
+        const hubResult = await tryRunViaHub(hubClient, digestContent, phase, digestPath);
+        if (hubResult) {
+            return { verdict: hubResult, crashed: false };
+        }
+        // Hub failed — fall through to Level 2 (Subagent)
+    }
+    // --- Level 2: Subagent mode (default — no CLI spawn, no Hub) ---
+    return {
+        verdict: { verdict: "FAIL", issues: [], raw: "" },
+        crashed: false,
+        subagentRequested: true,
+    };
+}
+/**
+ * Try to run tribunal via Agent Hub. Returns TribunalVerdict on success, null on failure.
+ */
+async function tryRunViaHub(hubClient, digestContent, phase, digestPath) {
+    try {
+        // 1. Check availability
+        const available = await hubClient.isAvailable();
+        if (!available)
+            return null;
+        // 2. Register (idempotent)
+        const connected = await hubClient.ensureConnected();
+        if (!connected)
+            return null;
+        // 3. Find worker
+        const worker = await hubClient.findTribunalWorker();
+        if (!worker)
+            return null;
+        // 4. Build prompt for worker
+        const useFile = digestPath && digestContent.length > INLINE_THRESHOLD;
+        const prompt = useFile
+            ? `你是独立裁决者。请先用 Read 工具读取文件 "${digestPath}"，然后按照其中的检查清单逐条裁决。输出 JSON 格式的裁决结果，包含 verdict ("PASS"/"FAIL") 和 issues 数组。`
+            : `以下是待裁决的材料，请按照检查清单逐条裁决。输出 JSON 格式的裁决结果，包含 verdict ("PASS"/"FAIL") 和 issues 数组。\n\n${digestContent}`;
+        // 5. Execute via Hub (10 min timeout)
+        const result = await hubClient.executePrompt(worker.id, prompt, 600_000);
+        if (!result)
+            return null;
+        // 6. Parse result
+        const data = typeof result === "string" ? JSON.parse(result) : result;
+        if (data && data.verdict) {
+            // Apply PASS-without-evidence override (same as runTribunal)
+            if (data.verdict === "PASS" && (!data.passEvidence || data.passEvidence.length === 0)) {
+                return {
+                    verdict: "FAIL",
+                    issues: [{
+                            severity: "P0",
+                            description: "裁决判定 PASS 但未提供任何证据（passEvidence 为空）。PASS 必须逐条举证。",
+                        }],
+                    raw: JSON.stringify(data),
+                };
+            }
+            return data;
+        }
+        return null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
+ * Original CLI spawn path with retry logic (Level 3).
+ * Extracted from the original runTribunalWithRetry for TRIBUNAL_MODE=cli.
+ */
+async function runTribunalWithRetryCli(digestContent, phase, digestPath) {
     const MAX_RETRIES = 1;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         const result = await runTribunal(digestContent, phase, digestPath);
         // Check if it's a JSON parse failure (LLM responded but output wasn't valid JSON).
-        // The raw output likely contains the verdict in a readable form — return it
-        // immediately for the main agent to extract, no retry needed.
         const isParseFailure = result.issues.some((i) => PARSE_FAILURE_INDICATORS.some((indicator) => i.description.includes(indicator)));
         if (isParseFailure) {
             return { verdict: result, crashed: false, rawParseFailure: true };
@@ -368,7 +440,7 @@ export async function runTribunalWithRetry(digestContent, phase, digestPath) {
             crashed: true,
         };
     }
-    // R2-1: unreachable — the loop always returns
+    // Unreachable — the loop always returns
     throw new Error("unreachable");
 }
 // ---------------------------------------------------------------------------
@@ -498,7 +570,20 @@ export async function evaluateTribunal(projectRoot, outputDir, phase, topic, sum
     // 2. Prepare tribunal input
     const { digestPath, digestContent } = await prepareTribunalInput(phase, outputDir, projectRoot, startCommit);
     // 3. Run tribunal with retry (passes digestPath for file-based mode on large digests)
-    const { verdict, crashed, rawParseFailure } = await runTribunalWithRetry(digestContent, phase, digestPath);
+    const { verdict, crashed, rawParseFailure, subagentRequested } = await runTribunalWithRetry(digestContent, phase, digestPath);
+    // 3b. Subagent requested — skip all post-processing, return immediately
+    //     (P1-2: skip tribunal log writing to avoid misleading audit trail)
+    if (subagentRequested) {
+        const digestHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
+        return {
+            verdict: "FAIL",
+            issues: [],
+            subagentRequested: true,
+            digestPath,
+            digest: digestContent,
+            digestHash,
+        };
+    }
     // 4. Write tribunal log (audit trail — not state)
     const tribunalLog = buildTribunalLog(phase, verdict, "claude-p");
     await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
