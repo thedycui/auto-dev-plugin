@@ -203,14 +203,14 @@ server.tool(
     shipMaxRounds: z.number().int().optional(),
   },
   async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
 
     // Handle existing directory
     if (await sm.outputDirExists()) {
       if (!onConflict) {
         return textResult({
           error: "OUTPUT_DIR_EXISTS",
-          message: `docs/auto-dev/${topic} exists. Use onConflict='resume' or 'overwrite'.`,
+          message: `${sm.outputDir} exists. Use onConflict='resume' or 'overwrite'.`,
         });
       }
       if (onConflict === "resume") {
@@ -552,7 +552,7 @@ server.tool(
     topic: z.string(),
   },
   async ({ projectRoot, topic }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
     return textResult(state);
   },
@@ -577,7 +577,7 @@ server.tool(
     }),
   },
   async ({ projectRoot, topic, updates }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     await sm.atomicUpdate(updates);
     return textResult({ ok: true, updated: Object.keys(updates) });
   },
@@ -606,7 +606,7 @@ server.tool(
     let rawSummary = rawSummary0;
     let status: string = rawStatus;
     let summary: string | undefined = rawSummary;
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Guard 0: In orchestrator mode, checkpoint is managed by auto_dev_next.
@@ -892,7 +892,7 @@ server.tool(
     testFiles: z.array(z.string()),
   },
   async ({ projectRoot, topic, task, testFiles }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Verify phase=3, status=IN_PROGRESS, tdd=true
@@ -1032,7 +1032,7 @@ server.tool(
     task: z.number(),
   },
   async ({ projectRoot, topic, task }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Verify phase=3, status=IN_PROGRESS, tdd=true
@@ -1160,7 +1160,7 @@ server.tool(
     phase: z.number(),
   },
   async ({ projectRoot, topic, phase }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
 
     const checks: Array<{ name: string; passed: boolean; message?: string }> = [];
 
@@ -1411,7 +1411,7 @@ server.tool(
     reusable: z.boolean().optional(),
   },
   async ({ projectRoot, topic, phase, category, lesson, context, severity, reusable }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const lessons = new LessonsManager(sm.outputDir);
     await lessons.add(phase, category, lesson, context, { severity, topic, reusable });
     return textResult({ success: true, message: "Lesson recorded." });
@@ -1432,7 +1432,7 @@ server.tool(
     category: z.string().optional(),
   },
   async ({ projectRoot, topic, phase, category }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const lessons = new LessonsManager(sm.outputDir);
     const entries = await lessons.get(phase, category);
     return textResult(entries);
@@ -1456,7 +1456,7 @@ server.tool(
     })),
   },
   async ({ projectRoot, topic, feedbacks }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
     const lessons = new LessonsManager(sm.outputDir, projectRoot);
     const result = await lessons.feedback(feedbacks, { phase: state.phase, topic: state.topic });
@@ -1486,7 +1486,7 @@ server.tool(
     topic: z.string(),
   },
   async ({ projectRoot, topic }) => {
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Read progress-log to find all passed phases
@@ -1756,7 +1756,7 @@ server.tool(
       });
     }
 
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
     // Guard: Phase 5 is skipped when skipE2e=true
@@ -1844,7 +1844,7 @@ server.tool(
     }
 
     // 2. Verify digestHash matches digest file
-    const sm = new StateManager(projectRoot, topic);
+    const sm = await StateManager.create(projectRoot, topic);
     const outputDir = sm.outputDir;
     const digestPath = join(outputDir, `tribunal-digest-phase${phase}.md`);
     let digestContent: string;

@@ -8,8 +8,9 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 
-import { readFile, writeFile, rename, mkdir, stat } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, stat, readdir } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
+import { lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { StateJsonSchema } from "./types.js";
@@ -123,6 +124,13 @@ function parseStackVariables(content: string): Record<string, string> {
 // StateManager
 // ---------------------------------------------------------------------------
 
+/** Format current date as YYYYMMDD-HHMM for directory name prefix. */
+function formatTimestampPrefix(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
 export class StateManager {
   readonly projectRoot: string;
   readonly topic: string;
@@ -133,10 +141,52 @@ export class StateManager {
   /** In-memory copy of the latest persisted state. Available after init() or loadAndValidate(). */
   private state: StateJson | null = null;
 
-  constructor(projectRoot: string, topic: string) {
+  /**
+   * Async factory: resolve the correct outputDir for a topic.
+   * - Scans `docs/auto-dev/` for an existing directory ending with `-{topic}` (or exact match for backward compat)
+   * - If found → reuse (resume scenario)
+   * - If not found → generate `YYYYMMDD-HHMM-{topic}` (new task)
+   */
+  static async create(projectRoot: string, topic: string): Promise<StateManager> {
+    const base = join(resolve(projectRoot), OUTPUT_BASE);
+    const existingDir = await StateManager.findExistingTopicDir(base, topic);
+    const dirName = existingDir ?? `${formatTimestampPrefix()}-${topic}`;
+    return new StateManager(projectRoot, topic, join(base, dirName));
+  }
+
+  /**
+   * Scan `base` directory for a subdirectory matching the given topic.
+   * Checks exact match (backward compat) then `*-{topic}` pattern.
+   */
+  private static async findExistingTopicDir(base: string, topic: string): Promise<string | undefined> {
+    // 1. Exact match (old-style dirs without timestamp)
+    const exact = join(base, topic);
+    if (await fileExists(exact)) return topic;
+
+    // 2. Scan for timestamp-prefixed match: YYYYMMDD-HHMM-{topic}
+    try {
+      const entries = await readdir(base);
+      // Look for dirs ending with `-{topic}`, preferring the latest (sort desc by prefix)
+      const matches = entries
+        .filter(e => {
+          if (!e.endsWith(`-${topic}`)) return false;
+          // Skip .bak directories
+          if (e.includes(".bak")) return false;
+          // Must be a directory
+          try { return lstatSync(join(base, e)).isDirectory(); } catch { return false; }
+        })
+        .sort()
+        .reverse(); // latest first
+      return matches[0]; // undefined if empty
+    } catch {
+      return undefined;
+    }
+  }
+
+  constructor(projectRoot: string, topic: string, outputDirOverride?: string) {
     this.projectRoot = resolve(projectRoot);
     this.topic = topic;
-    this.outputDir = join(this.projectRoot, OUTPUT_BASE, topic);
+    this.outputDir = outputDirOverride ?? join(this.projectRoot, OUTPUT_BASE, topic);
     this.stateFilePath = join(this.outputDir, STATE_FILE);
     this.progressLogPath = join(this.outputDir, PROGRESS_LOG);
   }

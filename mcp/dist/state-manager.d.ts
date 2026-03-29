@@ -19,7 +19,19 @@ export declare class StateManager {
     readonly progressLogPath: string;
     /** In-memory copy of the latest persisted state. Available after init() or loadAndValidate(). */
     private state;
-    constructor(projectRoot: string, topic: string);
+    /**
+     * Async factory: resolve the correct outputDir for a topic.
+     * - Scans `docs/auto-dev/` for an existing directory ending with `-{topic}` (or exact match for backward compat)
+     * - If found → reuse (resume scenario)
+     * - If not found → generate `YYYYMMDD-HHMM-{topic}` (new task)
+     */
+    static create(projectRoot: string, topic: string): Promise<StateManager>;
+    /**
+     * Scan `base` directory for a subdirectory matching the given topic.
+     * Checks exact match (backward compat) then `*-{topic}` pattern.
+     */
+    private static findExistingTopicDir;
+    constructor(projectRoot: string, topic: string, outputDirOverride?: string);
     /** Check whether the output directory already exists. */
     outputDirExists(): Promise<boolean>;
     /** Try to read and parse state.json. Returns null on any failure or validation error. */
