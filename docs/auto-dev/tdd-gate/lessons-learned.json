@@ -1,0 +1,86 @@
+[
+  {
+    "id": "c8767676-35d",
+    "phase": 7,
+    "category": "process",
+    "severity": "high",
+    "lesson": "Tribunal 子进程（claude --bare -p）在 Phase 4/5/6 连续崩溃，原因是权限/认证问题。手动推进虽然保证了流程继续，但丧失了独立审查的核心价值。根因：tribunal 使用 `claude` CLI 子进程需要认证 token 传递，而 MCP server 的进程环境可能缺少必要的认证信息。修复方向：tribunal 启动前做 preflight 检查（验证 claude CLI 可用性），失败时提供清晰诊断而非静默崩溃。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:15.409Z",
+    "score": 3
+  },
+  {
+    "id": "0d5dbee0-f37",
+    "phase": 7,
+    "category": "code-quality",
+    "severity": "high",
+    "lesson": "buildTestCommand 的 switch-case 未覆盖实际 stack 语言字符串 \"TypeScript/JavaScript\"（只写了 \"TypeScript\" 和 \"JavaScript\"），导致 TDD gate 对本项目自身完全不可用。这是 Phase 3 实现时未写单元测试的直接后果——如果 RED 阶段先写了 buildTestCommand(\"TypeScript/JavaScript\", ...) 的测试用例，这个 P0 bug 在实现阶段就会被捕获。教训：switch-case 分支必须用真实输入值做测试，不能只用理论值。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:21.214Z",
+    "score": 3
+  },
+  {
+    "id": "2af5337b-388",
+    "phase": 7,
+    "category": "process",
+    "severity": "medium",
+    "lesson": "Phase 3 在前一个会话完成，tdd=true 但实际未执行 RED-GREEN 流程（因为 TDD Gate 功能本身就是这个 session 要实现的）。这造成了\"用 TDD 去实现 TDD 工具\"的自举悖论：新工具还没实现，无法用自己来约束自己。此类自举场景应在 plan review 时识别并标注为已知例外，而非事后发现。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:26.034Z",
+    "score": 3
+  },
+  {
+    "id": "48e54904-982",
+    "phase": 7,
+    "category": "code-quality",
+    "severity": "high",
+    "lesson": "RED gate 的 git diff 检查最初只用 `git diff --name-only HEAD` 和 `git ls-files --others`，遗漏了 `git diff --name-only --cached`（staged 文件）。这意味着 agent 可以先 `git add` 实现文件再调用 auto_dev_task_red 来绕过检查。安全门禁必须覆盖所有文件状态：unstaged + staged + untracked。Code review（Phase 4）发现了此 P1-4 漏洞并修复。这证明了多阶段审查的价值。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:31.010Z",
+    "score": 3
+  },
+  {
+    "id": "4a38cc72-f0e",
+    "phase": 7,
+    "category": "process",
+    "severity": "high",
+    "lesson": "Phase 3 实现了 10 个 task 但零测试文件，plan 中明确标注了 TDD: required 的 task 也未写测试。Phase 4 code review 将此标为 P1-2 \"No test files exist for any TDD gate code\"。所有 45 个单元测试 + 29 个集成测试都是在 Phase 4 修复阶段补写的。这说明 Phase 3 的 agent 完全忽视了 plan 中的 TDD 要求——正是 TDD Gate 功能要解决的问题，形成了讽刺的递归验证。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:36.787Z",
+    "score": 3
+  },
+  {
+    "id": "ea23441d-94d",
+    "phase": 7,
+    "category": "design",
+    "severity": "medium",
+    "lesson": "设计评审（Phase 1）发现了 2 个 P0：buildTestCommand 不支持多模块 Maven 和 RED 验证不接受编译失败。这两个问题如果到实现后才发现，返工成本会大很多。Phase 1 evaluation 的 \"Dormant Path Detection\" 规则准确识别了所有 first-activation 路径并标为高风险。设计阶段做架构评审的 ROI 很高。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:41.309Z",
+    "score": 3
+  },
+  {
+    "id": "2a3fcc0a-8e7",
+    "phase": 7,
+    "category": "code-quality",
+    "severity": "medium",
+    "lesson": "Node.js child_process.execFile 的 error 对象中，err.code 在进程非零退出时是数字（exit code），但在 ENOENT/ETIMEDOUT 等系统错误时是字符串。如果不做 typeof 检查直接使用，会将字符串写入 z.number() 字段导致 Zod 校验失败。修复方式：`typeof (err as any).code === \"number\" ? (err as any).code : 1`。",
+    "topic": "tdd-gate",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T06:10:45.561Z",
+    "score": 3
+  }
+]

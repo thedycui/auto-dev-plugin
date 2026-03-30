@@ -1,0 +1,38 @@
+{
+  "topic": "test-file-regex",
+  "date": "2026-03-27",
+  "lessons": [
+    {
+      "id": "L1",
+      "category": "design",
+      "title": "正则合并时必须验证超集关系",
+      "description": "设计文档中将多处正则合并为一份时，第一条正则意外缩小了语言覆盖范围（从 java|ts|js|py 缩为 java|kt），被设计审查 P0 拦住。合并正则的本质是集合并集运算，必须逐条对比确认新模式 >= 所有旧模式的并集。",
+      "trigger": "多处正则/规则合并为单一来源",
+      "action": "合并前列出所有副本的匹配范围，逐行标注差异，确认合并结果是严格超集"
+    },
+    {
+      "id": "L2",
+      "category": "process",
+      "title": "设计审查 P0 拦截价值高",
+      "description": "本次唯一的返工发生在 Phase 1 设计审查，P0 拦截了正则超集遗漏。如果没有这道 gate，回归 bug 会在 Phase 5 测试阶段才暴露，成本更高。",
+      "trigger": "设计审查发现 P0",
+      "action": "信任审查流程，不要因为改动看起来简单就想跳过设计审查"
+    },
+    {
+      "id": "L3",
+      "category": "testing",
+      "title": "计划审查补充的 AC-9 测试确实有价值",
+      "description": "计划审查发现 AC-9（countTestFiles 集成测试）未在 Task 2 中明确覆盖，标为 P1。实现阶段补充了 3 个 countTestFiles 测试用例，验证了 phase-enforcer 改造后的行为正确性。",
+      "trigger": "计划审查发现测试覆盖遗漏",
+      "action": "计划审查的 P1 应在实现阶段立即补充，不要拖到 Phase 5"
+    },
+    {
+      "id": "L4",
+      "category": "efficiency",
+      "title": "小型重构全流程约 48 分钟完成",
+      "description": "5 个文件、73 行插入 40 行删除的纯重构任务，从 init 到 Phase 6 验收耗时约 48 分钟。Tribunal 在 Phase 4/5/6 各只需 1 次提交即通过。对于这种明确的重构任务，流程开销合理。",
+      "trigger": "小型重构任务的流程选择",
+      "action": "50 行以内的重构已 skipE2e=true，流程足够精简"
+    }
+  ]
+}

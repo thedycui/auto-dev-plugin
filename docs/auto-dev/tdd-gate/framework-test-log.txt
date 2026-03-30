@@ -1,0 +1,30 @@
+
+> auto-dev-plugin@1.0.0 test
+> cd mcp && npm test
+
+
+> auto-dev-mcp-server@5.0.0 test
+> vitest run
+
+
+ RUN  v3.2.4 /Users/admin/.claude/plugins/auto-dev-plugin/mcp
+
+ ✓ src/__tests__/improvements.test.ts (11 tests) 20ms
+ ✓ src/__tests__/lessons-manager.test.ts (35 tests) 702ms
+ ✓ src/__tests__/tdd-gate-integration.test.ts (29 tests) 498ms
+ ✓ src/__tests__/e2e-integration.test.ts (19 tests) 868ms
+ ✓ src/__tests__/state-rebuild.test.ts (5 tests) 14ms
+ ✓ src/__tests__/regress.test.ts (8 tests) 9ms
+ ✓ src/__tests__/tdd-gate.test.ts (45 tests) 167ms
+ ✓ src/__tests__/preflight-context.test.ts (7 tests) 8ms
+ ✓ src/__tests__/iteration-limit.test.ts (7 tests) 8ms
+ ✓ src/__tests__/tribunal.test.ts (46 tests) 6246ms
+   ✓ runTribunalWithRetry — Crash Detection and Retry > TC-11: Crash on first attempt, legitimate FAIL on retry  3001ms
+   ✓ runTribunalWithRetry — Crash Detection and Retry > TC-12: Two consecutive crashes returns exhausted-retry FAIL  3002ms
+
+ Test Files  10 passed (10)
+      Tests  212 passed (212)
+   Start at  13:57:50
+   Duration  8.51s (transform 1.56s, setup 0ms, collect 5.25s, tests 8.54s, environment 6ms, prepare 3.34s)
+
+

@@ -1,0 +1,74 @@
+{
+  "topic": "tdd-gate",
+  "mode": "full",
+  "phase": 7,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/tdd-gate",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "tdd": true,
+  "costMode": "beast",
+  "startCommit": "a552c7b55687c665363a1a3f1698f886d8d21288",
+  "phaseTimings": {
+    "1": {
+      "startedAt": "2026-03-26T03:57:36.576Z",
+      "completedAt": "2026-03-26T04:10:39.560Z",
+      "durationMs": 782984
+    },
+    "2": {
+      "startedAt": "2026-03-26T04:12:59.113Z",
+      "completedAt": "2026-03-26T04:21:07.686Z",
+      "durationMs": 488573
+    },
+    "3": {
+      "startedAt": "2026-03-26T04:21:21.264Z",
+      "completedAt": "2026-03-26T04:54:01.640Z",
+      "durationMs": 1960376
+    },
+    "4": {
+      "startedAt": "2026-03-26T04:54:33.830Z",
+      "completedAt": "2026-03-26T05:46:00.000Z",
+      "durationMs": 3086170
+    },
+    "5": {
+      "startedAt": "2026-03-26T05:46:00.000Z",
+      "completedAt": "2026-03-26T06:02:00.000Z",
+      "durationMs": 960000
+    },
+    "6": {
+      "startedAt": "2026-03-26T06:02:00.000Z",
+      "completedAt": "2026-03-26T06:07:00.000Z",
+      "durationMs": 300000
+    },
+    "7": {
+      "startedAt": "2026-03-26T06:07:00.000Z",
+      "completedAt": "2026-03-26T06:15:00.000Z",
+      "durationMs": 480000
+    }
+  },
+  "injectedLessonIds": [
+    "c4acc017-229",
+    "2d612ff7-cbf",
+    "faaec30f-d74",
+    "1c4d1d95-3cd",
+    "95b91929-d6f",
+    "d4bb4caf-800",
+    "ca751344-692",
+    "8ad1298b-5e7",
+    "591f5848-54c",
+    "ac71aadf-88e"
+  ],
+  "tribunalSubmits": {
+    "4": 3,
+    "5": 2,
+    "6": 1
+  },
+  "startedAt": "2026-03-26T03:49:21.565Z",
+  "updatedAt": "2026-03-26T06:09:14.265Z"
+}

@@ -1,0 +1,52 @@
+{
+  "topic": "tribunal",
+  "mode": "full",
+  "phase": 7,
+  "iteration": 0,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/tribunal",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "tdd": true,
+  "startCommit": "9f147de82bb29d0af2a570ddc7863c21aabe0027",
+  "phaseTimings": {
+    "1": {
+      "startedAt": "2026-03-26T01:35:08.840Z",
+      "completedAt": "2026-03-26T01:44:22.803Z",
+      "durationMs": 553963
+    },
+    "2": {
+      "startedAt": "2026-03-26T01:44:42.699Z",
+      "completedAt": "2026-03-26T01:51:03.334Z",
+      "durationMs": 380635
+    },
+    "3": {
+      "startedAt": "2026-03-26T01:52:31.038Z",
+      "completedAt": "2026-03-26T02:09:48.767Z",
+      "durationMs": 1037729
+    },
+    "4": {
+      "startedAt": "2026-03-26T02:10:08.607Z",
+      "completedAt": "2026-03-26T02:28:29.603Z",
+      "durationMs": 1100996
+    },
+    "5": {
+      "startedAt": "2026-03-26T02:28:50.624Z",
+      "completedAt": "2026-03-26T02:35:30.254Z",
+      "durationMs": 399630
+    },
+    "6": {
+      "startedAt": "2026-03-26T02:35:56.060Z",
+      "completedAt": "2026-03-26T02:39:22.865Z",
+      "durationMs": 206805
+    }
+  },
+  "injectedLessonIds": [],
+  "startedAt": "2026-03-26T01:33:36.608Z",
+  "updatedAt": "2026-03-26T02:43:35.093Z"
+}

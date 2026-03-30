@@ -1,0 +1,50 @@
+[
+  {
+    "id": "1c8f6450-8b2",
+    "phase": 7,
+    "category": "code-review",
+    "severity": "P0",
+    "lesson": "Zod schema validation silently strips unknown keys from objects. When storing dynamic keys (e.g., tribunalSubmits_phase5) in a Zod-validated state object, they will be dropped on the next safeParse. Solution: use a z.record() field instead of dynamic key names. This was caught as P0 in Phase 4 code review.",
+    "topic": "tribunal",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T02:41:16.510Z",
+    "score": 3
+  },
+  {
+    "id": "2d81e874-528",
+    "phase": 7,
+    "category": "code-review",
+    "severity": "P0",
+    "lesson": "git diff HEAD produces an empty diff when all changes are committed. For reviewing session-wide changes after commits, use git diff startCommit..HEAD where startCommit is recorded at init time. This was caught as P0 in Phase 4 — without this fix the tribunal agent would receive an empty patch file and have no code to review.",
+    "topic": "tribunal",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T02:41:19.719Z",
+    "score": 3
+  },
+  {
+    "id": "176723e8-5dd",
+    "phase": 7,
+    "category": "design-review",
+    "severity": "P0",
+    "lesson": "When designing a feature that spawns external CLI tools (e.g., claude CLI), never assume the binary is in PATH. Shell aliases (nvm, npx) are not resolved by execFile. Implement a multi-tier fallback: env override -> command -v -> hardcoded paths -> npx fallback with shell:true. This was P0 in Phase 1 design review.",
+    "topic": "tribunal",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T02:41:23.654Z",
+    "score": 3
+  },
+  {
+    "id": "fc658ca5-5b8",
+    "phase": 7,
+    "category": "process",
+    "severity": "P1",
+    "lesson": "When extracting shared logic from a large function (like internalCheckpoint from the checkpoint handler), verify which pre-validation guards remain in the caller vs move into the extracted function. In this session, idempotency and predecessor validation were correctly left in the caller, but this decision must be documented to avoid future confusion.",
+    "topic": "tribunal",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-03-26T02:41:26.897Z",
+    "score": 3
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "topic": "test-file-regex",
+  "mode": "full",
+  "phase": 7,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/test-file-regex",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "startedAt": "2026-03-26T23:54:01.130Z",
+  "updatedAt": "2026-03-27T00:46:52.163Z",
+  "startCommit": "05b7d6886a6fedec8b9ac4c1fdcacdcd4cb609a1",
+  "skipE2e": true,
+  "tdd": true,
+  "costMode": "beast",
+  "step": "7",
+  "stepIteration": 0,
+  "lastValidation": null,
+  "iteration": 0,
+  "phaseTimings": {},
+  "approachState": null,
+  "tribunalSubmits": {
+    "4": 1,
+    "5": 3,
+    "6": 1
+  }
+}

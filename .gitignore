@@ -9,6 +9,8 @@ dist/
 
 # MCP server - include dist/ and node_modules/ for zero-build install
 !mcp/dist/
+!mcp/dist/**/*.js
+!mcp/dist/**/*.js.map
 !mcp/node_modules/
 
 # IDE / editor
@@ -18,5 +20,9 @@ dist/
 *.tgz
 *.bak
 
-# Auto-dev session state (regenerated per session)
-mcp/docs/auto-dev/
+# Temporary directories
+.agent-hub/
+.claude/
+.playwright-mcp/
+mcp/node_modules/.bin/
+mcp/node_modules/.vite/

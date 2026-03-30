@@ -1,0 +1,30 @@
+{
+  "topic": "ship-integration",
+  "mode": "full",
+  "phase": 7,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/.claude/plugins/auto-dev-plugin/docs/auto-dev/ship-integration",
+  "projectRoot": "/Users/admin/.claude/plugins/auto-dev-plugin",
+  "startedAt": "2026-03-27T05:25:07.376Z",
+  "updatedAt": "2026-03-27T06:50:27.477Z",
+  "startCommit": "516ed142d2c6c76952300c84a0cb7f3a69399f39",
+  "tdd": true,
+  "costMode": "beast",
+  "step": null,
+  "stepIteration": 0,
+  "lastValidation": "DONE",
+  "approachState": null,
+  "tribunalSubmits": {
+    "4": 0,
+    "5": 0,
+    "6": 0
+  },
+  "iteration": 0,
+  "phaseTimings": {}
+}
