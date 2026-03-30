@@ -20,6 +20,31 @@ export declare class GitManager {
      */
     getHeadCommit(): Promise<string>;
     /**
+     * IMP-003: Unified function to get changed files (committed + staged + untracked).
+     *
+     * @param options.baseCommit - Base commit for diff (default: "HEAD~20")
+     * @param options.includeCommitted - Include committed changes since baseCommit (default: true)
+     * @param options.includeStaged - Include staged changes (default: true)
+     * @param options.includeUntracked - Include untracked files (default: true)
+     * @param options.diffFilter - Git diff-filter option (default: "AM" for added/modified)
+     * @returns Array of changed file paths
+     */
+    getChangedFiles(options?: {
+        baseCommit?: string;
+        includeCommitted?: boolean;
+        includeStaged?: boolean;
+        includeUntracked?: boolean;
+        diffFilter?: string;
+    }): Promise<string[]>;
+    /**
+     * IMP-003: Get git diff --stat output with untracked files listing.
+     * Used for tribunal digest generation.
+     *
+     * @param baseCommit - Base commit for diff (default: "HEAD")
+     * @returns Formatted string with diff stat and untracked files
+     */
+    getDiffStatWithUntracked(baseCommit?: string): Promise<string>;
+    /**
      * Compare plan-expected files against actual git changes since baseCommit.
      */
     diffCheck(expectedFiles: string[], baseCommit: string): Promise<DiffCheckOutput>;

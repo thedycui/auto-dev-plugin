@@ -22,6 +22,29 @@
 4. 确保代码可编译（运行 `{build_cmd}` 验证）
 5. 遵循项目现有代码风格
 
+## 可观测性要求
+
+当改动涉及以下场景时，**必须**在关键节点添加 WARN 级别日志：
+
+1. **数据转换/类型转换**：输入类型 + 输出类型 + 转换前后的值
+2. **外部系统调用**（数据库查询、RPC、HTTP）：请求参数摘要 + 响应状态 + 首条结果的类型和值
+3. **聚合/计算逻辑**：输入数据条数 + 计算方式 + 输出结果
+4. **条件分支**（if/switch on type/config）：实际走了哪个分支 + 判断依据
+
+### 日志规范
+- **级别**：WARN（确保在所有环境都能输出）
+- **前缀**：`[TRACE]`（便于 grep 过滤和后续清理）
+- **内容**：包含变量值和类型，不只是"进入了 XX 方法"
+- **示例**：
+  - Java: `logger.warn("[TRACE] SQL生成: type={}, calcMethod={}, sql={}", dataType, calcMethod, sql);`
+  - Node: `logger.warn('[TRACE] SQL生成: type=%s, calcMethod=%s, sql=%s', dataType, calcMethod, sql);`
+  - Python: `logger.warning('[TRACE] SQL生成: type=%s, calcMethod=%s, sql=%s', dataType, calcMethod, sql)`
+
+### 不需要加日志的场景
+- 纯粹的 CRUD（框架已有日志）
+- getter/setter、DTO 转换
+- 单元测试已完全覆盖的纯函数
+
 ## Constraints
 
 - 不"顺手"重构或添加任务未要求的功能/注释/日志

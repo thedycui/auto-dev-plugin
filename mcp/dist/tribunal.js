@@ -22,6 +22,7 @@ import { LessonsManager } from "./lessons-manager.js";
 import { isTestFile, isImplFile } from "./tdd-gate.js";
 import { getClaudePath } from "./agent-spawner.js";
 import { getHubClient } from "./hub-client.js";
+import { GitManager } from "./git-manager.js";
 // Re-export for backward compatibility
 export { getClaudePath, resolveClaudePath } from "./agent-spawner.js";
 // ---------------------------------------------------------------------------
@@ -156,23 +157,9 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     content += `- P0/P1 问题必须提供 acRef（关联验收标准编号），否则将被降级为 advisory。\n`;
     content += `- 不在本次任务范围内的改进建议请放入 advisory 字段。\n\n`;
     // 1. Framework statistics (hard data — git diff --stat + untracked files)
-    const diffBase = startCommit ?? "HEAD";
-    const diffStat = await new Promise((resolve) => {
-        execFile("git", ["diff", "--stat", diffBase], {
-            cwd: projectRoot,
-            maxBuffer: 1 * 1024 * 1024,
-        }, (err, stdout) => {
-            const tracked = err ? "" : stdout;
-            // Also list untracked files so tribunal can see new files
-            execFile("git", ["ls-files", "--others", "--exclude-standard"], {
-                cwd: projectRoot,
-            }, (err2, stdout2) => {
-                const untracked = (err2 || !stdout2?.trim()) ? "" :
-                    stdout2.trim().split("\n").map((f) => ` ${f} (new file)`).join("\n") + "\n";
-                resolve(tracked + (untracked ? "\nUntracked new files:\n" + untracked : ""));
-            });
-        });
-    });
+    // IMP-003: Use unified GitManager.getDiffStatWithUntracked
+    const gm = new GitManager(projectRoot);
+    const diffStat = await gm.getDiffStatWithUntracked(startCommit ?? "HEAD");
     // Truncate diffStat if too large (monorepos can produce thousands of lines)
     const diffStatLines = diffStat.split("\n");
     const truncatedDiffStat = diffStatLines.length > 100
@@ -217,9 +204,44 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     await writeFile(digestFile, content, "utf-8");
     return { digestPath: digestFile, digestContent: content };
 }
-// ---------------------------------------------------------------------------
-// Tribunal Invocation
-// ---------------------------------------------------------------------------
+/**
+ * Classify a tribunal process error into one of 7 known fault categories.
+ * Pure function — no side effects.
+ *
+ * Categories and retryability:
+ * - ENOENT:  claude CLI binary not found (not retryable)
+ * - EPERM:   permission denied (not retryable)
+ * - prompt-too-long: prompt exceeds shell limits (not retryable)
+ * - timeout:  process exceeded time limit (retryable)
+ * - OOM:     out of memory (retryable)
+ * - cli-internal: internal CLI error (retryable)
+ * - unknown: uncategorized error (retryable by default)
+ */
+export function classifyTribunalError(err, stderr, exitCode) {
+    const msg = typeof err === "string" ? err : err.message;
+    // IMP-002: Save full stderr for detailed crash analysis
+    const stderrSnippet = stderr?.slice(0, 500);
+    const stderrFull = stderr;
+    if (/ENOENT/i.test(msg)) {
+        return { errorCategory: "ENOENT", isRetryable: false, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    if (/EPERM|EACCES/i.test(msg)) {
+        return { errorCategory: "EPERM", isRetryable: false, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    if (/arg.*too long|argument list too long/i.test(msg) || /E2BIG/i.test(msg)) {
+        return { errorCategory: "prompt-too-long", isRetryable: false, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    if (/timed?\s*out|timeout|SIGTERM|ETIMEDOUT/i.test(msg)) {
+        return { errorCategory: "timeout", isRetryable: true, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    if (/OOM|out of memory|heap|ENOMEM/i.test(msg) || (stderr && /OOM|out of memory|heap|ENOMEM/i.test(stderr))) {
+        return { errorCategory: "OOM", isRetryable: true, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    if (/internal|ECONNREFUSED|ECONNRESET|SIGKILL|SIGSEGV/i.test(msg) || (stderr && /internal|fatal|abort/i.test(stderr))) {
+        return { errorCategory: "cli-internal", isRetryable: true, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+    }
+    return { errorCategory: "unknown", isRetryable: true, exitCode, stderrSnippet, stderrFull, errMessage: msg };
+}
 /** Known error strings that indicate a crash (not a legitimate verdict) */
 const CRASH_INDICATORS = [
     "裁决进程执行失败",
@@ -266,12 +288,14 @@ export async function runTribunal(digestContent, phase, digestPath) {
         maxBuffer: 2 * 1024 * 1024,
     };
     return new Promise((resolve) => {
-        const callback = (err, stdout, _stderr) => {
+        const callback = (err, stdout, stderr) => {
             if (err) {
+                // Task 2: Enrich crash info with classified error category
+                const crashInfo = classifyTribunalError(err, stderr, typeof err?.code === "number" ? err.code : undefined);
                 resolve({
                     verdict: "FAIL",
                     issues: [{ severity: "P0", description: `裁决进程执行失败: ${err.message}` }],
-                    raw: err.message,
+                    raw: JSON.stringify({ crashInfo, errMessage: err.message }),
                 });
                 return;
             }
@@ -401,7 +425,9 @@ async function tryRunViaHub(hubClient, digestContent, phase, digestPath) {
         }
         return null;
     }
-    catch {
+    catch (err) {
+        // Task 4: Log error instead of silently swallowing
+        console.warn(`[tribunal] Hub execution failed: ${err instanceof Error ? err.message : String(err)}`);
         return null;
     }
 }
@@ -422,6 +448,25 @@ async function runTribunalWithRetryCli(digestContent, phase, digestPath) {
         const isCrash = result.issues.some((i) => CRASH_INDICATORS.some((indicator) => i.description.includes(indicator)));
         if (!isCrash)
             return { verdict: result, crashed: false }; // Normal verdict (PASS or FAIL)
+        // Task 3: Check if crash is retryable via classified crashInfo
+        let isRetryable = true;
+        try {
+            const parsed = JSON.parse(result.raw);
+            if (parsed.crashInfo && typeof parsed.crashInfo.isRetryable === "boolean") {
+                isRetryable = parsed.crashInfo.isRetryable;
+            }
+        }
+        catch { /* raw not JSON — default to retryable */ }
+        if (!isRetryable) {
+            return {
+                verdict: {
+                    verdict: "FAIL",
+                    issues: [{ severity: "P0", description: `裁决进程崩溃（不可重试故障），跳过重试` }],
+                    raw: result.raw,
+                },
+                crashed: true,
+            };
+        }
         if (attempt < MAX_RETRIES) {
             // Transient failure, backoff 3s and retry
             await new Promise((r) => setTimeout(r, 3000));
@@ -461,27 +506,12 @@ export async function crossValidate(phase, outputDir, projectRoot, startCommit) 
         if (!startCommit) {
             return "startCommit 未设置（可能是旧版 state 迁移），无法校验 Phase 4 代码变更";
         }
-        const diffOutput = await new Promise((resolve) => {
-            execFile("git", ["diff", "--stat", startCommit], {
-                cwd: projectRoot,
-            }, (err, stdout) => {
-                const tracked = err ? "" : (stdout || "");
-                // Check staged changes
-                execFile("git", ["diff", "--cached", "--stat"], {
-                    cwd: projectRoot,
-                }, (err2, stdout2) => {
-                    const staged = err2 ? "" : (stdout2 || "");
-                    // Check untracked new files
-                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
-                        cwd: projectRoot,
-                    }, (err3, stdout3) => {
-                        const untracked = err3 ? "" : (stdout3 || "");
-                        resolve(tracked + staged + untracked);
-                    });
-                });
-            });
+        // IMP-003: Use unified GitManager.getChangedFiles
+        const gm = new GitManager(projectRoot);
+        const files = await gm.getChangedFiles({
+            baseCommit: startCommit,
         });
-        if (!diffOutput.trim()) {
+        if (files.length === 0) {
             return "git diff 为空，没有任何代码变更，裁决 Agent 不应判定 PASS";
         }
     }
@@ -496,27 +526,11 @@ export async function crossValidate(phase, outputDir, projectRoot, startCommit) 
         }
         catch { /* no exit code file — skip this check */ }
         // Check impl files vs test files ratio (committed + staged + untracked)
-        const diffBase = startCommit ?? "HEAD~20";
-        const diffOutput = await new Promise((resolve) => {
-            execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
-                cwd: projectRoot,
-            }, (err, stdout) => {
-                const committed = err ? "" : (stdout || "");
-                // Also check staged (cached) and untracked files
-                execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
-                    cwd: projectRoot,
-                }, (err2, stdout2) => {
-                    const staged = err2 ? "" : (stdout2 || "");
-                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
-                        cwd: projectRoot,
-                    }, (err3, stdout3) => {
-                        const untracked = err3 ? "" : (stdout3 || "");
-                        resolve(committed + "\n" + staged + "\n" + untracked);
-                    });
-                });
-            });
+        // IMP-003: Use unified GitManager.getChangedFiles
+        const gm = new GitManager(projectRoot);
+        const files = await gm.getChangedFiles({
+            baseCommit: startCommit ?? "HEAD~20",
         });
-        const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
         const implCount = files.filter(f => isImplFile(f)).length;
         const testCount = files.filter(f => isTestFile(f)).length;
         if (implCount > 0 && testCount === 0) {
@@ -604,7 +618,7 @@ export async function evaluateTribunal(projectRoot, outputDir, phase, topic, sum
     // 5b. Crashed → return for fallback (process-level failure, no raw output available)
     if (crashed) {
         const digestHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
-        return { verdict: "FAIL", issues: [], crashed: true, digest: digestContent, digestHash };
+        return { verdict: "FAIL", issues: [], crashed: true, digest: digestContent, digestHash, crashRaw: verdict.raw };
     }
     // 6. Auto-override: FAIL without P0/P1 acRef → PASS
     const advisory = [];
@@ -746,27 +760,11 @@ export async function executeTribunal(projectRoot, outputDir, phase, topic, summ
  */
 async function runQuickPreCheck(phase, outputDir, projectRoot, startCommit) {
     if (phase === 5) {
-        // Get test file count from git diff (committed + staged + untracked)
-        const diffBase = startCommit ?? "HEAD~20";
-        const diffOutput = await new Promise((resolve) => {
-            execFile("git", ["diff", "--name-only", "--diff-filter=AM", diffBase, "HEAD"], {
-                cwd: projectRoot,
-            }, (err, stdout) => {
-                const committed = err ? "" : (stdout || "");
-                execFile("git", ["diff", "--cached", "--name-only", "--diff-filter=AM"], {
-                    cwd: projectRoot,
-                }, (err2, stdout2) => {
-                    const staged = err2 ? "" : (stdout2 || "");
-                    execFile("git", ["ls-files", "--others", "--exclude-standard"], {
-                        cwd: projectRoot,
-                    }, (err3, stdout3) => {
-                        const untracked = err3 ? "" : (stdout3 || "");
-                        resolve(committed + "\n" + staged + "\n" + untracked);
-                    });
-                });
-            });
+        // IMP-003: Use unified GitManager.getChangedFiles
+        const gm = new GitManager(projectRoot);
+        const files = await gm.getChangedFiles({
+            baseCommit: startCommit ?? "HEAD~20",
         });
-        const files = [...new Set(diffOutput.trim().split("\n").filter((f) => f.length > 0))];
         const testFileCount = countTestFiles(files);
         // Read e2e-test-results.md
         let resultsContent = null;

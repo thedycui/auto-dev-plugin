@@ -68,12 +68,18 @@ export async function runRetrospective(state, outputDir, projectRoot) {
             extracted++;
         }
     }
-    const promoted = await lessons.promoteReusableLessons(state.topic);
+    const promoted = await lessons.promoteToProject(state.topic);
+    // Cross-project promotion: high-score reusable lessons → Global layer
+    let crossProjectPromoted = 0;
+    try {
+        crossProjectPromoted = await lessons.promoteToGlobal();
+    }
+    catch { /* non-critical: global promotion failure should not block retrospective */ }
     const retrospectivePath = join(outputDir, "retrospective.md");
     const content = generateRetrospectiveDoc(state, extracted, promoted, progressLog);
     await mkdir(dirname(retrospectivePath), { recursive: true });
     await writeFile(retrospectivePath, content, "utf-8");
-    return { lessonsExtracted: extracted, globalPromoted: promoted, retrospectivePath };
+    return { lessonsExtracted: extracted, globalPromoted: promoted, crossProjectPromoted, retrospectivePath };
 }
 function generateRetrospectiveDoc(state, extracted, promoted, progressLog) {
     const timings = state.phaseTimings ?? {};

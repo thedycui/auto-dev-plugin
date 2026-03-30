@@ -26,6 +26,7 @@ vi.mock("../tribunal.js", () => ({
 const mockLoadAndValidate = vi.fn();
 const mockAtomicUpdate = vi.fn();
 const mockInternalCheckpoint = vi.fn();
+const mockAppendToProgressLog = vi.fn();
 vi.mock("../state-manager.js", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
   return {
@@ -50,7 +51,7 @@ vi.mock("../state-manager.js", async (importOriginal) => {
       getCheckpointLine(phase: number, _task: number | undefined, status: string, summary: string) {
         return `<!-- CHECKPOINT phase=${phase} status=${status} summary="${summary}" -->`;
       }
-      async appendToProgressLog() {}
+      async appendToProgressLog(msg: string) { mockAppendToProgressLog(msg); }
     },
     internalCheckpoint: (...args: unknown[]) => mockInternalCheckpoint(...args),
     extractTaskList: actual["extractTaskList"],
@@ -1952,5 +1953,97 @@ describe("tribunal_subagent escalation (AC-8)", () => {
     expect(result.escalation!.reason).toBe("tribunal_subagent");
     // Should NOT be tribunal_max_escalations
     expect(result.escalation!.reason).not.toBe("tribunal_max_escalations");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IMP-002: TRIBUNAL_CRASH progress-log event
+// ---------------------------------------------------------------------------
+describe("IMP-002: orchestrator writes TRIBUNAL_CRASH on tribunal crash", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWriteFile.mockResolvedValue(undefined);
+    mockAtomicUpdate.mockResolvedValue(undefined);
+    mockAppendToProgressLog.mockResolvedValue(undefined);
+  });
+
+  it("writes TRIBUNAL_CRASH event with crashInfo when tribunal crashes", async () => {
+    const state = makeState({ mode: "full", phase: 4 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0, tribunalSubmits: {} });
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+      cb(null, "ok", "");
+    });
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      crashed: true,
+      digest: "test digest",
+      digestHash: "abc123",
+      crashRaw: JSON.stringify({
+        crashInfo: {
+          errorCategory: "ENOENT",
+          isRetryable: false,
+          exitCode: undefined,
+          errMessage: "spawn claude ENOENT",
+        },
+        errMessage: "spawn claude ENOENT",
+      }),
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "tribunal-crash-observability");
+
+    // Should return crashed escalation
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_crashed");
+
+    // Should have called appendToProgressLog with TRIBUNAL_CRASH event
+    expect(mockAppendToProgressLog).toHaveBeenCalled();
+    const logCall = mockAppendToProgressLog.mock.calls[0][0] as string;
+    expect(logCall).toContain("TRIBUNAL_CRASH");
+    expect(logCall).toContain('category="ENOENT"');
+    expect(logCall).toContain('retryable="false"');
+  });
+
+  it("writes TRIBUNAL_CRASH event without crashInfo when crashRaw is missing", async () => {
+    const state = makeState({ mode: "full", phase: 4 });
+    mockLoadAndValidate.mockResolvedValue(state);
+
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.includes("state.json")) {
+        return JSON.stringify({ ...state, step: "4a", stepIteration: 0, tribunalSubmits: {} });
+      }
+      throw new Error("ENOENT");
+    });
+
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+      cb(null, "ok", "");
+    });
+
+    mockEvaluateTribunal.mockResolvedValue({
+      verdict: "FAIL",
+      issues: [],
+      crashed: true,
+      digest: "test digest",
+      digestHash: "abc123",
+    });
+
+    const result = await computeNextTask("/tmp/test-project", "tribunal-crash-observability");
+
+    expect(result.escalation).toBeDefined();
+    expect(result.escalation!.reason).toBe("tribunal_crashed");
+    expect(mockAppendToProgressLog).toHaveBeenCalled();
+    const logCall = mockAppendToProgressLog.mock.calls[0][0] as string;
+    expect(logCall).toContain("TRIBUNAL_CRASH");
+    expect(logCall).toContain("phase=4");
+    expect(logCall).not.toContain("category");
   });
 });

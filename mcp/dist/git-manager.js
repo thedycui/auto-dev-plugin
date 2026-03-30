@@ -40,6 +40,65 @@ export class GitManager {
         return (await this.execGit("rev-parse", "HEAD")).trim();
     }
     /**
+     * IMP-003: Unified function to get changed files (committed + staged + untracked).
+     *
+     * @param options.baseCommit - Base commit for diff (default: "HEAD~20")
+     * @param options.includeCommitted - Include committed changes since baseCommit (default: true)
+     * @param options.includeStaged - Include staged changes (default: true)
+     * @param options.includeUntracked - Include untracked files (default: true)
+     * @param options.diffFilter - Git diff-filter option (default: "AM" for added/modified)
+     * @returns Array of changed file paths
+     */
+    async getChangedFiles(options) {
+        const opts = {
+            baseCommit: "HEAD~20",
+            includeCommitted: true,
+            includeStaged: true,
+            includeUntracked: true,
+            diffFilter: "AM",
+            ...options,
+        };
+        const parts = [];
+        // Committed changes since baseCommit
+        if (opts.includeCommitted) {
+            const committed = await this.execGit("diff", "--name-only", `--diff-filter=${opts.diffFilter}`, `${opts.baseCommit}..HEAD`);
+            parts.push(committed);
+        }
+        // Staged but not yet committed
+        if (opts.includeStaged) {
+            const staged = await this.execGit("diff", "--cached", "--name-only", `--diff-filter=${opts.diffFilter}`);
+            parts.push(staged);
+        }
+        // Untracked new files
+        if (opts.includeUntracked) {
+            const untracked = await this.execGit("ls-files", "--others", "--exclude-standard");
+            parts.push(untracked);
+        }
+        // Merge and deduplicate
+        const allFiles = parts
+            .join("\n")
+            .trim()
+            .split("\n")
+            .filter((f) => f.length > 0);
+        return [...new Set(allFiles)];
+    }
+    /**
+     * IMP-003: Get git diff --stat output with untracked files listing.
+     * Used for tribunal digest generation.
+     *
+     * @param baseCommit - Base commit for diff (default: "HEAD")
+     * @returns Formatted string with diff stat and untracked files
+     */
+    async getDiffStatWithUntracked(baseCommit) {
+        const diffBase = baseCommit ?? "HEAD";
+        const tracked = await this.execGit("diff", "--stat", diffBase);
+        const untrackedRaw = await this.execGit("ls-files", "--others", "--exclude-standard");
+        const untracked = untrackedRaw.trim()
+            ? "\nUntracked new files:\n" + untrackedRaw.trim().split("\n").map((f) => ` ${f} (new file)`).join("\n") + "\n"
+            : "";
+        return tracked + untracked;
+    }
+    /**
      * Compare plan-expected files against actual git changes since baseCommit.
      */
     async diffCheck(expectedFiles, baseCommit) {

@@ -7,9 +7,9 @@
     "lesson": "Phase 1 required revision",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:48:52.283Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 33,
     "feedbackHistory": [
       {
@@ -234,9 +234,9 @@
     "context": "Design review v1 found getGlobalLessons() missing writeAtomic() after retirement pass. Fixed in v2 by adding explicit persist step. This is a classic \"read-modify but forget to write\" pattern in lazy evaluation designs.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:34:30.919Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 5,
     "feedbackHistory": [
       {
@@ -353,9 +353,9 @@
     "context": "Design review v1 caught this by tracing preflight injection path (local + global) against feedback search path (local only). Fixed by dual-file search in feedback(). Textbook violation of Rule 1: \"not only review the producer, must review the consumer.\"",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:34:36.026Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 21,
     "feedbackHistory": [
       {
@@ -472,9 +472,9 @@
     "context": "checkpoint returns mandate from computeNextDirective() for normal flow. Adding a second mandate for lesson feedback would confuse the agent consumer. Fixed by using feedbackInstruction as the field name.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:34:40.844Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 25,
     "feedbackHistory": [
       {
@@ -591,9 +591,9 @@
     "context": "Phase 3 ran from 08:48 to 09:18 (30 minutes) for 7 tasks. Zero rework. Design iteration in Phase 1 (08:06 to 08:30, two rounds) paid off by preventing implementation-phase surprises.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 14,
+    "appliedCount": 16,
     "timestamp": "2026-03-25T09:34:51.701Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 14,
     "feedbackHistory": [
       {
@@ -715,9 +715,9 @@
     "context": "types.ts uses optional Zod fields, lessons-constants.ts provides ensureDefaults() that fills score/feedbackHistory/retired. Tests #1-6 explicitly verify legacy entries get correct defaults.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 23,
+    "appliedCount": 25,
     "timestamp": "2026-03-25T09:35:01.447Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 17,
     "feedbackHistory": [
       {
@@ -816,9 +816,9 @@
     "context": "Phase 1: 08:06 -> 08:13 (v1 review, NEEDS_REVISION) -> 08:30 (v2 review, PASS). Total 24 min. Without this, P0-1 (phantom pool) and P0-2 (silent feedback loss) would have been runtime bugs.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:35:18.769Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 41,
     "feedbackHistory": [
       {
@@ -935,9 +935,9 @@
     "context": "Phase 5 ran 09:23 to 09:30 (7 min). Code review (Phase 4) had already flagged AC-1/2/9 as coverage gaps. Phase 5 closed them with 5 integration tests (#31-35). The gap was predictable -- future plans should include handler-level test tasks.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 26,
+    "appliedCount": 28,
     "timestamp": "2026-03-25T09:35:24.844Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 25,
     "feedbackHistory": [
       {
@@ -1054,9 +1054,9 @@
     "context": "Phase 2: 08:30 to 08:48 (18 min total for plan creation + review). Plan had 7 tasks covering 10 ACs. Review caught that readGlobalEntries should be extracted in Task 2 (not Task 3) and addToGlobal should stay private.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 23,
+    "appliedCount": 25,
     "timestamp": "2026-03-25T09:35:29.229Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 25,
     "feedbackHistory": [
       {
@@ -1229,9 +1229,9 @@
     "context": "getGlobalLessons() applies decay, marks retirements, updates appliedCount, then writeAtomic() at the end. P2-NEW-3 in design review noted the write-on-read frequency concern for future multi-session scenarios. Current single-session usage is safe.",
     "topic": "lessons-evolution",
     "reusable": true,
-    "appliedCount": 8,
+    "appliedCount": 10,
     "timestamp": "2026-03-25T09:46:11.704Z",
-    "lastAppliedAt": "2026-03-26T15:04:43.596Z",
+    "lastAppliedAt": "2026-03-30T08:20:46.769Z",
     "score": 2,
     "feedbackHistory": [
       {

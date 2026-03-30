@@ -682,22 +682,12 @@ server.tool("auto_dev_checkpoint", "Write structured checkpoint to progress-log 
         let testFileCount = 0;
         let implFileCount = 0;
         try {
-            const { execFile: execFileAsync } = await import("node:child_process");
-            const diffOutput = await new Promise((resolve) => {
-                const baseCommit = state.startCommit ?? "HEAD~20";
-                execFileAsync("git", ["diff", "--name-only", "--diff-filter=AM", baseCommit, "HEAD"], { cwd: projectRoot }, (err, stdout) => {
-                    if (err)
-                        resolve("");
-                    else {
-                        execFileAsync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err2, stdout2) => {
-                            const committed = stdout || "";
-                            const untracked = err2 ? "" : (stdout2 || "");
-                            resolve(committed + "\n" + untracked);
-                        });
-                    }
-                });
+            // IMP-003: Use unified GitManager.getChangedFiles
+            const gm = new GitManager(projectRoot);
+            const newFiles = await gm.getChangedFiles({
+                baseCommit: state.startCommit ?? "HEAD~20",
+                includeStaged: false, // Only committed + untracked for Phase 5
             });
-            const newFiles = diffOutput.trim().split("\n").filter(f => f.length > 0);
             testFileCount = countTestFiles(newFiles);
             // Count new implementation files (non-test source files)
             implFileCount = newFiles.filter(f => isImplFile(f)).length;

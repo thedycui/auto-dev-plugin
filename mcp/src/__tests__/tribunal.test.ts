@@ -43,7 +43,9 @@ import {
   runTribunal,
   runTribunalWithRetry,
   crossValidate,
+  classifyTribunalError,
 } from "../tribunal.js";
+import type { TribunalCrashInfo } from "../tribunal.js";
 import { TRIBUNAL_PHASES } from "../tribunal-schema.js";
 import { getTribunalChecklist } from "../tribunal-checklists.js";
 import { generateRetrospectiveData } from "../retrospective-data.js";
@@ -1398,5 +1400,197 @@ describe("EvalTribunalResult interface compatibility (AC-9)", () => {
     // TypeScript ensures compile-time signature correctness;
     // at runtime we verify it's callable.
     expect(mod.evaluateTribunal.length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IMP-002: Crash Observability Tests
+// ---------------------------------------------------------------------------
+
+describe("IMP-002: classifyTribunalError", () => {
+  it("classifies ENOENT errors as non-retryable", () => {
+    const result = classifyTribunalError(new Error("spawn claude ENOENT"));
+    expect(result.errorCategory).toBe("ENOENT");
+    expect(result.isRetryable).toBe(false);
+  });
+
+  it("classifies EPERM errors as non-retryable", () => {
+    const result = classifyTribunalError(new Error("EPERM: operation not permitted"));
+    expect(result.errorCategory).toBe("EPERM");
+    expect(result.isRetryable).toBe(false);
+  });
+
+  it("classifies EACCES errors as EPERM non-retryable", () => {
+    const result = classifyTribunalError(new Error("EACCES permission denied"));
+    expect(result.errorCategory).toBe("EPERM");
+    expect(result.isRetryable).toBe(false);
+  });
+
+  it("classifies prompt-too-long errors as non-retryable", () => {
+    const result = classifyTribunalError(new Error("argument list too long"));
+    expect(result.errorCategory).toBe("prompt-too-long");
+    expect(result.isRetryable).toBe(false);
+  });
+
+  it("classifies E2BIG errors as prompt-too-long non-retryable", () => {
+    const result = classifyTribunalError(new Error("E2BIG arg list"));
+    expect(result.errorCategory).toBe("prompt-too-long");
+    expect(result.isRetryable).toBe(false);
+  });
+
+  it("classifies timeout errors as retryable", () => {
+    const result = classifyTribunalError(new Error("process timed out"));
+    expect(result.errorCategory).toBe("timeout");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("classifies SIGTERM as timeout retryable", () => {
+    const result = classifyTribunalError(new Error("child killed by SIGTERM"));
+    expect(result.errorCategory).toBe("timeout");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("classifies OOM errors as retryable", () => {
+    const result = classifyTribunalError(new Error("JavaScript heap out of memory"));
+    expect(result.errorCategory).toBe("OOM");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("classifies OOM from stderr as retryable", () => {
+    const result = classifyTribunalError(new Error("some error"), "FATAL ERROR: OOM");
+    expect(result.errorCategory).toBe("OOM");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("classifies cli-internal errors as retryable", () => {
+    const result = classifyTribunalError(new Error("ECONNREFUSED connection refused"));
+    expect(result.errorCategory).toBe("cli-internal");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("classifies unknown errors as retryable (conservative)", () => {
+    const result = classifyTribunalError(new Error("something unexpected"));
+    expect(result.errorCategory).toBe("unknown");
+    expect(result.isRetryable).toBe(true);
+  });
+
+  it("includes exitCode and stderrSnippet when provided", () => {
+    const result = classifyTribunalError(
+      new Error("spawn ENOENT"),
+      "some stderr output".repeat(50),
+      127,
+    );
+    expect(result.exitCode).toBe(127);
+    expect(result.stderrSnippet).toBeDefined();
+    expect(result.stderrSnippet!.length).toBeLessThanOrEqual(500);
+    expect(result.errMessage).toBe("spawn ENOENT");
+  });
+
+  it("accepts string error input", () => {
+    const result = classifyTribunalError("ENOENT not found");
+    expect(result.errorCategory).toBe("ENOENT");
+    expect(result.errMessage).toBe("ENOENT not found");
+  });
+});
+
+describe("IMP-002: runTribunal crash enriches raw with crashInfo", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    tmpDir = await mkdtemp(join(tmpdir(), "tribunal-crash-"));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("enriches raw with crashInfo on spawn failure", async () => {
+    const crashErr = new Error("spawn claude ENOENT");
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: any) => {
+      cb(crashErr, "", "");
+    });
+
+    const result = await runTribunal("test digest", 4);
+    expect(result.verdict).toBe("FAIL");
+
+    const parsed = JSON.parse(result.raw);
+    expect(parsed.crashInfo).toBeDefined();
+    expect(parsed.crashInfo.errorCategory).toBe("ENOENT");
+    expect(parsed.crashInfo.isRetryable).toBe(false);
+    expect(parsed.errMessage).toBe("spawn claude ENOENT");
+  });
+});
+
+describe("IMP-002: runTribunalWithRetryCli skips non-retryable crashes", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.TRIBUNAL_MODE = "cli";
+  });
+
+  afterEach(() => {
+    delete process.env.TRIBUNAL_MODE;
+  });
+
+  it("does not retry when crashInfo.isRetryable is false (ENOENT)", async () => {
+    // First call crashes with ENOENT (non-retryable)
+    const enoentErr = new Error("spawn ENOENT");
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: any) => {
+      cb(enoentErr, "", "");
+    });
+
+    const result = await runTribunalWithRetry("digest", 4);
+    expect(result.crashed).toBe(true);
+
+    // Should only be called once (no retry)
+    expect(mockExecFile.mock.calls.length).toBe(1);
+  });
+
+  it("retries when crashInfo.isRetryable is true (timeout)", async () => {
+    // Both calls crash with timeout (retryable)
+    const timeoutErr = new Error("process timed out");
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb: any) => {
+      cb(timeoutErr, "", "");
+    });
+
+    const result = await runTribunalWithRetry("digest", 4);
+    expect(result.crashed).toBe(true);
+
+    // Should be called twice (initial + 1 retry)
+    expect(mockExecFile.mock.calls.length).toBe(2);
+  });
+});
+
+describe("IMP-002: tryRunViaHub catch logs warning", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("logs console.warn when hub throws an exception", async () => {
+    // Mock environment to trigger Hub path
+    process.env.TRIBUNAL_HUB_URL = "http://fake-hub:3000";
+
+    // Mock hub-client to throw
+    vi.doMock("../hub-client.js", () => ({
+      getHubClient: () => ({
+        isAvailable: vi.fn().mockRejectedValue(new Error("hub connection lost")),
+        ensureConnected: vi.fn(),
+        findTribunalWorker: vi.fn(),
+        executePrompt: vi.fn(),
+      }),
+    }));
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Import fresh module with mock
+    const mod = await import("../tribunal.js");
+
+    // runTribunalWithRetry should handle hub failure gracefully
+    const result = await mod.runTribunalWithRetry("digest", 4);
+
+    // Hub fails, falls through to subagent mode (default)
+    expect(result.subagentRequested).toBe(true);
+
+    delete process.env.TRIBUNAL_HUB_URL;
+    vi.doUnmock("../hub-client.js");
+    warnSpy.mockRestore();
   });
 });
