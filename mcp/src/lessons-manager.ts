@@ -123,10 +123,14 @@ export class LessonsManager {
 
     // Write local and global independently with error isolation
     if (localUpdated.length > 0) {
-      await this.writeAtomic(localEntries, this.filePath).catch(() => {});
+      await this.writeAtomic(localEntries, this.filePath).catch((e) => {
+        console.error(`[lessons] writeAtomic local failed: ${(e as Error).message}`);
+      });
     }
     if (globalUpdated.length > 0) {
-      await this.writeAtomic(globalEntries, this.projectFilePath()).catch(() => {});
+      await this.writeAtomic(globalEntries, this.projectFilePath()).catch((e) => {
+        console.error(`[lessons] writeAtomic project failed: ${(e as Error).message}`);
+      });
     }
 
     return { localUpdated, globalUpdated };

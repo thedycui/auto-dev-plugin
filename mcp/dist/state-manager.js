@@ -191,7 +191,11 @@ export class StateManager {
             const result = StateJsonSchema.safeParse(parsed);
             return result.success ? result.data : null;
         }
-        catch {
+        catch (e) {
+            const err = e;
+            if (err.code !== "ENOENT") {
+                console.error(`[state] tryReadState unexpected error (${err.code ?? "unknown"}): ${err.message}`);
+            }
             return null;
         }
     }
@@ -389,7 +393,8 @@ export class StateManager {
         try {
             rawState = JSON.parse(await readFile(this.stateFilePath, "utf-8"));
         }
-        catch {
+        catch (e) {
+            console.error(`[state] atomicUpdate read/parse failed, falling back to validated state: ${e.message}`);
             // Fall back to validated state
             rawState = { ...(await this.loadAndValidate()) };
         }
@@ -566,8 +571,8 @@ export async function internalCheckpoint(sm, state, phase, status, summary, task
             current.updatedAt = new Date().toISOString();
             await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
         }
-        catch {
-            // Last resort: state.json.tmp preserved for manual recovery
+        catch (e2) {
+            console.error(`[state] internalCheckpoint last-resort write failed: ${e2.message}. state.json.tmp preserved for manual recovery.`);
         }
         // Return a failed result with directive pointing to current phase
         const fallbackDirective = computeNextDirective(phase, "BLOCKED", state);

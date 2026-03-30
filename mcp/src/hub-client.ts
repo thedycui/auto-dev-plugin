@@ -61,7 +61,8 @@ export class HubClient {
       } finally {
         clearTimeout(timeout);
       }
-    } catch {
+    } catch (e: unknown) {
+      console.error(`[hub] isAvailable failed: ${(e as Error).message}`);
       return false;
     }
   }
@@ -88,7 +89,8 @@ export class HubClient {
         return true;
       }
       return false;
-    } catch {
+    } catch (e: unknown) {
+      console.error(`[hub] ensureConnected failed: ${(e as Error).message}`);
       return false;
     }
   }
@@ -109,7 +111,8 @@ export class HubClient {
       const agents = await res.json() as Agent[];
       // Find first online agent
       return agents.find((a) => a.status === "online") ?? null;
-    } catch {
+    } catch (e: unknown) {
+      console.error(`[hub] findTribunalWorker failed: ${(e as Error).message}`);
       return null;
     }
   }
@@ -172,7 +175,8 @@ export class HubClient {
 
       // Timeout
       return null;
-    } catch {
+    } catch (e: unknown) {
+      console.error(`[hub] executePrompt failed: ${(e as Error).message}`);
       return null;
     }
   }

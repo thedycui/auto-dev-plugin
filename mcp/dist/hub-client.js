@@ -41,7 +41,8 @@ export class HubClient {
                 clearTimeout(timeout);
             }
         }
-        catch {
+        catch (e) {
+            console.error(`[hub] isAvailable failed: ${e.message}`);
             return false;
         }
     }
@@ -69,7 +70,8 @@ export class HubClient {
             }
             return false;
         }
-        catch {
+        catch (e) {
+            console.error(`[hub] ensureConnected failed: ${e.message}`);
             return false;
         }
     }
@@ -88,7 +90,8 @@ export class HubClient {
             // Find first online agent
             return agents.find((a) => a.status === "online") ?? null;
         }
-        catch {
+        catch (e) {
+            console.error(`[hub] findTribunalWorker failed: ${e.message}`);
             return null;
         }
     }
@@ -139,7 +142,8 @@ export class HubClient {
             // Timeout
             return null;
         }
-        catch {
+        catch (e) {
+            console.error(`[hub] executePrompt failed: ${e.message}`);
             return null;
         }
     }
