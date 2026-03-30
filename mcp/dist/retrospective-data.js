@@ -19,6 +19,7 @@ export async function generateRetrospectiveData(outputDir) {
         rejectionCount: countRejections(progressLog),
         phaseTimings: extractPhaseTimings(progressLog),
         tribunalResults: await extractTribunalResults(outputDir),
+        tribunalCrashes: extractTribunalCrashes(progressLog),
         submitRetries: extractSubmitRetries(progressLog),
         tddGateStats: await extractTddGateStats(outputDir, progressLog),
     };
@@ -46,9 +47,12 @@ function countRejections(progressLog) {
  * The first checkpoint per phase is treated as startedAt,
  * and the last PASS checkpoint per phase is treated as completedAt.
  */
-function extractPhaseTimings(progressLog) {
+export function extractPhaseTimings(progressLog) {
     const timings = {};
-    const regex = /<!-- CHECKPOINT phase=(\d+).*?status=(\S+).*?timestamp=(\S+)\s*-->/g;
+    // Hardened regex: uses known attribute order (phase -> task? -> status -> summary? -> timestamp)
+    // summary is bounded by double quotes, so we skip it precisely to avoid mis-matching
+    // status= or timestamp= substrings inside summary text.
+    const regex = /<!-- CHECKPOINT phase=(\d+)(?:\s+task=\d+)?\s+status=(\S+)(?:\s+summary="[^"]*")?\s+timestamp=(\S+)\s*-->/g;
     let match;
     while ((match = regex.exec(progressLog)) !== null) {
         const phase = parseInt(match[1], 10);
@@ -89,13 +93,41 @@ async function extractTribunalResults(outputDir) {
     return results;
 }
 /**
+ * Extract tribunal crash events from progress-log.
+ *
+ * Two formats are supported:
+ *   - Simple:  <!-- TRIBUNAL_CRASH phase=N -->
+ *   - Full:    <!-- TRIBUNAL_CRASH phase=N category="..." exitCode="..." retryable="..." timestamp="..." -->
+ */
+export function extractTribunalCrashes(progressLog) {
+    const results = [];
+    const regex = /<!-- TRIBUNAL_CRASH\s+phase=(\d+)(.*?)-->/g;
+    let match;
+    while ((match = regex.exec(progressLog)) !== null) {
+        const phase = parseInt(match[1], 10);
+        const rest = match[2] ?? "";
+        const categoryMatch = rest.match(/category="([^"]*)"/);
+        const exitCodeMatch = rest.match(/exitCode="([^"]*)"/);
+        const retryableMatch = rest.match(/retryable="([^"]*)"/);
+        const timestampMatch = rest.match(/timestamp="([^"]*)"/);
+        results.push({
+            phase,
+            ...(categoryMatch ? { category: categoryMatch[1] } : {}),
+            ...(exitCodeMatch ? { exitCode: exitCodeMatch[1] } : {}),
+            ...(retryableMatch ? { retryable: retryableMatch[1] === "true" } : {}),
+            ...(timestampMatch ? { timestamp: timestampMatch[1] } : {}),
+        });
+    }
+    return results;
+}
+/**
  * Extract submit (checkpoint PASS) retry counts per phase from progress-log.
  * Counts the number of CHECKPOINT calls with status=PASS for each phase.
  * A count > 1 means the phase was retried.
  */
-function extractSubmitRetries(progressLog) {
+export function extractSubmitRetries(progressLog) {
     const retries = {};
-    const regex = /<!-- CHECKPOINT phase=(\d+).*?status=PASS/g;
+    const regex = /<!-- CHECKPOINT phase=(\d+)(?:\s+task=\d+)?\s+status=PASS/g;
     let match;
     while ((match = regex.exec(progressLog)) !== null) {
         const phase = parseInt(match[1], 10);
@@ -138,6 +170,19 @@ function renderRetrospectiveDataMarkdown(data) {
         md += `|-------|---------|-------------|\n`;
         for (const r of data.tribunalResults) {
             md += `| ${r.phase} | ${r.verdict} | ${r.issueCount} |\n`;
+        }
+        md += "\n";
+    }
+    // Tribunal Crashes
+    md += `## Tribunal Crashes\n\n`;
+    if (data.tribunalCrashes.length === 0) {
+        md += "No tribunal crashes recorded.\n\n";
+    }
+    else {
+        md += `| Phase | Category | Exit Code | Retryable | Timestamp |\n`;
+        md += `|-------|----------|-----------|-----------|----------|\n`;
+        for (const c of data.tribunalCrashes) {
+            md += `| ${c.phase} | ${c.category ?? "---"} | ${c.exitCode ?? "---"} | ${c.retryable !== undefined ? c.retryable : "---"} | ${c.timestamp ?? "---"} |\n`;
         }
         md += "\n";
     }

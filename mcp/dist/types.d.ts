@@ -339,6 +339,13 @@ export interface RetrospectiveAutoData {
         verdict: string;
         issueCount: number;
     }>;
+    tribunalCrashes: Array<{
+        phase: number;
+        category?: string;
+        exitCode?: string;
+        retryable?: boolean;
+        timestamp?: string;
+    }>;
     submitRetries: Record<number, number>;
     tddGateStats?: {
         totalTasks: number;
