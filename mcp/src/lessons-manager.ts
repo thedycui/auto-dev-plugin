@@ -133,40 +133,7 @@ export class LessonsManager {
   }
 
   async getProjectLessons(limit: number = MAX_GLOBAL_INJECT): Promise<LessonEntry[]> {
-    const allEntries = await this.readProjectEntries();
-    if (allEntries.length === 0) return [];
-
-    const now = new Date();
-    const nowStr = now.toISOString();
-
-    // Lazy retirement pass (P0-1): retire non-retired entries whose decayed score <= 0
-    for (const e of allEntries) {
-      if (!e.retired && applyDecay(e, now) <= 0) {
-        e.retired = true;
-        e.retiredAt = nowStr;
-        e.retiredReason = "score_decayed";
-      }
-    }
-
-    // Filter out retired, compute effective score, sort by score desc
-    const active = allEntries
-      .filter((e) => !e.retired)
-      .map((e) => ({ ...e, score: applyDecay(e, now) }))
-      .sort((a, b) => b.score - a.score);
-
-    const selected = active.slice(0, limit);
-    const selectedIds = new Set(selected.map((e) => e.id));
-
-    // Update appliedCount and lastAppliedAt on the full array for persistence
-    for (const e of allEntries) {
-      if (selectedIds.has(e.id)) {
-        e.appliedCount = (e.appliedCount ?? 0) + 1;
-        e.lastAppliedAt = nowStr;
-      }
-    }
-
-    await this.writeAtomic(allEntries, this.projectFilePath());
-    return selected;
+    return this.getLessonsFromPool(this.projectFilePath(), limit);
   }
 
   async promoteToProject(topic: string): Promise<number> {
@@ -186,53 +153,7 @@ export class LessonsManager {
   }
 
   async addToProject(entry: LessonEntry): Promise<{ added: boolean; displaced?: LessonEntry }> {
-    const entries = await this.readProjectEntries();
-
-    // Dedup: same lesson text and not retired
-    if (entries.some((e) => e.lesson === entry.lesson && !e.retired)) {
-      return { added: false };
-    }
-
-    const now = new Date();
-    const active = entries.filter((e) => !e.retired);
-
-    if (active.length < MAX_GLOBAL_POOL) {
-      entries.push(entry);
-      await this.writeAtomic(entries, this.projectFilePath());
-      return { added: true };
-    }
-
-    // Pool full -- find lowest effective-score active entry
-    let lowestIdx = -1;
-    let lowestScore = Infinity;
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
-      if (e.retired) continue;
-      const es = applyDecay(e, now);
-      if (es < lowestScore) {
-        lowestScore = es;
-        lowestIdx = i;
-      }
-    }
-
-    const newScore = applyDecay(entry, now);
-
-    // New entry must exceed lowest + margin to displace
-    if (newScore <= lowestScore + MIN_DISPLACEMENT_MARGIN) {
-      return { added: false };
-    }
-
-    // Displace the lowest entry
-    const displaced = entries[lowestIdx];
-    entries[lowestIdx] = {
-      ...displaced,
-      retired: true,
-      retiredAt: now.toISOString(),
-      retiredReason: "displaced_by_new",
-    };
-    entries.push(entry);
-    await this.writeAtomic(entries, this.projectFilePath());
-    return { added: true, displaced };
+    return this.addToPool(this.projectFilePath(), entry, MAX_GLOBAL_POOL);
   }
 
   private async readEntries(): Promise<LessonEntry[]> {
@@ -245,12 +166,7 @@ export class LessonsManager {
   }
 
   async readProjectEntries(): Promise<LessonEntry[]> {
-    try {
-      const raw = await readFile(this.projectFilePath(), "utf-8");
-      return JSON.parse(raw) as LessonEntry[];
-    } catch {
-      return [];
-    }
+    return this.readEntriesFrom(this.projectFilePath());
   }
 
   // -------------------------------------------------------------------------
@@ -283,40 +199,7 @@ export class LessonsManager {
   }
 
   async getCrossProjectLessons(limit: number = MAX_CROSS_PROJECT_INJECT): Promise<LessonEntry[]> {
-    const allEntries = await this.readCrossProjectEntries();
-    if (allEntries.length === 0) return [];
-
-    const now = new Date();
-    const nowStr = now.toISOString();
-
-    // Lazy retirement pass: retire entries whose decayed score <= 0
-    for (const e of allEntries) {
-      if (!e.retired && applyDecay(e, now) <= 0) {
-        e.retired = true;
-        e.retiredAt = nowStr;
-        e.retiredReason = "score_decayed";
-      }
-    }
-
-    // Filter out retired, compute effective score, sort by score desc
-    const active = allEntries
-      .filter((e) => !e.retired)
-      .map((e) => ({ ...e, score: applyDecay(e, now) }))
-      .sort((a, b) => b.score - a.score);
-
-    const selected = active.slice(0, limit);
-    const selectedIds = new Set(selected.map((e) => e.id));
-
-    // Update appliedCount and lastAppliedAt
-    for (const e of allEntries) {
-      if (selectedIds.has(e.id)) {
-        e.appliedCount = (e.appliedCount ?? 0) + 1;
-        e.lastAppliedAt = nowStr;
-      }
-    }
-
-    await this.writeAtomic(allEntries, this.crossProjectFilePath());
-    return selected;
+    return this.getLessonsFromPool(this.crossProjectFilePath(), limit);
   }
 
   async promoteToGlobal(minScore: number = GLOBAL_PROMOTE_MIN_SCORE): Promise<number> {
@@ -349,19 +232,104 @@ export class LessonsManager {
   }
 
   private async addToCrossProject(entry: LessonEntry): Promise<{ added: boolean; displaced?: LessonEntry }> {
-    const entries = await this.readCrossProjectEntries();
+    return this.addToPool(this.crossProjectFilePath(), entry, MAX_CROSS_PROJECT_POOL);
+  }
 
-    // Dedup: same lesson text and not retired
-    if (entries.some((e) => e.lesson === entry.lesson && !e.retired)) {
+  private async readCrossProjectEntries(): Promise<LessonEntry[]> {
+    return this.readEntriesFrom(this.crossProjectFilePath());
+  }
+
+  // -------------------------------------------------------------------------
+  // Generic pool operations (DRY: shared by project + cross-project layers)
+  // -------------------------------------------------------------------------
+
+  private async readEntriesFrom(filePath: string): Promise<LessonEntry[]> {
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      return JSON.parse(raw) as LessonEntry[];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Generic "get lessons from pool" — shared logic for getProjectLessons and
+   * getCrossProjectLessons. Performs lazy retirement, scoring, selection,
+   * appliedCount update, and write-back.
+   */
+  private async getLessonsFromPool(filePath: string, limit: number): Promise<LessonEntry[]> {
+    const allEntries = await this.readEntriesFrom(filePath);
+    if (allEntries.length === 0) return [];
+
+    const now = new Date();
+    const nowStr = now.toISOString();
+
+    // Lazy retirement pass: retire non-retired entries whose decayed score <= 0
+    for (const e of allEntries) {
+      if (!e.retired && applyDecay(e, now) <= 0) {
+        e.retired = true;
+        e.retiredAt = nowStr;
+        e.retiredReason = "score_decayed";
+      }
+    }
+
+    // Filter out retired, compute effective score, sort by score desc
+    const active = allEntries
+      .filter((e) => !e.retired)
+      .map((e) => ({ ...e, score: applyDecay(e, now) }))
+      .sort((a, b) => b.score - a.score);
+
+    const selected = active.slice(0, limit);
+    const selectedIds = new Set(selected.map((e) => e.id));
+
+    // Update appliedCount and lastAppliedAt on the full array for persistence
+    for (const e of allEntries) {
+      if (selectedIds.has(e.id)) {
+        e.appliedCount = (e.appliedCount ?? 0) + 1;
+        e.lastAppliedAt = nowStr;
+      }
+    }
+
+    await this.writeAtomic(allEntries, filePath);
+    return selected;
+  }
+
+  /**
+   * Generic "add to pool" — shared logic for addToProject and addToCrossProject.
+   * Performs dedup (exact match + prefix match on first 60 chars), pool-full
+   * displacement, and write-back.
+   */
+  private async addToPool(
+    filePath: string,
+    entry: LessonEntry,
+    poolMax: number,
+  ): Promise<{ added: boolean; displaced?: LessonEntry }> {
+    const entries = await this.readEntriesFrom(filePath);
+    const DEDUP_PREFIX_LEN = 60;
+
+    // Dedup: exact match OR prefix match (first 60 chars of shorter text)
+    const isDuplicate = entries.some((e) => {
+      if (e.retired) return false;
+      if (e.lesson === entry.lesson) return true;
+      const shorter = e.lesson.length <= entry.lesson.length ? e.lesson : entry.lesson;
+      const longer = e.lesson.length <= entry.lesson.length ? entry.lesson : e.lesson;
+      if (shorter.length >= DEDUP_PREFIX_LEN) {
+        const prefix = shorter.slice(0, DEDUP_PREFIX_LEN);
+        return longer.startsWith(prefix);
+      }
+      return false;
+    });
+
+    if (isDuplicate) {
       return { added: false };
     }
 
     const now = new Date();
     const active = entries.filter((e) => !e.retired);
 
-    if (active.length < MAX_CROSS_PROJECT_POOL) {
+    if (active.length < poolMax) {
       entries.push(entry);
-      await this.writeAtomic(entries, this.crossProjectFilePath());
+      await this.writeAtomic(entries, filePath);
       return { added: true };
     }
 
@@ -369,7 +337,7 @@ export class LessonsManager {
     let lowestIdx = -1;
     let lowestScore = Infinity;
     for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
+      const e = entries[i]!;
       if (e.retired) continue;
       const es = applyDecay(e, now);
       if (es < lowestScore) {
@@ -386,7 +354,7 @@ export class LessonsManager {
     }
 
     // Displace the lowest entry
-    const displaced = entries[lowestIdx];
+    const displaced = entries[lowestIdx]!;
     entries[lowestIdx] = {
       ...displaced,
       retired: true,
@@ -394,17 +362,8 @@ export class LessonsManager {
       retiredReason: "displaced_by_new",
     };
     entries.push(entry);
-    await this.writeAtomic(entries, this.crossProjectFilePath());
+    await this.writeAtomic(entries, filePath);
     return { added: true, displaced };
-  }
-
-  private async readCrossProjectEntries(): Promise<LessonEntry[]> {
-    try {
-      const raw = await readFile(this.crossProjectFilePath(), "utf-8");
-      return JSON.parse(raw) as LessonEntry[];
-    } catch {
-      return [];
-    }
   }
 
   private async writeAtomic(entries: LessonEntry[], targetPath: string): Promise<void> {

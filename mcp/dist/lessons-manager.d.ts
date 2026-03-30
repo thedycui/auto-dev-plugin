@@ -47,5 +47,18 @@ export declare class LessonsManager {
     injectGlobalLessons(): Promise<LessonEntry[]>;
     private addToCrossProject;
     private readCrossProjectEntries;
+    private readEntriesFrom;
+    /**
+     * Generic "get lessons from pool" — shared logic for getProjectLessons and
+     * getCrossProjectLessons. Performs lazy retirement, scoring, selection,
+     * appliedCount update, and write-back.
+     */
+    private getLessonsFromPool;
+    /**
+     * Generic "add to pool" — shared logic for addToProject and addToCrossProject.
+     * Performs dedup (exact match + prefix match on first 60 chars), pool-full
+     * displacement, and write-back.
+     */
+    private addToPool;
     private writeAtomic;
 }

@@ -1016,3 +1016,84 @@ describe("Cross-project Global layer", () => {
     });
   });
 });
+
+// ===========================================================================
+// Group: Enhanced dedup (prefix matching)
+// ===========================================================================
+
+describe("addToProject — prefix dedup", () => {
+  it("lesson text with same first 60 chars is treated as duplicate (AC-9)", async () => {
+    const prefix60 = "For dual-file write operations (local + global), use indepen";
+    const existingEntry = makeEntry({
+      id: "dup-prefix-1",
+      lesson: prefix60 + "dent writeAtomic calls to avoid partial failure.",
+    });
+    await seedGlobal([existingEntry]);
+    const mgr = createManager();
+
+    const newEntry = makeEntry({
+      id: "dup-prefix-2",
+      lesson: prefix60 + "dent writeAtomic + rename for each file independently.",
+    });
+
+    const result = await mgr.addToProject(newEntry);
+    expect(result.added).toBe(false);
+  });
+
+  it("lesson text with different first 60 chars is added normally (AC-10)", async () => {
+    const existingEntry = makeEntry({
+      id: "diff-prefix-1",
+      lesson: "Always validate input parameters before calling external APIs to avoid runtime errors.",
+    });
+    await seedGlobal([existingEntry]);
+    const mgr = createManager();
+
+    const newEntry = makeEntry({
+      id: "diff-prefix-2",
+      lesson: "Use atomic write operations (write-to-temp + rename) to prevent data corruption.",
+    });
+
+    const result = await mgr.addToProject(newEntry);
+    expect(result.added).toBe(true);
+  });
+
+  it("exact match dedup still works", async () => {
+    const existingEntry = makeEntry({ id: "exact-1", lesson: "exact match text" });
+    await seedGlobal([existingEntry]);
+    const mgr = createManager();
+
+    const newEntry = makeEntry({ id: "exact-2", lesson: "exact match text" });
+    const result = await mgr.addToProject(newEntry);
+    expect(result.added).toBe(false);
+  });
+
+  it("short lesson text (< 60 chars) only uses exact match, not prefix", async () => {
+    const existingEntry = makeEntry({ id: "short-1", lesson: "Short lesson" });
+    await seedGlobal([existingEntry]);
+    const mgr = createManager();
+
+    const newEntry = makeEntry({ id: "short-2", lesson: "Short lesson extended with more text" });
+    const result = await mgr.addToProject(newEntry);
+    // "Short lesson" is only 12 chars, below 60 threshold, so prefix dedup does NOT apply
+    expect(result.added).toBe(true);
+  });
+
+  it("retired entries are not considered for dedup", async () => {
+    const retiredEntry = makeEntry({
+      id: "retired-dup-1",
+      lesson: "For dual-file write operations (local + global), use independent writeAtomic calls.",
+      retired: true,
+      retiredAt: new Date().toISOString(),
+      retiredReason: "score_decayed",
+    });
+    await seedGlobal([retiredEntry]);
+    const mgr = createManager();
+
+    const newEntry = makeEntry({
+      id: "retired-dup-2",
+      lesson: "For dual-file write operations (local + global), use independent writeAtomic + rename.",
+    });
+    const result = await mgr.addToProject(newEntry);
+    expect(result.added).toBe(true);
+  });
+});
