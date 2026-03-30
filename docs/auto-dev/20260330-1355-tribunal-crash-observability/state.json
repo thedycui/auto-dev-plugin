@@ -1,0 +1,40 @@
+{
+  "topic": "tribunal-crash-observability",
+  "mode": "full",
+  "phase": 4,
+  "status": "PASS",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/dycui/auto-dev-plugin/docs/auto-dev/20260330-1355-tribunal-crash-observability",
+  "projectRoot": "/Users/admin/dycui/auto-dev-plugin",
+  "startedAt": "2026-03-30T05:55:59.912Z",
+  "updatedAt": "2026-03-30T08:20:46.776Z",
+  "startCommit": "6bcb9f91240f6e84ec96e44f4238f9d7aacf91e2",
+  "tdd": true,
+  "costMode": "beast",
+  "step": "4a",
+  "stepIteration": 0,
+  "lastValidation": null,
+  "approachState": null,
+  "iteration": 0,
+  "phaseTimings": {},
+  "injectedLessonIds": [
+    "2d612ff7-cbf",
+    "c4acc017-229",
+    "1c4d1d95-3cd",
+    "faaec30f-d74",
+    "d4bb4caf-800",
+    "ca751344-692",
+    "95b91929-d6f",
+    "99d34a30-f0e",
+    "591f5848-54c",
+    "4270a22b-323"
+  ],
+  "tribunalSubmits": {
+    "4": 1
+  }
+}
