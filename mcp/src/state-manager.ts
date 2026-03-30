@@ -8,7 +8,7 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 
-import { readFile, writeFile, rename, mkdir, stat, readdir } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, stat, readdir, open } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -505,6 +505,10 @@ export class StateManager {
   /**
    * Check whether the last CHECKPOINT in progress-log.md has identical parameters.
    * Used for idempotency: if same → caller should skip the append.
+   *
+   * Optimization: for files larger than 4KB, only reads the last 4KB to find
+   * the last CHECKPOINT. Falls back to full-file read if no CHECKPOINT found
+   * in the tail (e.g. very long non-checkpoint content at the end).
    */
   async isCheckpointDuplicate(
     phase: number,
@@ -512,9 +516,34 @@ export class StateManager {
     status: string,
     summary?: string,
   ): Promise<boolean> {
+    const TAIL_SIZE = 4096;
+
     let content: string;
     try {
-      content = await readFile(this.progressLogPath, "utf-8");
+      const fh = await open(this.progressLogPath, "r");
+      try {
+        const fileStat = await fh.stat();
+        const fileSize = fileStat.size;
+
+        if (fileSize > TAIL_SIZE) {
+          // Read only the last 4KB
+          const buffer = Buffer.alloc(TAIL_SIZE);
+          await fh.read(buffer, 0, TAIL_SIZE, fileSize - TAIL_SIZE);
+          content = buffer.toString("utf-8");
+
+          // If tail doesn't contain a CHECKPOINT, fall back to full read
+          if (!content.includes("<!-- CHECKPOINT ")) {
+            content = await readFile(this.progressLogPath, "utf-8");
+          }
+        } else {
+          // Small file: read all
+          const buffer = Buffer.alloc(fileSize);
+          await fh.read(buffer, 0, fileSize, 0);
+          content = buffer.toString("utf-8");
+        }
+      } finally {
+        await fh.close();
+      }
     } catch {
       return false; // file doesn't exist → not a duplicate
     }

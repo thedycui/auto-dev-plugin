@@ -68,6 +68,10 @@ export declare class StateManager {
     /**
      * Check whether the last CHECKPOINT in progress-log.md has identical parameters.
      * Used for idempotency: if same → caller should skip the append.
+     *
+     * Optimization: for files larger than 4KB, only reads the last 4KB to find
+     * the last CHECKPOINT. Falls back to full-file read if no CHECKPOINT found
+     * in the tail (e.g. very long non-checkpoint content at the end).
      */
     isCheckpointDuplicate(phase: number, task: number | undefined, status: string, summary?: string): Promise<boolean>;
     /** Append content to progress-log.md (atomic via write-to-temp-then-rename). */
