@@ -1,6 +1,6 @@
 # auto-dev-plugin 路线图
 
-> 最后更新：2026-03-30 (observability-gate 方案 A 已完成)
+> 最后更新：2026-03-30 (self-improve round1 + round2 已完成)
 >
 > 本文档追踪所有设计文档的实现状态，作为插件演进的总路线图。
 
@@ -54,6 +54,14 @@
 | 11 | [design-observability-gate.md](design-observability-gate.md) | 可观测性门禁（方案 A） | 2026-03-26 | 2026-03-30 | Phase 3/4 prompt 增强 + code review checklist，可观测性覆盖强制检查 |
 | 12 | [design-email-mcp-server.md](design-email-mcp-server.md) | 邮件 MCP Server 插件 | 2026-03-26 | 2026-03-28 | 独立项目，已实现于 `~/.claude/plugins/email-mcp`，IMAP/SMTP 完整功能 |
 
+### 1.5 自我进化（P1 — 内部质量）
+
+| # | 设计文档 | 主题 | 创建日期 | 完成日期 | 备注 |
+|---|---------|------|---------|---------|------|
+| 13 | [auto-dev/20260330-1355-tribunal-crash-observability](auto-dev/20260330-1355-tribunal-crash-observability/) | IMP-002 Tribunal 崩溃可观测性 + IMP-003 Git 工具统一 | 2026-03-30 | 2026-03-30 | classifyTribunalError + isRetryable + progress-log 审计；getChangedFiles/getDiffStatWithUntracked 统一 |
+| 14 | [auto-dev/20260330-1730-internal-quality-triple-fix](auto-dev/20260330-1730-internal-quality-triple-fix/) | IMP-009 正则修复 + IMP-007 尾部读取 + IMP-004 Lessons 去重 | 2026-03-30 | 2026-03-30 | extractTribunalCrashes + extractPhaseTimings 加固；isCheckpointDuplicate 4KB 尾部读取；getLessonsFromPool/addToPool 抽取 + 前缀去重 |
+| 15 | [auto-dev/20260330-1821-auto-dev-self-improve-round2](auto-dev/20260330-1821-auto-dev-self-improve-round2/) | R2-1 Tribunal step 修复 + R2-2 TDD 全局门禁 + R2-3 Phase 5a 文件检查 + R2-4 skipSteps | 2026-03-30 | 2026-03-30 | tribunal verdict 后清空 step 让 orchestrator 重新接管；TDD 非 exempt task BLOCK；e2e-test-cases.md 存在性检查；lightweight 模式跳过 1b/2b |
+
 ---
 
 ## 二、进行中
@@ -65,9 +73,7 @@
 
 ### 相关进行中任务（无独立设计文档）
 
-| # | auto-dev 任务目录 | 主题 | 当前进度 |
-|---|------------------|------|---------|
-| — | [20260330-1355-tribunal-crash-observability](auto-dev/20260330-1355-tribunal-crash-observability/) | Tribunal 崩溃可观测性改进 | 设计审查中 |
+（无）
 
 ---
 
@@ -107,11 +113,13 @@
 2026-03-28  ████ batch2 + issues 修复完成, turbo-mode 上线
             ████ email-mcp-server 完成（独立插件）
 2026-03-29  ████ tribunal-hub-integration + ship-integration 完成
-2026-03-30  ██ tribunal-crash-observability 设计中, observability-gate 完成, review-enhancement 草案
+2026-03-30  ████████ self-evolution round1 (IMP-002/003/009/007/004) + round2 (R2-1~R2-4) 完成
+            ████ observability-gate 完成, review-enhancement 草案
             ↓
   下一步    → executable-ac (P1)
             → resource-constraints (P2)
             → review-enhancement (P2)
+            → state-unification (P2, 仅初始化)
 ```
 
 ---

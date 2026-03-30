@@ -67,6 +67,13 @@ auto-dev 是一个 Claude Code Plugin，将「自治开发循环」从纯 Skill 
 └────────────────────────────────────────────────────────┘
          │ PASS
          ▼
+┌─ Phase 7: RETROSPECTIVE ─────────────────────────┐
+│  自动生成回顾数据：phase timings, tribunal stats,  │
+│  TDD compliance, lesson extraction                │
+│  写入 retrospective-data.md                        │
+└────────────────────────────────────────────────────┘
+         │
+         ▼
     ✅ COMPLETED
     输出统计摘要 + 下一步选项
 ```
@@ -256,7 +263,7 @@ npm run build
 | `--resume` | 从上次断点恢复 |
 | `--interactive` | 启用交互确认模式 |
 | `--skip-design` | 跳过设计，直接从计划执行 |
-| `--phase N` | 从指定阶段开始（1-6） |
+| `--phase N` | 从指定阶段开始（1-7） |
 
 ## 架构
 
@@ -280,7 +287,7 @@ npm run build
 
 | 组件 | 职责 | 数量 |
 |------|------|------|
-| **MCP Server** | 状态管理、模板渲染、精确回滚、元学习等确定性操作 | 10 个工具 |
+| **MCP Server** | 状态管理、编排引擎、裁决系统、模板渲染、精确回滚、元学习等确定性操作 | 20+ 个工具 |
 | **Agents** | 架构师、审查专家、开发者、测试架构师、验收专家 | 5 个 |
 | **Skill** | 流程编排（Phase 顺序、循环、重试逻辑） | ~90 行 |
 | **Hooks** | SubagentStop 事件后自动提醒更新 checkpoint | 1 个 |
@@ -290,15 +297,22 @@ npm run build
 | 工具 | 说明 |
 |------|------|
 | `auto_dev_init` | 初始化会话：创建目录、检测技术栈、生成 state.json |
+| `auto_dev_next` | 获取下一步任务（编排引擎核心，驱动整个流程循环） |
 | `auto_dev_state_get` | 读取当前状态（支持 --resume 恢复） |
 | `auto_dev_state_update` | 原子更新状态字段 |
 | `auto_dev_checkpoint` | 写入结构化 CHECKPOINT（幂等 + 原子写入） |
+| `auto_dev_submit` | 提交 Phase 完成状态（触发 Phase 推进） |
+| `auto_dev_complete` | 标记任务完成（触发 retrospective） |
 | `auto_dev_render` | 模板渲染：变量替换 + checklist 注入 |
-| `auto_dev_preflight` | 前置条件检查（Phase 1-6 各有不同检查项） |
+| `auto_dev_preflight` | 前置条件检查（Phase 1-7 各有不同检查项） |
 | `auto_dev_diff_check` | 对比计划文件 vs 实际变更，报告异常 |
 | `auto_dev_git_rollback` | 精确回滚指定任务的文件变更 |
-| `auto_dev_lessons_add` | 记录经验教训（元学习） |
+| `auto_dev_tribunal_verdict` | 提交独立裁决结果（subagent 模式） |
+| `auto_dev_task_red` | TDD RED 阶段：注册失败测试 |
+| `auto_dev_task_green` | TDD GREEN 阶段：确认测试通过 |
+| `auto_dev_lessons_add` | 记录经验教训（三层元学习：local/project/global） |
 | `auto_dev_lessons_get` | 获取历史教训注入到 prompt |
+| `auto_dev_lessons_feedback` | 教训反馈（提升/降级/退役） |
 
 ### Agent 定义
 
@@ -361,11 +375,15 @@ auto-dev-plugin/
 │   ├── dist/                    # 编译产物（已提交，免构建）
 │   ├── node_modules/            # 依赖（已提交，免安装）
 │   └── src/
-│       ├── index.ts             # 入口 + 10 个工具注册
-│       ├── state-manager.ts     # 状态管理（原子写入）
+│       ├── index.ts             # 入口 + 20+ 个工具注册
+│       ├── orchestrator.ts      # 编排引擎（step 状态机、任务分发）
+│       ├── tribunal.ts          # 独立裁决系统（Hub/Subagent/CLI 三级策略）
+│       ├── state-manager.ts     # 状态管理（原子写入 + checkpoint 去重）
 │       ├── template-renderer.ts # 模板渲染
-│       ├── git-manager.ts       # Git 操作（rollback + diffCheck）
-│       ├── lessons-manager.ts   # 元学习
+│       ├── git-manager.ts       # Git 操作（rollback + diffCheck + 统一 diff）
+│       ├── lessons-manager.ts   # 三层元学习（local/project/global + 衰减 + 去重）
+│       ├── retrospective-data.ts # 回顾数据提取（checkpoint/tribunal/TDD 统计）
+│       ├── phase-enforcer.ts    # Phase 门禁（TDD gate + 审查强制）
 │       └── types.ts             # 类型定义 + Zod schema
 ├── skills/                      # Skill 定义（自动发现）
 │   └── auto-dev/

@@ -1,6 +1,7 @@
 # Auto-Dev Plugin TODO
 
 > 来源：tribunal-hub-integration session 复盘 (2026-03-28)
+> 更新：2026-03-30 — TODO-3 部分完成（R2-2 全局门禁）
 
 ---
 
@@ -39,18 +40,20 @@
 
 ## TODO-3: TDD gate 的 tddTaskStates 追踪需要更可靠的框架支持
 
-**背景**：`state.json` 中 `tdd=true`（默认开启），但 Phase 3 实现完成后 `tddTaskStates` 字段缺失。Phase 4 tribunal 因此判 FAIL（TDD gate violation）。实际原因是开发 agent 在实现过程中没有调用 `auto_dev_task_red` / `auto_dev_task_green` MCP 工具。
+**状态**：部分完成（R2-2 全局门禁已实现）
 
-**问题**：
-- TDD 工具调用完全依赖 agent 自觉——prompt 中虽有说明，但 agent 可能忽略
-- `tddTaskStates` 缺失时 tribunal 判 FAIL，但 FAIL 后的修复路径不透明（是重新实现还是补测试？）
-- TDD 模式下的 Phase 3 prompt 没有足够强的约束让 agent 必须走红绿循环
+**已完成**：
+- R2-2 在 Phase 3→4 过渡时增加了全局 TDD BLOCK：统计 plan.md 中非 exempt task 数量 vs tddTaskStates 中 GREEN_CONFIRMED 数量，不足则阻断
+- 解决了"tddTaskStates 为空但仍能通过"的绕过问题
 
-**解决方向**：
+**仍待解决**：
+- TDD 工具调用仍完全依赖 agent 自觉（prompt 引导但无框架强制）
+- Phase 3 每个 task 级别的 RED→GREEN 强制（方案 A）尚未实现
+- TDD 模式下 Phase 3 prompt 约束不够强
+
+**剩余方向**：
 - 方案 A（框架层面）：Phase 3 每个 task 完成后，框架检查 `tddTaskStates[taskN]` 是否存在，不存在则拒绝推进到下一个 task
-- 方案 B（prompt 层面）：在 Phase 3 的 task prompt 中加入硬性前置条件——"在写任何实现代码之前，必须先调用 `auto_dev_task_red` 注册测试，等测试红灯后再写实现"
-- 方案 C（配置层面）：当 `changeType=feature` 且 `tdd=true` 时，在 `computeNextTask()` 中对每个 task 自动插入 red/green checkpoint
-- 推荐方案 A + B 组合，框架强制 + prompt 引导双保险
+- 方案 B（prompt 层面）：在 Phase 3 task prompt 中加入硬性前置条件
 
 ---
 
