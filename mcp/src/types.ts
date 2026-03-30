@@ -106,6 +106,7 @@ export const StateJsonSchema = z.object({
   // Paths
   outputDir: z.string(),
   projectRoot: z.string(),
+  codeRoot: z.string().optional(),  // Actual code directory (defaults to projectRoot if not set)
 
   // Dirty flag — set when progress-log was written but state.json update failed
   dirty: z.boolean().optional(),

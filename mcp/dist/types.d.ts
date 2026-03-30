@@ -119,6 +119,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     }, z.core.$strip>;
     outputDir: z.ZodString;
     projectRoot: z.ZodString;
+    codeRoot: z.ZodOptional<z.ZodString>;
     dirty: z.ZodOptional<z.ZodBoolean>;
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;

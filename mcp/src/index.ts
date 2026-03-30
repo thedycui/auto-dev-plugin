@@ -201,8 +201,9 @@ server.tool(
       sshHost: z.string().optional(),
     }).optional(),
     shipMaxRounds: z.number().int().optional(),
+    codeRoot: z.string().optional(),
   },
-  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds }) => {
+  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds, codeRoot }) => {
     const sm = await StateManager.create(projectRoot, topic);
 
     // Handle existing directory
@@ -408,6 +409,7 @@ server.tool(
 
     // Persist behavior flags and startCommit to state
     const behaviorUpdates: Record<string, unknown> = { startCommit };
+    if (codeRoot) behaviorUpdates["codeRoot"] = resolve(projectRoot, codeRoot);
     if (interactive) behaviorUpdates["interactive"] = true;
     if (dryRun) behaviorUpdates["dryRun"] = true;
     if (skipE2e) behaviorUpdates["skipE2e"] = true;

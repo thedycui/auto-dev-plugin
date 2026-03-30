@@ -300,6 +300,14 @@ export function firstStepForPhase(phase: number): string {
   return map[phase] ?? String(phase);
 }
 
+/** Return the last sub-step for a given phase (used to advance past a completed phase) */
+export function lastStepForPhase(phase: number): string {
+  const map: Record<number, string> = {
+    1: "1b", 2: "2b", 3: "3", 4: "4a", 5: "5b", 6: "6", 7: "7", 8: "8d",
+  };
+  return map[phase] ?? String(phase);
+}
+
 /**
  * Compute the next step in sequence, skipping steps whose phase
  * is not in the mode's phase sequence.
@@ -671,7 +679,7 @@ export async function validateStep(
       if (!validation.valid) {
         return { passed: false, feedback: validation.errors.join(" ") };
       }
-      if (content && /\bREJECT\b/i.test(content)) {
+      if (content && /\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
         const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues)\s*\n([\s\S]*?)(?=\n##|$)/);
         const feedback = feedbackMatch?.[1]?.trim() ?? "设计审查未通过，请根据审查意见修订设计方案。";
         return { passed: false, feedback };
@@ -695,7 +703,7 @@ export async function validateStep(
       if (!validation.valid) {
         return { passed: false, feedback: validation.errors.join(" ") };
       }
-      if (content && /\bREJECT\b/i.test(content)) {
+      if (content && /\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
         const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues)\s*\n([\s\S]*?)(?=\n##|$)/);
         const feedback = feedbackMatch?.[1]?.trim() ?? "计划审查未通过，请根据审查意见修订实施计划。";
         return { passed: false, feedback };
@@ -947,7 +955,21 @@ export async function buildTaskForStep(
     // Extract task details with completion criteria (task-level contract)
     const taskDetails = extractTaskDetails(planContent);
 
-    return `请完成以下任务：\n\n${taskDetails}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
+    // Include P0/P1 issues from plan-review.md so developer doesn't miss critical feedback
+    let reviewSection = "";
+    const planReviewContent = await readFileSafe(join(outputDir, "plan-review.md"));
+    if (planReviewContent) {
+      const p0p1Lines = planReviewContent
+        .split("\n")
+        .filter(line => /\b(P0|P1)\b/.test(line))
+        .map(line => line.trim())
+        .filter(Boolean);
+      if (p0p1Lines.length > 0) {
+        reviewSection = `\n\n**⚠ 计划审查 P0/P1 修订要求（必须在实现中落实）：**\n${p0p1Lines.map(l => `- ${l}`).join("\n")}\n`;
+      }
+    }
+
+    return `请完成以下任务：\n\n${taskDetails}${reviewSection}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
       `**重要：每完成一个 task，先验证其完成标准是否满足，再开始下一个。**` +
       approachPlanInstruction + ISOLATION_FOOTER;
   }
@@ -998,6 +1020,8 @@ export async function computeNextTask(
   const buildCmd = state.stack.buildCmd;
   const testCmd = state.stack.testCmd;
   const skipSteps = state.skipSteps ?? [];
+  // codeRoot: actual directory where code lives (may differ from projectRoot for skill projects)
+  const effectiveCodeRoot = state.codeRoot ?? projectRoot;
 
   // Ship extra variables for Phase 8 prompt rendering
   const shipExtraVars: Record<string, string> | undefined = state.ship === true
@@ -1028,9 +1052,51 @@ export async function computeNextTask(
 
   // 3. If no step: determine first phase, set step, return first task prompt
   if (!stepState.step) {
-    // Use state.phase if already mid-flow (e.g. after tribunal verdict cleared step),
-    // otherwise fall back to the mode's first phase for initial startup.
-    const firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0]!;
+    // When status === "PASS", the current phase was completed (e.g. by tribunal_verdict)
+    // and we need to advance to the NEXT phase — not restart the current one.
+    let firstPhase: number;
+    if (state.status === "PASS" && state.phase && phases.includes(state.phase)) {
+      // Find the last step of the completed phase, then use computeNextStep to advance
+      const completedPhase = state.phase;
+      const lastStepOfCompleted = lastStepForPhase(completedPhase);
+      const nextStep = computeNextStep(lastStepOfCompleted, phases, skipSteps);
+
+      if (!nextStep) {
+        // All phases done
+        await sm.atomicUpdate({
+          step: null, stepIteration: 0, lastValidation: "DONE",
+          status: "COMPLETED",
+        });
+        return {
+          done: true,
+          step: null,
+          agent: null,
+          prompt: null,
+          message: "All phases completed successfully.",
+        };
+      }
+
+      const nextPhase = phaseForStep(nextStep);
+      await sm.atomicUpdate({
+        step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
+        phase: nextPhase, status: "IN_PROGRESS",
+      });
+
+      const prompt = await buildTaskForStep(
+        nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep),
+      );
+
+      return {
+        done: false,
+        step: nextStep,
+        agent: STEP_AGENTS[nextStep] ?? null,
+        prompt,
+        message: `Phase ${completedPhase} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
+      };
+    }
+
+    // Normal startup: use state.phase if already mid-flow, otherwise the mode's first phase.
+    firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0]!;
     let firstStep = firstStepForPhase(firstPhase);
 
     // Skip Phase 1a if design doc already exists and is compliant
@@ -1084,7 +1150,7 @@ export async function computeNextTask(
   const currentIteration = stepState.stepIteration;
 
   const validation = await validateStep(
-    currentStep, outputDir, projectRoot, buildCmd, testCmd, sm, state, topic,
+    currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic,
   );
 
   if (!validation.passed) {

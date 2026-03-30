@@ -154,8 +154,8 @@ describe("computeNextTask", () => {
       expect(result.prompt).not.toBeNull();
     });
 
-    it("R2-1: step=null + phase=5 returns step 5a (post-tribunal PASS recovery)", async () => {
-      const state = makeState({ mode: "full", phase: 5 });
+    it("R2-1: step=null + phase=4 + status=PASS advances to step 5a (post-tribunal PASS)", async () => {
+      const state = makeState({ mode: "full", phase: 4, status: "PASS" });
       mockLoadAndValidate.mockResolvedValue(state);
       // state.json has no step (cleared after tribunal PASS)
       mockReadFile.mockImplementation(async (path: string) => {
@@ -171,6 +171,40 @@ describe("computeNextTask", () => {
       expect(result.step).toBe("5a");
       expect(result.prompt).toBeDefined();
       expect(result.prompt).not.toBeNull();
+    });
+
+    it("R2-1b: step=null + phase=5 + status=IN_PROGRESS resumes at 5a (mid-flow recovery)", async () => {
+      const state = makeState({ mode: "full", phase: 5 });
+      mockLoadAndValidate.mockResolvedValue(state);
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("5a");
+      expect(result.prompt).toBeDefined();
+      expect(result.prompt).not.toBeNull();
+    });
+
+    it("R2-1c: step=null + last phase + status=PASS returns done", async () => {
+      const state = makeState({ mode: "full", phase: 7, status: "PASS" });
+      mockLoadAndValidate.mockResolvedValue(state);
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(true);
+      expect(result.step).toBeNull();
     });
 
     it("turbo mode without plan.md: returns implementation task with topic", async () => {
