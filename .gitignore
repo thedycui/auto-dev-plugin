@@ -20,6 +20,14 @@ dist/
 *.tgz
 *.bak
 
+# Auto-dev run artifacts (regenerable)
+docs/auto-dev/*/*.patch
+docs/auto-dev/*/framework-test-*.txt
+
+# Backup directories
+docs/auto-dev/*.bak.*/
+docs/auto-dev/_self-assess/
+
 # Temporary directories
 .agent-hub/
 .claude/
