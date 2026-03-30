@@ -414,6 +414,9 @@ server.tool(
     behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
     behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
+    if (mode === "full" && (estimatedLines ?? 999) <= 50 && (estimatedFiles ?? 999) <= 3) {
+      behaviorUpdates["skipSteps"] = ["1b", "2b"];
+    }
     if (ship === true) {
       behaviorUpdates["ship"] = true;
       behaviorUpdates["deployTarget"] = deployTarget;
@@ -1907,6 +1910,11 @@ server.tool(
     if (verdict === "PASS") {
       const ckptSummary = `[TRIBUNAL-FALLBACK] Fallback 裁决通过。${issues.length} 个建议项。`;
       const ckptResult = await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
+
+      // Clear step fields so orchestrator re-computes the next step on next auto_dev_next call
+      if (ckptResult.ok) {
+        await sm.atomicUpdate({ step: null, stepIteration: 0, lastValidation: null, approachState: null });
+      }
 
       const nextDirective = ckptResult.ok
         ? ckptResult.nextDirective

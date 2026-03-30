@@ -26,6 +26,7 @@ import { StateManager, extractTaskList } from "./state-manager.js";
 import {
   validatePhase1ReviewArtifact,
   validatePhase2ReviewArtifact,
+  isTddExemptTask,
 } from "./phase-enforcer.js";
 import { evaluateTribunal } from "./tribunal.js";
 import type { EvalTribunalResult } from "./tribunal.js";
@@ -303,12 +304,13 @@ export function firstStepForPhase(phase: number): string {
  * Compute the next step in sequence, skipping steps whose phase
  * is not in the mode's phase sequence.
  */
-export function computeNextStep(currentStep: string, phases: number[]): string | null {
+export function computeNextStep(currentStep: string, phases: number[], skipSteps?: string[]): string | null {
   const idx = STEP_ORDER.indexOf(currentStep);
   if (idx < 0) return null;
 
   for (let i = idx + 1; i < STEP_ORDER.length; i++) {
     const candidate = STEP_ORDER[i]!;
+    if (skipSteps?.includes(candidate)) continue;
     const candidatePhase = phaseForStep(candidate);
     if (phases.includes(candidatePhase)) {
       return candidate;
@@ -728,7 +730,10 @@ export async function validateStep(
     }
 
     case "5a": {
-      // Just check that test design output exists (pass through)
+      const hasTestCases = await fileExists(join(outputDir, "e2e-test-cases.md"));
+      if (!hasTestCases) {
+        return { passed: false, feedback: "e2e-test-cases.md 不存在。Phase 5a 要求输出测试用例设计文件。" };
+      }
       return { passed: true, feedback: "" };
     }
 
@@ -992,6 +997,7 @@ export async function computeNextTask(
   }
   const buildCmd = state.stack.buildCmd;
   const testCmd = state.stack.testCmd;
+  const skipSteps = state.skipSteps ?? [];
 
   // Ship extra variables for Phase 8 prompt rendering
   const shipExtraVars: Record<string, string> | undefined = state.ship === true
@@ -1022,7 +1028,9 @@ export async function computeNextTask(
 
   // 3. If no step: determine first phase, set step, return first task prompt
   if (!stepState.step) {
-    const firstPhase = phases[0]!;
+    // Use state.phase if already mid-flow (e.g. after tribunal verdict cleared step),
+    // otherwise fall back to the mode's first phase for initial startup.
+    const firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0]!;
     let firstStep = firstStepForPhase(firstPhase);
 
     // Skip Phase 1a if design doc already exists and is compliant
@@ -1371,7 +1379,36 @@ export async function computeNextTask(
     tribunalUpdates.tribunalSubmits = { ...(state.tribunalSubmits ?? {}), [phaseKey]: 0 };
   }
 
-  const nextStep = computeNextStep(currentStep, phases);
+  const nextStep = computeNextStep(currentStep, phases, skipSteps);
+
+  // TDD global gate: block Phase 3 → Phase 4 transition if not all tasks are GREEN_CONFIRMED
+  if (nextStep && state.tdd === true && phaseForStep(currentStep) === 3 && phaseForStep(nextStep) >= 4) {
+    const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    if (planContent) {
+      const taskMatches = planContent.match(/^## Task\s+(\d+)/gm) ?? [];
+      const taskNums = taskMatches.map(m => parseInt(m.replace(/^## Task\s+/, ""), 10));
+      let nonExemptCount = 0;
+      let greenCount = 0;
+      for (const t of taskNums) {
+        const exempt = await isTddExemptTask(outputDir, t);
+        if (!exempt) {
+          nonExemptCount++;
+          if (state.tddTaskStates?.[String(t)]?.status === "GREEN_CONFIRMED") {
+            greenCount++;
+          }
+        }
+      }
+      if (nonExemptCount > 0 && greenCount < nonExemptCount) {
+        return {
+          done: false,
+          step: currentStep,
+          agent: null,
+          prompt: null,
+          message: `TDD_GATE_GLOBAL_INCOMPLETE: ${greenCount}/${nonExemptCount} non-exempt tasks are GREEN_CONFIRMED. All must pass before Phase 4.`,
+        };
+      }
+    }
+  }
 
   if (!nextStep) {
     // All steps done — single atomicUpdate

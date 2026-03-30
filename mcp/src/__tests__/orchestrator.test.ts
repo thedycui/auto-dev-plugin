@@ -151,6 +151,25 @@ describe("computeNextTask", () => {
       expect(result.prompt).not.toBeNull();
     });
 
+    it("R2-1: step=null + phase=5 returns step 5a (post-tribunal PASS recovery)", async () => {
+      const state = makeState({ mode: "full", phase: 5 });
+      mockLoadAndValidate.mockResolvedValue(state);
+      // state.json has no step (cleared after tribunal PASS)
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify(state);
+        }
+        throw new Error("ENOENT");
+      });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("5a");
+      expect(result.prompt).toBeDefined();
+      expect(result.prompt).not.toBeNull();
+    });
+
     it("turbo mode without plan.md: returns implementation task with topic", async () => {
       const state = makeState({ mode: "turbo" });
       mockLoadAndValidate.mockResolvedValue(state);
@@ -1236,6 +1255,151 @@ describe("computeNextTask", () => {
   });
 
   // -----------------------------------------------------------------------
+  // R2-2: TDD global gate — block Phase 3→4 if tddTaskStates incomplete
+  // -----------------------------------------------------------------------
+
+  describe("TDD global gate (R2-2)", () => {
+    it("blocks Phase 3→4 when non-exempt tasks have no GREEN_CONFIRMED", async () => {
+      const state = makeState({ mode: "quick", tdd: true, tddTaskStates: {} });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "3", stepIteration: 0 });
+        }
+        if (path.includes("plan.md")) {
+          return "## Task 1: Implement feature\nDo it\n\n## Task 2: Write tests\n**TDD**: skip\n";
+        }
+        throw new Error("ENOENT");
+      });
+
+      // Build + test pass for step 3 validation
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+          cb(null, "ok", "");
+        },
+      );
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.done).toBe(false);
+      expect(result.step).toBe("3");
+      expect(result.prompt).toBeNull();
+      expect(result.message).toContain("TDD_GATE_GLOBAL_INCOMPLETE");
+    });
+
+    it("passes when all tasks are TDD exempt", async () => {
+      const state = makeState({ mode: "quick", tdd: true, tddTaskStates: {} });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "3", stepIteration: 0 });
+        }
+        if (path.includes("plan.md")) {
+          return "## Task 1: Write docs\n**TDD**: skip\n\n## Task 2: Config\n**TDD**: skip\n";
+        }
+        throw new Error("ENOENT");
+      });
+
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+          cb(null, "ok", "");
+        },
+      );
+
+      // Tribunal for step 4a
+      mockEvaluateTribunal.mockResolvedValue({ verdict: "PASS", issues: [] });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      // Should advance past step 3 (not blocked)
+      expect(result.step).not.toBe("3");
+      expect(result.message).not.toContain("TDD_GATE_GLOBAL_INCOMPLETE");
+    });
+
+    it("passes when all non-exempt tasks are GREEN_CONFIRMED", async () => {
+      const state = makeState({
+        mode: "quick",
+        tdd: true,
+        tddTaskStates: {
+          "1": { status: "GREEN_CONFIRMED" },
+        },
+      });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "3", stepIteration: 0 });
+        }
+        if (path.includes("plan.md")) {
+          return "## Task 1: Implement feature\nDo it\n\n## Task 2: Write docs\n**TDD**: skip\n";
+        }
+        throw new Error("ENOENT");
+      });
+
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
+          cb(null, "ok", "");
+        },
+      );
+
+      mockEvaluateTribunal.mockResolvedValue({ verdict: "PASS", issues: [] });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      expect(result.step).not.toBe("3");
+      expect(result.message).not.toContain("TDD_GATE_GLOBAL_INCOMPLETE");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // R2-3: Phase 5a file existence check
+  // -----------------------------------------------------------------------
+
+  describe("Phase 5a e2e-test-cases.md check (R2-3)", () => {
+    it("returns failed when e2e-test-cases.md does not exist", async () => {
+      const state = makeState({ mode: "full", phase: 5 });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "5a", stepIteration: 0 });
+        }
+        throw new Error("ENOENT");
+      });
+      // stat (used by fileExists) should reject for e2e-test-cases.md
+      mockStat.mockRejectedValue(new Error("ENOENT"));
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      // Should get a revision prompt (step stays 5a with failure feedback)
+      expect(result.step).toBe("5a");
+      expect(result.done).toBe(false);
+    });
+
+    it("passes when e2e-test-cases.md exists", async () => {
+      const state = makeState({ mode: "full", phase: 5 });
+      mockLoadAndValidate.mockResolvedValue(state);
+
+      mockReadFile.mockImplementation(async (path: string) => {
+        if (path.includes("state.json")) {
+          return JSON.stringify({ ...state, step: "5a", stepIteration: 0 });
+        }
+        throw new Error("ENOENT");
+      });
+      // stat succeeds for e2e-test-cases.md
+      mockStat.mockResolvedValue({ isFile: () => true });
+
+      const result = await computeNextTask("/tmp/test-project", "test-topic");
+
+      // Should advance past 5a
+      expect(result.step).toBe("5b");
+      expect(result.done).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // skipE2e — orchestrator must skip Phase 5 steps
   // -----------------------------------------------------------------------
 
@@ -1406,6 +1570,22 @@ describe("computeNextStep — skipE2e phase filtering", () => {
   it("no ship: step 7 is terminal", () => {
     const phases = [1, 2, 3, 4, 5, 6, 7];
     expect(computeNextStep("7", phases)).toBeNull();
+  });
+
+  // R2-4: skipSteps filtering
+  it("R2-4: skipSteps=[1b,2b] causes 1a → 2a (skips 1b)", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7];
+    expect(computeNextStep("1a", phases, ["1b", "2b"])).toBe("2a");
+  });
+
+  it("R2-4: skipSteps=[1b,2b] causes 2a → 3 (skips 2b)", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7];
+    expect(computeNextStep("2a", phases, ["1b", "2b"])).toBe("3");
+  });
+
+  it("R2-4: skipSteps=[1b,2b] does not affect step 4a", () => {
+    const phases = [1, 2, 3, 4, 5, 6, 7];
+    expect(computeNextStep("3", phases, ["1b", "2b"])).toBe("4a");
   });
 });
 

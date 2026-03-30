@@ -123,6 +123,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     interactive: z.ZodOptional<z.ZodBoolean>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
     skipE2e: z.ZodOptional<z.ZodBoolean>;
+    skipSteps: z.ZodOptional<z.ZodArray<z.ZodString>>;
     tdd: z.ZodOptional<z.ZodBoolean>;
     tddTaskStates: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
         status: z.ZodEnum<{

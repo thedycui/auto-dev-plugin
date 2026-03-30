@@ -89,6 +89,7 @@ export const StateJsonSchema = z.object({
     interactive: z.boolean().optional(), // --interactive mode (default: false = fully automatic)
     dryRun: z.boolean().optional(), // --dry-run mode (only Phase 1-2)
     skipE2e: z.boolean().optional(), // --skip-e2e mode (skip Phase 5)
+    skipSteps: z.array(z.string()).optional(), // lightweight mode: skip specific steps (e.g. ["1b", "2b"])
     tdd: z.boolean().optional(), // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
     tddTaskStates: z.record(z.string(), z.object({
         status: z.enum(["PENDING", "RED_CONFIRMED", "GREEN_CONFIRMED"]),
