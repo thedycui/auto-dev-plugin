@@ -982,8 +982,8 @@ export async function computeNextTask(
   projectRoot: string,
   topic: string,
 ): Promise<NextTaskResult> {
-  // 1. Load state via StateManager
-  const sm = new StateManager(projectRoot, topic);
+  // 1. Load state via StateManager (use create() to resolve timestamp-prefixed dirs)
+  const sm = await StateManager.create(projectRoot, topic);
   const state = await sm.loadAndValidate();
 
   const outputDir = sm.outputDir;

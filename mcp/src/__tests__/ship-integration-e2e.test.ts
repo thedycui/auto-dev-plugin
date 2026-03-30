@@ -35,6 +35,9 @@ vi.mock("../state-manager.js", async (importOriginal) => {
       outputDir: string;
       stateFilePath: string;
       progressLogPath: string;
+      static async create(projectRoot: string, topic: string) {
+        return new MockStateManager(projectRoot, topic);
+      }
       constructor(projectRoot: string, topic: string) {
         this.projectRoot = projectRoot;
         this.topic = topic;
