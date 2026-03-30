@@ -462,6 +462,183 @@ async function checkBuildWithBaseline(
   };
 }
 
+// ---------------------------------------------------------------------------
+// IMP-001: Extracted functions for computeNextTask refactoring
+// These functions handle tribunal failure scenarios, reducing the complexity
+// of the main computeNextTask function.
+// ---------------------------------------------------------------------------
+
+/**
+ * Handle tribunal crash event — write detailed crash info to progress-log.
+ * IMP-002 enhanced: writes full stderr to dedicated crash log file.
+ */
+async function handleTribunalCrash(
+  sm: StateManager,
+  state: StateJson,
+  crashRaw: string | undefined,
+  outputDir: string,
+): Promise<void> {
+  try {
+    let crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} -->`;
+    if (crashRaw) {
+      const parsed = JSON.parse(crashRaw);
+      if (parsed.crashInfo) {
+        const ci = parsed.crashInfo;
+        const timestamp = new Date().toISOString();
+        crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} category="${ci.errorCategory}" exitCode="${ci.exitCode ?? "N/A"}" retryable="${ci.isRetryable}" timestamp="${timestamp}" -->`;
+        if (ci.stderrSnippet) {
+          const safeSnippet = ci.stderrSnippet
+            .replace(/"/g, '&quot;')
+            .replace(/--/g, '&#45;&#45;')
+            .slice(0, 200);
+          crashEvent += `\n<!-- TRIBUNAL_CRASH_STDERR snippet="${safeSnippet}" -->`;
+        }
+        if (ci.stderrFull) {
+          const crashLogPath = join(outputDir, `.tribunal-crash-phase${state.phase}.log`);
+          await writeFile(crashLogPath, `[${timestamp}] TRIBUNAL_CRASH category=${ci.errorCategory} exitCode=${ci.exitCode ?? "N/A"}\n\nSTDERR:\n${ci.stderrFull}\n\nERROR: ${ci.errMessage}\n`, "utf-8");
+          crashEvent += `\n<!-- TRIBUNAL_CRASH_LOG path="${crashLogPath}" -->`;
+        }
+      }
+    }
+    await sm.appendToProgressLog(crashEvent);
+  } catch { /* best-effort */ }
+}
+
+/**
+ * Handle tribunal subagent request — delegate to subagent for tribunal execution.
+ */
+async function handleTribunalSubagent(
+  sm: StateManager,
+  state: StateJson,
+  phaseKey: string,
+  count: number,
+  currentStep: string,
+  tribunalResult: EvalTribunalResult,
+): Promise<NextTaskResult> {
+  await sm.atomicUpdate({
+    tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
+  });
+  return {
+    done: false,
+    step: currentStep,
+    agent: null,
+    prompt: null,
+    escalation: {
+      reason: "tribunal_subagent",
+      lastFeedback: "裁决已委托给 subagent，请读取 digestPath 文件执行裁决后调用 auto_dev_tribunal_verdict 提交。",
+      digest: tribunalResult.digest,
+      digestHash: tribunalResult.digestHash,
+      digestPath: tribunalResult.digestPath,
+    },
+    message: `Step ${currentStep} tribunal 委托给 subagent 执行。`,
+  };
+}
+
+/**
+ * Handle tribunal parse failure — return raw output for main agent to extract verdict.
+ */
+async function handleTribunalParseFailure(
+  sm: StateManager,
+  state: StateJson,
+  phaseKey: string,
+  count: number,
+  currentStep: string,
+  tribunalResult: EvalTribunalResult,
+): Promise<NextTaskResult> {
+  await sm.atomicUpdate({
+    tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
+  });
+  return {
+    done: false,
+    step: currentStep,
+    agent: null,
+    prompt: null,
+    escalation: {
+      reason: "tribunal_parse_failure",
+      lastFeedback: "Tribunal 返回了裁决内容但 JSON 格式不合法。请从以下原始输出中提取 verdict 和 issues，然后调用 auto_dev_tribunal_verdict 提交。",
+      digest: tribunalResult.rawOutput,
+      digestHash: tribunalResult.digestHash,
+    },
+    message: `Step ${currentStep} tribunal JSON 解析失败，原始输出已返回，请 agent 自行提取裁决结果。`,
+  };
+}
+
+/**
+ * Handle tribunal crash with fallback escalation.
+ */
+async function handleTribunalCrashEscalation(
+  sm: StateManager,
+  state: StateJson,
+  phaseKey: string,
+  count: number,
+  currentStep: string,
+  tribunalResult: EvalTribunalResult,
+  outputDir: string,
+): Promise<NextTaskResult> {
+  await handleTribunalCrash(sm, state, tribunalResult.crashRaw, outputDir);
+  await sm.atomicUpdate({
+    tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
+  });
+  return {
+    done: false,
+    step: currentStep,
+    agent: null,
+    prompt: null,
+    escalation: {
+      reason: "tribunal_crashed",
+      lastFeedback: "Tribunal 进程崩溃，需要 fallback 裁决。",
+      digest: tribunalResult.digest,
+      digestHash: tribunalResult.digestHash,
+    },
+    message: `Step ${currentStep} tribunal 崩溃，需要 fallback。`,
+  };
+}
+
+/**
+ * Handle tribunal escalation after 3 failures — regress to Phase 3 or BLOCKED.
+ */
+async function handleTribunalEscalation(
+  sm: StateManager,
+  state: StateJson,
+  phaseKey: string,
+  currentStep: string,
+  feedback: string,
+  outputDir: string,
+  projectRoot: string,
+  topic: string,
+  buildCmd: string,
+  testCmd: string,
+): Promise<NextTaskResult> {
+  const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
+  if (escCount >= 2) {
+    await sm.atomicUpdate({ status: "BLOCKED" });
+    return {
+      done: false, step: currentStep, agent: null, prompt: null,
+      escalation: {
+        reason: "tribunal_max_escalations",
+        lastFeedback: `Phase ${phaseKey} 已 ${escCount + 1} 次 ESCALATE，需要人工介入。`,
+      },
+      message: `Phase ${phaseKey} 多次 ESCALATE，BLOCKED。`,
+    };
+  }
+
+  await sm.atomicUpdate({
+    phase: 3, status: "IN_PROGRESS",
+    step: "3", stepIteration: 0, lastValidation: "ESCALATE_REGRESS", approachState: null,
+    tribunalSubmits: {},
+    phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
+  });
+
+  const prompt = await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, feedback);
+  return {
+    done: false,
+    step: "3",
+    agent: STEP_AGENTS["3"] ?? null,
+    prompt,
+    message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
+  };
+}
+
 export async function validateStep(
   step: string,
   outputDir: string,
@@ -954,6 +1131,36 @@ export async function computeNextTask(
 
       // Crashed tribunal → full fallback needed (process-level failure)
       if (validation.tribunalResult.crashed) {
+        // IMP-002: Enhanced TRIBUNAL_CRASH event with full stderr for observability
+        try {
+          const crashRaw = validation.tribunalResult.crashRaw;
+          let crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} -->`;
+          if (crashRaw) {
+            const parsed = JSON.parse(crashRaw);
+            if (parsed.crashInfo) {
+              const ci = parsed.crashInfo;
+              const timestamp = new Date().toISOString();
+              // Build detailed crash event with stderr snippet (avoid polluting log with huge stderr)
+              crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} category="${ci.errorCategory}" exitCode="${ci.exitCode ?? "N/A"}" retryable="${ci.isRetryable}" timestamp="${timestamp}" -->`;
+              // IMP-002: Append stderr summary line for quick diagnostics
+              if (ci.stderrSnippet) {
+                const safeSnippet = ci.stderrSnippet
+                  .replace(/"/g, '&quot;')
+                  .replace(/--/g, '&#45;&#45;')
+                  .slice(0, 200); // Further limit for inline comment
+                crashEvent += `\n<!-- TRIBUNAL_CRASH_STDERR snippet="${safeSnippet}" -->`;
+              }
+              // IMP-002: Write full stderr to dedicated file for detailed analysis
+              if (ci.stderrFull) {
+                const crashLogPath = join(outputDir, `.tribunal-crash-phase${state.phase}.log`);
+                await writeFile(crashLogPath, `[${timestamp}] TRIBUNAL_CRASH category=${ci.errorCategory} exitCode=${ci.exitCode ?? "N/A"}\n\nSTDERR:\n${ci.stderrFull}\n\nERROR: ${ci.errMessage}\n`, "utf-8");
+                crashEvent += `\n<!-- TRIBUNAL_CRASH_LOG path="${crashLogPath}" -->`;
+              }
+            }
+          }
+          await sm.appendToProgressLog(crashEvent);
+        } catch { /* best-effort — don't block on logging failure */ }
+
         await sm.atomicUpdate({
           tribunalSubmits: { ...submits, [phaseKey]: count },
         });
