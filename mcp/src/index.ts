@@ -411,7 +411,7 @@ server.tool(
     if (interactive) behaviorUpdates["interactive"] = true;
     if (dryRun) behaviorUpdates["dryRun"] = true;
     if (skipE2e) behaviorUpdates["skipE2e"] = true;
-    behaviorUpdates["tdd"] = tdd !== false;  // TDD on by default, --no-tdd to disable
+    behaviorUpdates["tdd"] = tdd === true;  // TDD off by default, --tdd to enable
     if (brainstorm) behaviorUpdates["brainstorm"] = true;
     behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
     if (mode === "full" && (estimatedLines ?? 999) <= 50 && (estimatedFiles ?? 999) <= 3) {
