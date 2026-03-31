@@ -93,6 +93,33 @@ export declare const LessonEntrySchema: z.ZodObject<{
     }>>;
 }, z.core.$strip>;
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
+export declare const ApproachEntrySchema: z.ZodObject<{
+    id: z.ZodString;
+    summary: z.ZodString;
+    failCount: z.ZodNumber;
+}, z.core.$strip>;
+export type ApproachEntryType = z.infer<typeof ApproachEntrySchema>;
+export declare const FailedApproachSchema: z.ZodObject<{
+    id: z.ZodString;
+    summary: z.ZodString;
+    failReason: z.ZodString;
+}, z.core.$strip>;
+export type FailedApproachType = z.infer<typeof FailedApproachSchema>;
+export declare const ApproachStateSchema: z.ZodObject<{
+    stepId: z.ZodString;
+    approaches: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        summary: z.ZodString;
+        failCount: z.ZodNumber;
+    }, z.core.$strip>>;
+    currentIndex: z.ZodNumber;
+    failedApproaches: z.ZodArray<z.ZodObject<{
+        id: z.ZodString;
+        summary: z.ZodString;
+        failReason: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ApproachState = z.infer<typeof ApproachStateSchema>;
 export declare const StateJsonSchema: z.ZodObject<{
     topic: z.ZodString;
     mode: z.ZodEnum<{

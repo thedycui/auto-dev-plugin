@@ -69,6 +69,25 @@ export const LessonEntrySchema = z.object({
     retiredReason: z.enum(["displaced_by_new", "score_decayed", "manually_removed"]).optional(),
 });
 // ---------------------------------------------------------------------------
+// ApproachState — circuit breaker approach tracking
+// ---------------------------------------------------------------------------
+export const ApproachEntrySchema = z.object({
+    id: z.string(),
+    summary: z.string(),
+    failCount: z.number().int(),
+});
+export const FailedApproachSchema = z.object({
+    id: z.string(),
+    summary: z.string(),
+    failReason: z.string(),
+});
+export const ApproachStateSchema = z.object({
+    stepId: z.string(),
+    approaches: z.array(ApproachEntrySchema),
+    currentIndex: z.number().int(),
+    failedApproaches: z.array(FailedApproachSchema),
+});
+// ---------------------------------------------------------------------------
 // StateJson — persisted in state.json
 // ---------------------------------------------------------------------------
 export const StateJsonSchema = z.object({

@@ -89,6 +89,35 @@ export const LessonEntrySchema = z.object({
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
 
 // ---------------------------------------------------------------------------
+// ApproachState — circuit breaker approach tracking
+// ---------------------------------------------------------------------------
+
+export const ApproachEntrySchema = z.object({
+  id: z.string(),
+  summary: z.string(),
+  failCount: z.number().int(),
+});
+
+export type ApproachEntryType = z.infer<typeof ApproachEntrySchema>;
+
+export const FailedApproachSchema = z.object({
+  id: z.string(),
+  summary: z.string(),
+  failReason: z.string(),
+});
+
+export type FailedApproachType = z.infer<typeof FailedApproachSchema>;
+
+export const ApproachStateSchema = z.object({
+  stepId: z.string(),
+  approaches: z.array(ApproachEntrySchema),
+  currentIndex: z.number().int(),
+  failedApproaches: z.array(FailedApproachSchema),
+});
+
+export type ApproachState = z.infer<typeof ApproachStateSchema>;
+
+// ---------------------------------------------------------------------------
 // StateJson — persisted in state.json
 // ---------------------------------------------------------------------------
 

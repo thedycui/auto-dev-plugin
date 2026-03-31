@@ -69,7 +69,7 @@ const STEP_AGENTS = {
     "8d": "auto-dev-developer",
 };
 /** Ordered step transitions (happy path) */
-const STEP_ORDER = ["1a", "1b", "2a", "2b", "3", "4a", "5a", "5b", "6", "7", "8a", "8b", "8c", "8d"];
+const STEP_ORDER = ["1a", "1b", "1c", "2a", "2b", "2c", "3", "4a", "5a", "5b", "5c", "6", "7", "8a", "8b", "8c", "8d"];
 const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
 const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills", "auto-dev");
 // ---------------------------------------------------------------------------
@@ -343,7 +343,8 @@ async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = 
  * Handle tribunal crash event — write detailed crash info to progress-log.
  * IMP-002 enhanced: writes full stderr to dedicated crash log file.
  */
-async function handleTribunalCrash(sm, state, crashRaw, outputDir) {
+async function handleTribunalCrash(ctx, crashRaw) {
+    const { sm, state, outputDir } = ctx;
     try {
         let crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} -->`;
         if (crashRaw) {
@@ -373,7 +374,8 @@ async function handleTribunalCrash(sm, state, crashRaw, outputDir) {
 /**
  * Handle tribunal subagent request — delegate to subagent for tribunal execution.
  */
-async function handleTribunalSubagent(sm, state, phaseKey, count, currentStep, tribunalResult) {
+async function handleTribunalSubagent(ctx, phaseKey, count, currentStep, tribunalResult) {
+    const { sm, state } = ctx;
     await sm.atomicUpdate({
         tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
     });
@@ -395,7 +397,8 @@ async function handleTribunalSubagent(sm, state, phaseKey, count, currentStep, t
 /**
  * Handle tribunal parse failure — return raw output for main agent to extract verdict.
  */
-async function handleTribunalParseFailure(sm, state, phaseKey, count, currentStep, tribunalResult) {
+async function handleTribunalParseFailure(ctx, phaseKey, count, currentStep, tribunalResult) {
+    const { sm, state } = ctx;
     await sm.atomicUpdate({
         tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
     });
@@ -416,8 +419,9 @@ async function handleTribunalParseFailure(sm, state, phaseKey, count, currentSte
 /**
  * Handle tribunal crash with fallback escalation.
  */
-async function handleTribunalCrashEscalation(sm, state, phaseKey, count, currentStep, tribunalResult, outputDir) {
-    await handleTribunalCrash(sm, state, tribunalResult.crashRaw, outputDir);
+async function handleTribunalCrashEscalation(ctx, phaseKey, count, currentStep, tribunalResult) {
+    const { sm, state } = ctx;
+    await handleTribunalCrash(ctx, tribunalResult.crashRaw);
     await sm.atomicUpdate({
         tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
     });
@@ -438,9 +442,11 @@ async function handleTribunalCrashEscalation(sm, state, phaseKey, count, current
 /**
  * Handle tribunal escalation after 3 failures — regress to Phase 3 or BLOCKED.
  */
-async function handleTribunalEscalation(sm, state, phaseKey, currentStep, feedback, outputDir, projectRoot, topic, buildCmd, testCmd) {
+async function handleTribunalEscalation(ctx, phaseKey, currentStep, feedback) {
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd } = ctx;
     const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
     if (escCount >= 2) {
+        console.error(`[orchestrator] tribunal escalation BLOCKED: step=${currentStep} phase=${phaseKey} escCount=${escCount + 1}`);
         await sm.atomicUpdate({ status: "BLOCKED" });
         return {
             done: false, step: currentStep, agent: null, prompt: null,
@@ -451,13 +457,14 @@ async function handleTribunalEscalation(sm, state, phaseKey, currentStep, feedba
             message: `Phase ${phaseKey} 多次 ESCALATE，BLOCKED。`,
         };
     }
+    console.error(`[orchestrator] tribunal escalation regress: step=${currentStep} phase=${phaseKey} escCount=${escCount + 1}`);
     await sm.atomicUpdate({
         phase: 3, status: "IN_PROGRESS",
         step: "3", stepIteration: 0, lastValidation: "ESCALATE_REGRESS", approachState: null,
         tribunalSubmits: {},
         phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
     });
-    const prompt = await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, feedback);
+    const prompt = await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, feedback, ctx.getExtraVars("3"));
     return {
         done: false,
         step: "3",
@@ -768,381 +775,262 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
     return `请完成步骤 ${step} 的任务。\n\n主题: ${topic}\n项目根目录: ${projectRoot}` + ISOLATION_FOOTER;
 }
 // ---------------------------------------------------------------------------
-// computeNextTask — Main Step Function
+// Extracted sub-functions for computeNextTask
 // ---------------------------------------------------------------------------
-export async function computeNextTask(projectRoot, topic) {
-    // 1. Load state via StateManager (use create() to resolve timestamp-prefixed dirs)
-    const sm = await StateManager.create(projectRoot, topic);
-    const state = await sm.loadAndValidate();
-    const outputDir = sm.outputDir;
-    const mode = state.mode;
-    let phases = PHASE_SEQUENCE[mode] ?? [3];
-    if (state.skipE2e === true) {
-        phases = phases.filter(p => p !== 5);
-    }
-    if (state.ship === true) {
-        phases = [...phases, 8];
-    }
-    const buildCmd = state.stack.buildCmd;
-    const testCmd = state.stack.testCmd;
-    const skipSteps = state.skipSteps ?? [];
-    // codeRoot: actual directory where code lives (may differ from projectRoot for skill projects)
-    const effectiveCodeRoot = state.codeRoot ?? projectRoot;
-    // Ship extra variables for Phase 8 prompt rendering
-    const shipExtraVars = state.ship === true
-        ? {
-            substep: "", // will be overridden per call
-            deployTarget: state.deployTarget ?? "",
-            deployBranch: state.deployBranch ?? "",
-            deployEnv: state.deployEnv ?? "green",
-            verifyMethod: state.verifyMethod ?? "",
-            verifyEndpoint: state.verifyConfig?.endpoint ?? "",
-            verifyExpectedPattern: state.verifyConfig?.expectedPattern ?? "",
-            verifyLogPath: state.verifyConfig?.logPath ?? "",
-            verifyLogKeyword: state.verifyConfig?.logKeyword ?? "",
-            verifySshHost: state.verifyConfig?.sshHost ?? "",
-        }
-        : undefined;
-    /** Build extraVars for a specific step, adding substep for Phase 8 */
-    function getExtraVars(step) {
-        if (shipExtraVars && step.startsWith("8")) {
-            return { ...shipExtraVars, substep: step };
-        }
-        return undefined;
-    }
-    // 2. Read step state
-    const stepState = await readStepState(sm.stateFilePath);
-    // 3. If no step: determine first phase, set step, return first task prompt
-    if (!stepState.step) {
-        // When status === "PASS", the current phase was completed (e.g. by tribunal_verdict)
-        // and we need to advance to the NEXT phase — not restart the current one.
-        let firstPhase;
-        if (state.status === "PASS" && state.phase && phases.includes(state.phase)) {
-            // Find the last step of the completed phase, then use computeNextStep to advance
-            const completedPhase = state.phase;
-            const lastStepOfCompleted = lastStepForPhase(completedPhase);
-            const nextStep = computeNextStep(lastStepOfCompleted, phases, skipSteps);
-            if (!nextStep) {
-                // All phases done
-                await sm.atomicUpdate({
-                    step: null, stepIteration: 0, lastValidation: "DONE",
-                    status: "COMPLETED",
-                });
-                return {
-                    done: true,
-                    step: null,
-                    agent: null,
-                    prompt: null,
-                    message: "All phases completed successfully.",
-                };
-            }
-            const nextPhase = phaseForStep(nextStep);
+/**
+ * Handle the "no step" scenario: PASS advancement, design doc compliance skip, or normal startup.
+ */
+async function resolveInitialStep(ctx, stepState) {
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
+    // When status === "PASS", the current phase was completed (e.g. by tribunal_verdict)
+    // and we need to advance to the NEXT phase — not restart the current one.
+    if (state.status === "PASS" && state.phase && phases.includes(state.phase)) {
+        const completedPhase = state.phase;
+        const lastStepOfCompleted = lastStepForPhase(completedPhase);
+        const nextStep = computeNextStep(lastStepOfCompleted, phases, skipSteps);
+        if (!nextStep) {
             await sm.atomicUpdate({
-                step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
-                phase: nextPhase, status: "IN_PROGRESS",
+                step: null, stepIteration: 0, lastValidation: "DONE",
+                status: "COMPLETED",
             });
-            const prompt = await buildTaskForStep(nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep));
             return {
-                done: false,
-                step: nextStep,
-                agent: STEP_AGENTS[nextStep] ?? null,
-                prompt,
-                message: `Phase ${completedPhase} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
+                done: true, step: null, agent: null, prompt: null,
+                message: "All phases completed successfully.",
             };
         }
-        // Normal startup: use state.phase if already mid-flow, otherwise the mode's first phase.
-        firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0];
-        let firstStep = firstStepForPhase(firstPhase);
-        // Skip Phase 1a if design doc already exists and is compliant
-        // (has AC table with ≥3 entries + solution comparison)
-        if (firstStep === "1a" && state.designDocBound) {
-            const designContent = await readFileSafe(join(outputDir, "design.md"));
-            if (designContent && designContent.length >= 100) {
-                const { compliant } = checkDesignDocCompliance(designContent);
-                if (compliant) {
-                    // Design doc is compliant — skip 1a (architect rewrite), go to 1b (review)
-                    firstStep = "1b";
-                    await sm.atomicUpdate({
-                        step: firstStep, stepIteration: 0, lastValidation: null,
-                        phase: firstPhase, status: "IN_PROGRESS",
-                    });
-                    const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
-                    return {
-                        done: false,
-                        step: firstStep,
-                        agent: STEP_AGENTS[firstStep] ?? null,
-                        prompt,
-                        message: `Design doc is compliant (has AC table + solution comparison). Skipping 1a, starting at 1b (review).`,
-                    };
-                }
-            }
-        }
-        // Single atomicUpdate: step + phase
+        const nextPhase = phaseForStep(nextStep);
         await sm.atomicUpdate({
-            step: firstStep, stepIteration: 0, lastValidation: null,
-            phase: firstPhase, status: "IN_PROGRESS",
+            step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
+            phase: nextPhase, status: "IN_PROGRESS",
         });
-        const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
+        const prompt = await buildTaskForStep(nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep));
         return {
             done: false,
-            step: firstStep,
-            agent: STEP_AGENTS[firstStep] ?? null,
+            step: nextStep,
+            agent: STEP_AGENTS[nextStep] ?? null,
             prompt,
-            message: `Starting step ${firstStep} (phase ${firstPhase}).`,
+            message: `Phase ${completedPhase} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
         };
     }
-    // 4. Step exists — validate previous step's artifacts
-    const currentStep = stepState.step;
-    const currentIteration = stepState.stepIteration;
-    const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic);
-    if (!validation.passed) {
-        // --- Tribunal FAIL: handle counter + ESCALATE ---
-        if (validation.tribunalResult) {
-            const phaseKey = String(phaseForStep(currentStep));
-            const submits = state.tribunalSubmits ?? {};
-            const count = (submits[phaseKey] ?? 0) + 1;
-            // Subagent requested: Hub unavailable or default mode — delegate to subagent.
-            // Does NOT count as crash — intentional delegation. Still increment tribunalSubmits.
-            if (validation.tribunalResult.subagentRequested) {
+    // Normal startup: use state.phase if already mid-flow, otherwise the mode's first phase.
+    const firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0];
+    let firstStep = firstStepForPhase(firstPhase);
+    // Skip Phase 1a if design doc already exists and is compliant
+    if (firstStep === "1a" && state.designDocBound) {
+        const designContent = await readFileSafe(join(outputDir, "design.md"));
+        if (designContent && designContent.length >= 100) {
+            const { compliant } = checkDesignDocCompliance(designContent);
+            if (compliant) {
+                firstStep = "1b";
                 await sm.atomicUpdate({
-                    tribunalSubmits: { ...submits, [phaseKey]: count },
+                    step: firstStep, stepIteration: 0, lastValidation: null,
+                    phase: firstPhase, status: "IN_PROGRESS",
                 });
+                const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
                 return {
                     done: false,
-                    step: currentStep,
-                    agent: null,
-                    prompt: null,
-                    escalation: {
-                        reason: "tribunal_subagent",
-                        lastFeedback: "裁决已委托给 subagent，请读取 digestPath 文件执行裁决后调用 auto_dev_tribunal_verdict 提交。",
-                        digest: validation.tribunalResult.digest,
-                        digestHash: validation.tribunalResult.digestHash,
-                        digestPath: validation.tribunalResult.digestPath,
-                    },
-                    message: `Step ${currentStep} tribunal 委托给 subagent 执行。`,
+                    step: firstStep,
+                    agent: STEP_AGENTS[firstStep] ?? null,
+                    prompt,
+                    message: `Design doc is compliant (has AC table + solution comparison). Skipping 1a, starting at 1b (review).`,
                 };
             }
-            // Parse failure: LLM responded but JSON was malformed.
-            // Return raw output for the main agent to extract the verdict itself.
-            if (validation.tribunalResult.rawParseFailure && validation.tribunalResult.rawOutput) {
-                await sm.atomicUpdate({
-                    tribunalSubmits: { ...submits, [phaseKey]: count },
-                });
-                return {
-                    done: false,
-                    step: currentStep,
-                    agent: null,
-                    prompt: null,
-                    escalation: {
-                        reason: "tribunal_parse_failure",
-                        lastFeedback: "Tribunal 返回了裁决内容但 JSON 格式不合法。请从以下原始输出中提取 verdict 和 issues，然后调用 auto_dev_tribunal_verdict 提交。",
-                        digest: validation.tribunalResult.rawOutput,
-                        digestHash: validation.tribunalResult.digestHash,
-                    },
-                    message: `Step ${currentStep} tribunal JSON 解析失败，原始输出已返回，请 agent 自行提取裁决结果。`,
-                };
-            }
-            // Crashed tribunal → full fallback needed (process-level failure)
-            if (validation.tribunalResult.crashed) {
-                // IMP-002: Enhanced TRIBUNAL_CRASH event with full stderr for observability
-                try {
-                    const crashRaw = validation.tribunalResult.crashRaw;
-                    let crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} -->`;
-                    if (crashRaw) {
-                        const parsed = JSON.parse(crashRaw);
-                        if (parsed.crashInfo) {
-                            const ci = parsed.crashInfo;
-                            const timestamp = new Date().toISOString();
-                            // Build detailed crash event with stderr snippet (avoid polluting log with huge stderr)
-                            crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} category="${ci.errorCategory}" exitCode="${ci.exitCode ?? "N/A"}" retryable="${ci.isRetryable}" timestamp="${timestamp}" -->`;
-                            // IMP-002: Append stderr summary line for quick diagnostics
-                            if (ci.stderrSnippet) {
-                                const safeSnippet = ci.stderrSnippet
-                                    .replace(/"/g, '&quot;')
-                                    .replace(/--/g, '&#45;&#45;')
-                                    .slice(0, 200); // Further limit for inline comment
-                                crashEvent += `\n<!-- TRIBUNAL_CRASH_STDERR snippet="${safeSnippet}" -->`;
-                            }
-                            // IMP-002: Write full stderr to dedicated file for detailed analysis
-                            if (ci.stderrFull) {
-                                const crashLogPath = join(outputDir, `.tribunal-crash-phase${state.phase}.log`);
-                                await writeFile(crashLogPath, `[${timestamp}] TRIBUNAL_CRASH category=${ci.errorCategory} exitCode=${ci.exitCode ?? "N/A"}\n\nSTDERR:\n${ci.stderrFull}\n\nERROR: ${ci.errMessage}\n`, "utf-8");
-                                crashEvent += `\n<!-- TRIBUNAL_CRASH_LOG path="${crashLogPath}" -->`;
-                            }
-                        }
-                    }
-                    await sm.appendToProgressLog(crashEvent);
-                }
-                catch { /* best-effort — don't block on logging failure */ }
-                await sm.atomicUpdate({
-                    tribunalSubmits: { ...submits, [phaseKey]: count },
-                });
-                return {
-                    done: false,
-                    step: currentStep,
-                    agent: null,
-                    prompt: null,
-                    escalation: {
-                        reason: "tribunal_crashed",
-                        lastFeedback: "Tribunal 进程崩溃，需要 fallback 裁决。",
-                        digest: validation.tribunalResult.digest,
-                        digestHash: validation.tribunalResult.digestHash,
-                    },
-                    message: `Step ${currentStep} tribunal 崩溃，需要 fallback。`,
-                };
-            }
-            if (count >= 3) {
-                // ESCALATE_REGRESS — regress to Phase 3
-                const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
-                if (escCount >= 2) {
-                    await sm.atomicUpdate({ status: "BLOCKED" });
-                    return {
-                        done: false, step: currentStep, agent: null, prompt: null,
-                        escalation: {
-                            reason: "tribunal_max_escalations",
-                            lastFeedback: `Phase ${phaseKey} 已 ${escCount + 1} 次 ESCALATE，需要人工介入。`,
-                        },
-                        message: `Phase ${phaseKey} 多次 ESCALATE，BLOCKED。`,
-                    };
-                }
-                await sm.atomicUpdate({
-                    phase: 3, status: "IN_PROGRESS",
-                    step: "3", stepIteration: 0, lastValidation: "ESCALATE_REGRESS", approachState: null,
-                    tribunalSubmits: {}, // Reset ALL counters
-                    phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
-                });
-                return {
-                    done: false,
-                    step: "3",
-                    agent: STEP_AGENTS["3"] ?? null,
-                    prompt: await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback),
-                    message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
-                };
-            }
-            // Tribunal FAIL but under limit — increment counter and return revision
-            await sm.atomicUpdate({
-                stepIteration: currentIteration + 1, lastValidation: "FAILED",
-                tribunalSubmits: { ...submits, [phaseKey]: count },
-            });
-            const prompt = await buildTaskForStep(currentStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback);
-            return {
-                done: false,
-                step: currentStep,
-                agent: STEP_AGENTS[currentStep] ?? null,
-                prompt,
-                message: `Step ${currentStep} tribunal FAIL (attempt ${count}/3). Revision needed.`,
-            };
         }
-        // --- regressToPhase handling (Phase 8 CODE_BUG -> regress to Phase 3) ---
-        if (validation.regressToPhase !== undefined) {
-            const currentShipRound = (state.shipRound ?? 0) + 1;
-            const maxRounds = state.shipMaxRounds ?? 5;
-            if (currentShipRound >= maxRounds) {
-                await sm.atomicUpdate({ status: "BLOCKED" });
-                return {
-                    done: false, step: currentStep, agent: null, prompt: null,
-                    escalation: {
-                        reason: "ship_max_rounds",
-                        lastFeedback: validation.feedback,
-                    },
-                    message: `Ship 已达最大轮次 (${currentShipRound}/${maxRounds})，需要人工介入。`,
-                };
-            }
-            const regressStep = firstStepForPhase(validation.regressToPhase);
-            await sm.atomicUpdate({
-                phase: validation.regressToPhase,
-                step: regressStep,
-                stepIteration: 0,
-                shipRound: currentShipRound,
-                lastValidation: "SHIP_REGRESS",
-                approachState: null,
-                status: "IN_PROGRESS",
-            });
-            const prompt = await buildTaskForStep(regressStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback);
-            return {
-                done: false,
-                step: regressStep,
-                agent: STEP_AGENTS[regressStep] ?? null,
-                prompt,
-                message: `Step ${currentStep} 远程验证失败 (CODE_BUG)，回退到 Phase ${validation.regressToPhase} (round ${currentShipRound})。`,
-            };
-        }
-        // --- Non-tribunal failure: circuit breaker + iteration logic ---
-        const approachResult = await handleApproachFailure(stepState, currentStep, outputDir, validation.feedback);
-        if (approachResult.action === "CIRCUIT_BREAK") {
-            await sm.atomicUpdate({
-                stepIteration: 0, lastValidation: "CIRCUIT_BREAK",
-                approachState: approachResult.approachState,
-            });
-            return {
+    }
+    // Single atomicUpdate: step + phase
+    await sm.atomicUpdate({
+        step: firstStep, stepIteration: 0, lastValidation: null,
+        phase: firstPhase, status: "IN_PROGRESS",
+    });
+    const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
+    return {
+        done: false,
+        step: firstStep,
+        agent: STEP_AGENTS[firstStep] ?? null,
+        prompt,
+        message: `Starting step ${firstStep} (phase ${firstPhase}).`,
+    };
+}
+/**
+ * Handle phase regression (e.g. Phase 8 CODE_BUG -> regress to Phase 3).
+ */
+async function handlePhaseRegress(ctx, currentStep, validation) {
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd } = ctx;
+    const currentShipRound = (state.shipRound ?? 0) + 1;
+    const maxRounds = state.shipMaxRounds ?? 5;
+    if (currentShipRound >= maxRounds) {
+        await sm.atomicUpdate({ status: "BLOCKED" });
+        return {
+            done: false, step: currentStep, agent: null, prompt: null,
+            escalation: {
+                reason: "ship_max_rounds",
+                lastFeedback: validation.feedback,
+            },
+            message: `Ship 已达最大轮次 (${currentShipRound}/${maxRounds})，需要人工介入。`,
+        };
+    }
+    console.error(`[orchestrator] phase regress: step=${currentStep} regressTo=${validation.regressToPhase} round=${currentShipRound}`);
+    const regressStep = firstStepForPhase(validation.regressToPhase);
+    await sm.atomicUpdate({
+        phase: validation.regressToPhase,
+        step: regressStep,
+        stepIteration: 0,
+        shipRound: currentShipRound,
+        lastValidation: "SHIP_REGRESS",
+        approachState: null,
+        status: "IN_PROGRESS",
+    });
+    const prompt = await buildTaskForStep(regressStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback);
+    return {
+        done: false,
+        step: regressStep,
+        agent: STEP_AGENTS[regressStep] ?? null,
+        prompt,
+        message: `Step ${currentStep} 远程验证失败 (CODE_BUG)，回退到 Phase ${validation.regressToPhase} (round ${currentShipRound})。`,
+    };
+}
+/**
+ * Handle circuit breaker: approach failure, circuit break, all exhausted.
+ * Returns { result, approachAction } — result is non-null if handled (CIRCUIT_BREAK / ALL_EXHAUSTED).
+ */
+async function handleCircuitBreaker(ctx, stepState, currentStep, validation) {
+    const { sm, outputDir } = ctx;
+    const approachResult = await handleApproachFailure(stepState, currentStep, outputDir, validation.feedback);
+    if (approachResult.action === "CIRCUIT_BREAK") {
+        console.error(`[orchestrator] circuit breaker: step=${currentStep} phase=${phaseForStep(currentStep)}`);
+        await sm.atomicUpdate({
+            stepIteration: 0, lastValidation: "CIRCUIT_BREAK",
+            approachState: approachResult.approachState,
+        });
+        return {
+            result: {
                 done: false,
                 step: currentStep,
                 agent: STEP_AGENTS[currentStep] ?? null,
                 prompt: approachResult.prompt,
                 freshContext: true,
                 message: `方案 "${approachResult.failedApproach}" 已熔断，切换到 "${approachResult.nextApproach}"。`,
-            };
-        }
-        if (approachResult.action === "ALL_EXHAUSTED") {
-            await sm.atomicUpdate({
-                lastValidation: "ALL_APPROACHES_EXHAUSTED", status: "BLOCKED",
-            });
-            return {
+            },
+            approachAction: approachResult,
+        };
+    }
+    if (approachResult.action === "ALL_EXHAUSTED") {
+        await sm.atomicUpdate({
+            lastValidation: "ALL_APPROACHES_EXHAUSTED", status: "BLOCKED",
+        });
+        return {
+            result: {
                 done: false, step: currentStep, agent: null, prompt: null,
                 escalation: {
                     reason: "all_approaches_exhausted",
                     lastFeedback: validation.feedback,
                 },
                 message: `Step ${currentStep} 所有方案均已失败，需要人工介入。`,
-            };
-        }
-        // CONTINUE: persist approachState if present
-        if (approachResult.approachState) {
-            await sm.atomicUpdate({ approachState: approachResult.approachState });
-        }
-        // Check iteration limit (skip if approachState exists)
-        const hasApproachState = !!(approachResult.approachState || stepState.approachState);
-        if (!hasApproachState && currentIteration >= MAX_STEP_ITERATIONS) {
-            await sm.atomicUpdate({
-                lastValidation: "ESCALATED", status: "BLOCKED",
-            });
-            return {
-                done: false, step: currentStep, agent: null, prompt: null,
-                escalation: {
-                    reason: "iteration_limit_exceeded",
-                    lastFeedback: validation.feedback,
-                },
-                message: `Step ${currentStep} exceeded maximum iterations (${MAX_STEP_ITERATIONS}). Escalating.`,
-            };
-        }
-        // Return revision prompt
-        const newIteration = currentIteration + 1;
-        // Determine revision step (1b fail -> 1c, 2b fail -> 2c, etc)
-        let revisionStep = currentStep;
-        if (currentStep === "1b")
-            revisionStep = "1c";
-        if (currentStep === "2b")
-            revisionStep = "2c";
-        if (currentStep === "5b")
-            revisionStep = "5c";
-        const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
-        await sm.atomicUpdate({
-            step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
-        });
-        let combinedFeedback = validation.feedback;
-        if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
-            combinedFeedback += `\n\n${approachResult.planFeedback}`;
-        }
-        const prompt = await buildTaskForStep(effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback, getExtraVars(effectiveStep));
-        return {
-            done: false,
-            step: effectiveStep,
-            agent: STEP_AGENTS[effectiveStep] ?? STEP_AGENTS[currentStep] ?? null,
-            prompt,
-            message: `Step ${currentStep} validation failed (iteration ${newIteration}/${MAX_STEP_ITERATIONS}). Revision needed.`,
+            },
+            approachAction: approachResult,
         };
     }
-    // 5. Validation passed — advance to next step
+    // CONTINUE: persist approachState if present
+    if (approachResult.approachState) {
+        await sm.atomicUpdate({ approachState: approachResult.approachState });
+    }
+    return { result: null, approachAction: approachResult };
+}
+/**
+ * Handle all validation failure branches: tribunal, phase regress, circuit breaker, iteration limit, revision.
+ */
+async function handleValidationFailure(ctx, stepState, validation) {
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, getExtraVars } = ctx;
+    const currentStep = stepState.step;
+    const currentIteration = stepState.stepIteration;
+    // --- Tribunal FAIL: handle counter + ESCALATE ---
+    if (validation.tribunalResult) {
+        const phaseKey = String(phaseForStep(currentStep));
+        const submits = state.tribunalSubmits ?? {};
+        const count = (submits[phaseKey] ?? 0) + 1;
+        if (validation.tribunalResult.subagentRequested) {
+            return handleTribunalSubagent(ctx, phaseKey, count, currentStep, validation.tribunalResult);
+        }
+        if (validation.tribunalResult.rawParseFailure && validation.tribunalResult.rawOutput) {
+            return handleTribunalParseFailure(ctx, phaseKey, count, currentStep, validation.tribunalResult);
+        }
+        if (validation.tribunalResult.crashed) {
+            console.error(`[orchestrator] tribunal crashed: step=${currentStep} phase=${phaseKey}`);
+            return handleTribunalCrashEscalation(ctx, phaseKey, count, currentStep, validation.tribunalResult);
+        }
+        if (count >= 3) {
+            console.error(`[orchestrator] tribunal failure limit reached: step=${currentStep} phase=${phaseKey} count=${count}`);
+            return handleTribunalEscalation(ctx, phaseKey, currentStep, validation.feedback);
+        }
+        // Tribunal FAIL but under limit — increment counter and return revision
+        await sm.atomicUpdate({
+            stepIteration: currentIteration + 1, lastValidation: "FAILED",
+            tribunalSubmits: { ...submits, [phaseKey]: count },
+        });
+        const prompt = await buildTaskForStep(currentStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback, getExtraVars(currentStep));
+        return {
+            done: false,
+            step: currentStep,
+            agent: STEP_AGENTS[currentStep] ?? null,
+            prompt,
+            message: `Step ${currentStep} tribunal FAIL (attempt ${count}/3). Revision needed.`,
+        };
+    }
+    // --- regressToPhase handling (Phase 8 CODE_BUG -> regress to Phase 3) ---
+    if (validation.regressToPhase !== undefined) {
+        return handlePhaseRegress(ctx, currentStep, { feedback: validation.feedback, regressToPhase: validation.regressToPhase });
+    }
+    // --- Non-tribunal failure: circuit breaker + iteration logic ---
+    const { result: circuitResult, approachAction: approachResult } = await handleCircuitBreaker(ctx, stepState, currentStep, validation);
+    if (circuitResult)
+        return circuitResult;
+    // Check iteration limit (skip if approachState exists)
+    const hasApproachState = !!((approachResult.action === "CONTINUE" && approachResult.approachState) || stepState.approachState);
+    if (!hasApproachState && currentIteration >= MAX_STEP_ITERATIONS) {
+        await sm.atomicUpdate({
+            lastValidation: "ESCALATED", status: "BLOCKED",
+        });
+        return {
+            done: false, step: currentStep, agent: null, prompt: null,
+            escalation: {
+                reason: "iteration_limit_exceeded",
+                lastFeedback: validation.feedback,
+            },
+            message: `Step ${currentStep} exceeded maximum iterations (${MAX_STEP_ITERATIONS}). Escalating.`,
+        };
+    }
+    // Return revision prompt
+    const newIteration = currentIteration + 1;
+    // Determine revision step (1b fail -> 1c, 2b fail -> 2c, etc)
+    let revisionStep = currentStep;
+    if (currentStep === "1b")
+        revisionStep = "1c";
+    if (currentStep === "2b")
+        revisionStep = "2c";
+    if (currentStep === "5b")
+        revisionStep = "5c";
+    const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
+    await sm.atomicUpdate({
+        step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
+    });
+    let combinedFeedback = validation.feedback;
+    if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
+        combinedFeedback += `\n\n${approachResult.planFeedback}`;
+    }
+    const prompt = await buildTaskForStep(effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback, getExtraVars(effectiveStep));
+    return {
+        done: false,
+        step: effectiveStep,
+        agent: STEP_AGENTS[effectiveStep] ?? STEP_AGENTS[currentStep] ?? null,
+        prompt,
+        message: `Step ${currentStep} validation failed (iteration ${newIteration}/${MAX_STEP_ITERATIONS}). Revision needed.`,
+    };
+}
+/**
+ * Handle validation passed: progress log, TDD gate, step advancement or completion.
+ */
+async function advanceToNextStep(ctx, currentStep, validation) {
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
     const currentPhase = phaseForStep(currentStep);
     // Write progress-log checkpoint (audit only)
     await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Step ${currentStep} passed.`) + "\n");
@@ -1153,7 +1041,7 @@ export async function computeNextTask(projectRoot, topic) {
         tribunalUpdates.tribunalSubmits = { ...(state.tribunalSubmits ?? {}), [phaseKey]: 0 };
     }
     const nextStep = computeNextStep(currentStep, phases, skipSteps);
-    // TDD global gate: block Phase 3 → Phase 4 transition if not all tasks are GREEN_CONFIRMED
+    // TDD global gate: block Phase 3 -> Phase 4 transition if not all tasks are GREEN_CONFIRMED
     if (nextStep && state.tdd === true && phaseForStep(currentStep) === 3 && phaseForStep(nextStep) >= 4) {
         const planContent = await readFileSafe(join(outputDir, "plan.md"));
         if (planContent) {
@@ -1211,5 +1099,68 @@ export async function computeNextTask(projectRoot, topic) {
         prompt,
         message: `Step ${currentStep} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
     };
+}
+// ---------------------------------------------------------------------------
+// computeNextTask — Main Step Function
+// ---------------------------------------------------------------------------
+export async function computeNextTask(projectRoot, topic) {
+    // 1. Load state via StateManager (use create() to resolve timestamp-prefixed dirs)
+    const sm = await StateManager.create(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+    const outputDir = sm.outputDir;
+    const mode = state.mode;
+    let phases = PHASE_SEQUENCE[mode] ?? [3];
+    if (state.skipE2e === true) {
+        phases = phases.filter(p => p !== 5);
+    }
+    if (state.ship === true) {
+        phases = [...phases, 8];
+    }
+    const buildCmd = state.stack.buildCmd;
+    const testCmd = state.stack.testCmd;
+    const skipSteps = state.skipSteps ?? [];
+    // codeRoot: actual directory where code lives (may differ from projectRoot for skill projects)
+    const effectiveCodeRoot = state.codeRoot ?? projectRoot;
+    // Ship extra variables for Phase 8 prompt rendering
+    const shipExtraVars = state.ship === true
+        ? {
+            substep: "", // will be overridden per call
+            deployTarget: state.deployTarget ?? "",
+            deployBranch: state.deployBranch ?? "",
+            deployEnv: state.deployEnv ?? "green",
+            verifyMethod: state.verifyMethod ?? "",
+            verifyEndpoint: state.verifyConfig?.endpoint ?? "",
+            verifyExpectedPattern: state.verifyConfig?.expectedPattern ?? "",
+            verifyLogPath: state.verifyConfig?.logPath ?? "",
+            verifyLogKeyword: state.verifyConfig?.logKeyword ?? "",
+            verifySshHost: state.verifyConfig?.sshHost ?? "",
+        }
+        : undefined;
+    /** Build extraVars for a specific step, adding substep for Phase 8 */
+    function getExtraVars(step) {
+        if (shipExtraVars && step.startsWith("8")) {
+            return { ...shipExtraVars, substep: step };
+        }
+        return undefined;
+    }
+    // Build orchestrator context for extracted sub-functions
+    const ctx = {
+        sm, state, outputDir, projectRoot, effectiveCodeRoot,
+        topic, buildCmd, testCmd, phases, skipSteps, getExtraVars,
+    };
+    // 2. Read step state
+    const stepState = await readStepState(sm.stateFilePath);
+    // 3. If no step: determine first phase, set step, return first task prompt
+    if (!stepState.step) {
+        return resolveInitialStep(ctx, stepState);
+    }
+    // 4. Step exists — validate previous step's artifacts
+    const currentStep = stepState.step;
+    const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic);
+    if (!validation.passed) {
+        return handleValidationFailure(ctx, stepState, validation);
+    }
+    // 5. Validation passed — advance to next step
+    return advanceToNextStep(ctx, currentStep, validation);
 }
 //# sourceMappingURL=orchestrator.js.map
