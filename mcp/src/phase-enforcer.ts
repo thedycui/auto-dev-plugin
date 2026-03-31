@@ -173,9 +173,9 @@ export function computeNextDirective(
     phaseCompleted: true,
     nextPhase,
     nextPhaseName: nextMeta?.name ?? `Phase ${nextPhase}`,
-    mandate: `[MANDATORY] Phase ${currentPhase} 已通过。必须立即执行 Phase ${nextPhase} (${nextMeta?.description ?? ""})。` +
-      ` 调用 auto_dev_preflight(phase=${nextPhase}) 开始。` +
-      ` 禁止跳过，禁止向用户宣称任务完成。`,
+    mandate: `[MANDATORY] Phase ${currentPhase} 已通过。现在立即调用 auto_dev_next(projectRoot, topic) 进入 Phase ${nextPhase} (${nextMeta?.description ?? ""})。` +
+      ` 禁止做其他任何操作（禁止 git push、禁止部署、禁止向用户宣称完成）。` +
+      ` 你是调度器，必须通过 Agent tool 派发子 agent 执行任务，禁止自己执行。`,
     canDeclareComplete: false,
   };
 }

@@ -1969,6 +1969,14 @@ server.tool(
   },
   async ({ projectRoot, topic }) => {
     const result = await computeNextTask(projectRoot, topic);
+    // Inject mandatory dispatch instruction when framework assigns an agent
+    if (result.agent && result.prompt) {
+      result.mandate =
+        `[MANDATORY] 你是 orchestrator（调度器），不是执行者。` +
+        `必须使用 Agent tool 将此任务派发给 ${result.agent} 子 agent（subagent_type="${result.agent}"）。` +
+        `禁止自己执行 prompt 中的任务（禁止直接 Edit/Write 项目源码、禁止自己跑测试、禁止自己写文档）。` +
+        `子 agent 完成后，立即调用 auto_dev_next(projectRoot, topic) 获取下一步。`;
+    }
     return textResult(result);
   },
 );

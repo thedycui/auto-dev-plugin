@@ -85,6 +85,8 @@ export interface NextTaskResult {
   };
   /** When true, the prompt should be executed in a fresh subagent context (clean slate, no prior failure context) */
   freshContext?: boolean;
+  /** Mandatory instruction for the main agent — MUST be followed, not a suggestion */
+  mandate?: string;
   /** Informational message */
   message: string;
 }

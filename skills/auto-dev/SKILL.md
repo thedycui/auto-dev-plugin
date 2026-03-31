@@ -28,14 +28,32 @@ auto_dev_init(projectRoot, topic, mode?, skipE2e?, tdd?, costMode?, onConflict?,
 
 ### 2. 循环执行
 
+**⚠️ 强制规则（违反任何一条 = 流程作废）：**
+
+1. **你是纯调度器（orchestrator）。** 你的唯一职责：
+   - 调用 `auto_dev_next` 获取任务
+   - 用 `Agent(subagent_type=result.agent, prompt=result.prompt)` 派发子 agent
+   - 子 agent 完成后再调用 `auto_dev_next`
+
+2. **禁止事项：**
+   - ❌ 自己执行 prompt 中的任务（禁止直接 Edit/Write 项目源码、禁止自己跑测试、禁止自己写设计/计划文档）
+   - ❌ 跳过任何 step（每个 step 都必须走完，不能因为"简单"就跳过）
+   - ❌ 在 auto-dev 流程完成前（done=true 之前）执行 git push 或部署
+   - ❌ 不调用 auto_dev_next 就宣称任务完成
+   - ❌ 忽略 mandate 字段（auto_dev_next 和 checkpoint 返回的 mandate 是强制指令）
+
+3. **escalation 处理：**
+   - `tribunal_subagent` → 自动派发 reviewer agent 执行裁决（不中断流程）
+   - 其他 escalation → 告知用户，等待用户决定
+
 ```
 result = auto_dev_next(projectRoot, topic)
 while !result.done:
-  if result.task:
-    Agent(subagent_type=result.agentType, prompt=result.task, model=result.model)
+  if result.prompt:
+    // 必须 dispatch 子 agent，禁止自己执行
+    Agent(subagent_type=result.agent, prompt=result.prompt, model=result.model)
   elif result.escalation:
     if result.escalation.reason == "tribunal_subagent":
-      // 自动启动 subagent 执行裁决（不中断流程）
       digestPath = result.escalation.digestPath
       Agent(subagent_type="auto-dev-reviewer", prompt="""
         你是独立裁决者。请先用 Read 工具读取文件 "{digestPath}"，
@@ -47,7 +65,6 @@ while !result.done:
       result = auto_dev_next(projectRoot, topic)
       continue
     else:
-      // 其他 escalation（tribunal_crashed, tribunal_parse_failure, iteration_limit 等）
       告知用户: result.escalation.reason + result.escalation.feedback
       等待用户决定后继续或终止
       break
@@ -56,8 +73,9 @@ while !result.done:
 
 每次调用 `auto_dev_next`：
 - 框架验证上一步产出（编译、测试、文档审查等）
-- 返回下一个任务的 prompt 和建议的 agent 类型
+- 返回下一个任务的 prompt、指定的 agent 类型、以及 mandate（强制指令）
 - 你用 Agent() 派发 subagent 执行，subagent 有完整的工具能力
+- **你不执行任何实际工作，只负责调度和传递**
 
 ### 3. 查看状态
 
