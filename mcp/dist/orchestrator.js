@@ -69,7 +69,13 @@ const STEP_AGENTS = {
     "8d": "auto-dev-developer",
 };
 /** Ordered step transitions (happy path) */
-const STEP_ORDER = ["1a", "1b", "1c", "2a", "2b", "2c", "3", "4a", "5a", "5b", "5c", "6", "7", "8a", "8b", "8c", "8d"];
+const STEP_ORDER = ["1a", "1b", "2a", "2b", "3", "4a", "5a", "5b", "6", "7", "8a", "8b", "8c", "8d"];
+/** Map revision steps back to their review counterparts for step progression */
+const REVISION_TO_REVIEW = {
+    "1c": "1b",
+    "2c": "2b",
+    "5c": "5b",
+};
 const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
 const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills", "auto-dev");
 // ---------------------------------------------------------------------------
@@ -201,7 +207,10 @@ export function lastStepForPhase(phase) {
  * is not in the mode's phase sequence.
  */
 export function computeNextStep(currentStep, phases, skipSteps) {
-    const idx = STEP_ORDER.indexOf(currentStep);
+    // Revision steps (1c/2c/5c) are not in STEP_ORDER — map them back to
+    // their review counterpart so we can find the correct next step.
+    const lookupStep = REVISION_TO_REVIEW[currentStep] ?? currentStep;
+    const idx = STEP_ORDER.indexOf(lookupStep);
     if (idx < 0)
         return null;
     for (let i = idx + 1; i < STEP_ORDER.length; i++) {
