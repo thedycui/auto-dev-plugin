@@ -41,6 +41,7 @@ auto_dev_init(projectRoot, topic, mode?, skipE2e?, tdd?, costMode?, onConflict?,
    - ❌ 在 auto-dev 流程完成前（done=true 之前）执行 git push 或部署
    - ❌ 不调用 auto_dev_next 就宣称任务完成
    - ❌ 忽略 mandate 字段（auto_dev_next 和 checkpoint 返回的 mandate 是强制指令）
+   - ❌ 默认设置 skipE2e=true（除非用户明确要求跳过 E2E 测试，否则必须保持 skipE2e=false）
 
 3. **escalation 处理：**
    - `tribunal_subagent` → 自动派发 reviewer agent 执行裁决（不中断流程）
