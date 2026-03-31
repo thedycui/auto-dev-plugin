@@ -615,13 +615,26 @@ server.tool(
     const state = await sm.loadAndValidate();
 
     // Guard 0: In orchestrator mode, checkpoint is managed by auto_dev_next.
-    // Only allow non-PASS checkpoints (e.g. IN_PROGRESS) or tribunal-forced overrides.
-    if (state.step != null && status === "PASS" && (TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
-      return textResult({
-        error: "USE_AUTO_DEV_NEXT",
-        message: `当前使用 orchestrator 模式，Phase ${phase} 的验证和推进由 auto_dev_next 自动处理。请调用 auto_dev_next(projectRoot, topic) 推进流程，不要手动调用 checkpoint 或 submit。`,
-        mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
-      });
+    // [FIX-2] Block ALL phase changes in orchestrator mode, not just PASS.
+    // Allowing IN_PROGRESS checkpoint with a different phase creates phase/step
+    // inconsistency because internalCheckpoint does not update the step field.
+    if (state.step != null) {
+      // Block PASS for tribunal phases (original guard)
+      if (status === "PASS" && (TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+        return textResult({
+          error: "USE_AUTO_DEV_NEXT",
+          message: `当前使用 orchestrator 模式，Phase ${phase} 的验证和推进由 auto_dev_next 自动处理。请调用 auto_dev_next(projectRoot, topic) 推进流程，不要手动调用 checkpoint 或 submit。`,
+          mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
+        });
+      }
+      // Block phase changes that don't match current state (prevents phase/step desync)
+      if (phase !== state.phase) {
+        return textResult({
+          error: "PHASE_STEP_DESYNC",
+          message: `当前使用 orchestrator 模式（step=${state.step}），不允许通过 checkpoint 修改 phase（当前=${state.phase}，请求=${phase}）。phase 变更由 auto_dev_next 自动管理。`,
+          mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程，禁止手动修改 phase。",
+        });
+      }
     }
 
     // Idempotency check

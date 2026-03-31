@@ -577,7 +577,14 @@ async function handleTribunalParseFailure(
   currentStep: string,
   tribunalResult: EvalTribunalResult,
 ): Promise<NextTaskResult> {
-  const { sm, state } = ctx;
+  const { sm, state, outputDir } = ctx;
+  // [FIX-4] Write rawOutput to file instead of returning inline (can be 2MB+, causes MCP overflow).
+  let rawOutputRef = "";
+  if (tribunalResult.rawOutput) {
+    const rawOutputPath = join(outputDir, `tribunal-raw-phase${phaseKey}.txt`);
+    await writeFile(rawOutputPath, tribunalResult.rawOutput, "utf-8");
+    rawOutputRef = ` 原始输出已保存到 ${rawOutputPath}，请读取后提取 verdict 和 issues。`;
+  }
   await sm.atomicUpdate({
     tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
   });
@@ -588,11 +595,10 @@ async function handleTribunalParseFailure(
     prompt: null,
     escalation: {
       reason: "tribunal_parse_failure",
-      lastFeedback: "Tribunal 返回了裁决内容但 JSON 格式不合法。请从以下原始输出中提取 verdict 和 issues，然后调用 auto_dev_tribunal_verdict 提交。",
-      digest: tribunalResult.rawOutput,
+      lastFeedback: `Tribunal 返回了裁决内容但 JSON 格式不合法。${rawOutputRef}然后调用 auto_dev_tribunal_verdict 提交。`,
       digestHash: tribunalResult.digestHash,
     },
-    message: `Step ${currentStep} tribunal JSON 解析失败，原始输出已返回，请 agent 自行提取裁决结果。`,
+    message: `Step ${currentStep} tribunal JSON 解析失败，原始输出已保存到文件。`,
   };
 }
 
@@ -606,8 +612,15 @@ async function handleTribunalCrashEscalation(
   currentStep: string,
   tribunalResult: EvalTribunalResult,
 ): Promise<NextTaskResult> {
-  const { sm, state } = ctx;
+  const { sm, state, outputDir } = ctx;
   await handleTribunalCrash(ctx, tribunalResult.crashRaw);
+  // [FIX-4b] Write digest to file to avoid MCP overflow
+  let digestRef = "";
+  if (tribunalResult.digest) {
+    const digestPath = join(outputDir, `tribunal-digest-phase${phaseKey}.txt`);
+    await writeFile(digestPath, tribunalResult.digest, "utf-8");
+    digestRef = ` Digest 已保存到 ${digestPath}`;
+  }
   await sm.atomicUpdate({
     tribunalSubmits: { ...(state.tribunalSubmits ?? {}), [phaseKey]: count },
   });
@@ -618,8 +631,7 @@ async function handleTribunalCrashEscalation(
     prompt: null,
     escalation: {
       reason: "tribunal_crashed",
-      lastFeedback: "Tribunal 进程崩溃，需要 fallback 裁决。",
-      digest: tribunalResult.digest,
+      lastFeedback: `Tribunal 进程崩溃，需要 fallback 裁决。${digestRef}`,
       digestHash: tribunalResult.digestHash,
     },
     message: `Step ${currentStep} tribunal 崩溃，需要 fallback。`,
@@ -1344,6 +1356,27 @@ async function advanceToNextStep(
 ): Promise<NextTaskResult> {
   const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
   const currentPhase = phaseForStep(currentStep);
+
+  // [FIX-1] Revision steps (1c/2c/5c) are not in STEP_ORDER.
+  // When a revision step passes, go back to the parent step for re-validation
+  // instead of calling computeNextStep (which would return null → premature done=true).
+  const REVISION_TO_PARENT: Record<string, string> = { "1c": "1b", "2c": "2b", "5c": "5b" };
+  const parentStep = REVISION_TO_PARENT[currentStep];
+  if (parentStep) {
+    await sm.appendToProgressLog(
+      "\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Revision step ${currentStep} passed. Re-validating ${parentStep}.`) + "\n",
+    );
+    await sm.atomicUpdate({
+      step: parentStep, stepIteration: 0, lastValidation: null, approachState: null,
+    });
+    return {
+      done: false,
+      step: parentStep,
+      agent: null,
+      prompt: null,
+      message: `Revision step ${currentStep} completed. Re-validating parent step ${parentStep}.`,
+    };
+  }
 
   // Write progress-log checkpoint (audit only)
   await sm.appendToProgressLog(
