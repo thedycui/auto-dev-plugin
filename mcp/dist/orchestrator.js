@@ -514,10 +514,21 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
             if (!validation.valid) {
                 return { passed: false, feedback: validation.errors.join(" ") };
             }
-            if (content && /\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
-                const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues)\s*\n([\s\S]*?)(?=\n##|$)/);
-                const feedback = feedbackMatch?.[1]?.trim() ?? "设计审查未通过，请根据审查意见修订设计方案。";
-                return { passed: false, feedback };
+            if (content) {
+                // Extract only the 结论 section to avoid false positives from historical/example text
+                const conclusionMatch = content.match(/##\s*结论\s*\n([\s\S]*?)(?=\n##|$)/i);
+                const conclusionText = conclusionMatch?.[1]?.trim() ?? "";
+                if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(conclusionText)) {
+                    const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues|P0|P1)\s*\n([\s\S]*?)(?=\n##|$)/i);
+                    const feedback = feedbackMatch?.[1]?.trim() ?? `设计审查未通过（结论：${conclusionText || "NEEDS_REVISION"}），请根据审查意见修订设计方案。`;
+                    return { passed: false, feedback };
+                }
+                if (!conclusionMatch) {
+                    // No 结论 section found — fall back to full-text scan but warn
+                    if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
+                        return { passed: false, feedback: "design-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。" };
+                    }
+                }
             }
             return { passed: true, feedback: "" };
         }
@@ -536,10 +547,21 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
             if (!validation.valid) {
                 return { passed: false, feedback: validation.errors.join(" ") };
             }
-            if (content && /\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
-                const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues)\s*\n([\s\S]*?)(?=\n##|$)/);
-                const feedback = feedbackMatch?.[1]?.trim() ?? "计划审查未通过，请根据审查意见修订实施计划。";
-                return { passed: false, feedback };
+            if (content) {
+                // Extract only the 结论 section to avoid false positives from historical/example text
+                const conclusionMatch = content.match(/##\s*结论\s*\n([\s\S]*?)(?=\n##|$)/i);
+                const conclusionText = conclusionMatch?.[1]?.trim() ?? "";
+                if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(conclusionText)) {
+                    const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues|P0|P1)\s*\n([\s\S]*?)(?=\n##|$)/i);
+                    const feedback = feedbackMatch?.[1]?.trim() ?? `计划审查未通过（结论：${conclusionText || "NEEDS_REVISION"}），请根据审查意见修订实施计划。`;
+                    return { passed: false, feedback };
+                }
+                if (!conclusionMatch) {
+                    // No 结论 section found — fall back to full-text scan but warn
+                    if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
+                        return { passed: false, feedback: "plan-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。" };
+                    }
+                }
             }
             return { passed: true, feedback: "" };
         }
