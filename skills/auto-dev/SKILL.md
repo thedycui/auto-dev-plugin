@@ -51,8 +51,24 @@ auto_dev_init(projectRoot, topic, mode?, skipE2e?, tdd?, costMode?, onConflict?,
 result = auto_dev_next(projectRoot, topic)
 while !result.done:
   if result.prompt:
-    // 必须 dispatch 子 agent，禁止自己执行
-    Agent(subagent_type=result.agent, prompt=result.prompt, model=result.model)
+    // Step 3 并行优化：按 task 拆分并行派发，其余 step 保持单 agent 派发
+    if result.step === "3":
+      // 1. 读取 {outputDir}/plan.md，解析所有 Task（格式：`- [ ] Task N: ...`）
+      // 2. 提取每个 task 关联的文件列表（plan 中 task 描述里提到的文件名）
+      // 3. 按文件重叠分 Wave：文件无重叠 → 同 Wave 并行；有重叠 → 下一 Wave 顺序执行
+      // 4. 构造每个 task 的 scoped_prompt：
+      //    = result.prompt 的共享 header（项目根目录/输出目录/构建命令等）
+      //      + 单个 task 描述（只包含该 task 的内容与完成标准）
+      // 5. 对每个 Wave，在同一条消息里并行 dispatch（一条消息多个 Agent 调用）：
+      for each wave in waves:
+        parallel:
+          for each task in wave:
+            Agent(subagent_type="auto-dev:auto-dev-developer", prompt=scoped_prompt(task), model=result.model)
+        // 等本 Wave 所有 agent 完成后才进下一 Wave
+      // 6. 所有 Wave 完成后正常调用 auto_dev_next（不在此处调用，由循环末尾处理）
+    else:
+      // 必须 dispatch 子 agent，禁止自己执行
+      Agent(subagent_type=result.agent, prompt=result.prompt, model=result.model)
   elif result.escalation:
     if result.escalation.reason == "tribunal_subagent":
       digestPath = result.escalation.digestPath
