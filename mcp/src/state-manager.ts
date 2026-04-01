@@ -125,6 +125,18 @@ function parseStackVariables(content: string): Record<string, string> {
 // ---------------------------------------------------------------------------
 
 /** Format current date as YYYYMMDD-HHMM for directory name prefix. */
+/**
+ * Sanitize a string for use as a directory name across OS (Windows, macOS, Linux).
+ * Removes/replaces characters illegal in Windows paths: : * ? " < > | \ /
+ * Also collapses whitespace and trims.
+ */
+function sanitizePathSegment(s: string): string {
+  return s
+    .replace(/[:*?"<>|\\\/]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function formatTimestampPrefix(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -150,7 +162,7 @@ export class StateManager {
   static async create(projectRoot: string, topic: string): Promise<StateManager> {
     const base = join(resolve(projectRoot), OUTPUT_BASE);
     const existingDir = await StateManager.findExistingTopicDir(base, topic);
-    const dirName = existingDir ?? `${formatTimestampPrefix()}-${topic}`;
+    const dirName = existingDir ?? `${formatTimestampPrefix()}-${sanitizePathSegment(topic)}`;
     return new StateManager(projectRoot, topic, join(base, dirName));
   }
 
@@ -159,17 +171,23 @@ export class StateManager {
    * Checks exact match (backward compat) then `*-{topic}` pattern.
    */
   private static async findExistingTopicDir(base: string, topic: string): Promise<string | undefined> {
-    // 1. Exact match (old-style dirs without timestamp)
-    const exact = join(base, topic);
-    if (await fileExists(exact)) return topic;
+    const safeTopic = sanitizePathSegment(topic);
+    // 1. Exact match with sanitized topic (old-style dirs without timestamp)
+    const exact = join(base, safeTopic);
+    if (await fileExists(exact)) return safeTopic;
+    // Also try raw topic for backward compat with existing dirs
+    if (safeTopic !== topic) {
+      const rawExact = join(base, topic);
+      if (await fileExists(rawExact)) return topic;
+    }
 
     // 2. Scan for timestamp-prefixed match: YYYYMMDD-HHMM-{topic}
     try {
       const entries = await readdir(base);
-      // Look for dirs ending with `-{topic}`, preferring the latest (sort desc by prefix)
+      // Look for dirs ending with `-{safeTopic}` or `-{topic}` (raw), preferring the latest
       const matches = entries
         .filter(e => {
-          if (!e.endsWith(`-${topic}`)) return false;
+          if (!e.endsWith(`-${safeTopic}`) && !e.endsWith(`-${topic}`)) return false;
           // Skip .bak directories
           if (e.includes(".bak")) return false;
           // Must be a directory
@@ -186,7 +204,7 @@ export class StateManager {
   constructor(projectRoot: string, topic: string, outputDirOverride?: string) {
     this.projectRoot = resolve(projectRoot);
     this.topic = topic;
-    this.outputDir = outputDirOverride ?? join(this.projectRoot, OUTPUT_BASE, topic);
+    this.outputDir = outputDirOverride ?? join(this.projectRoot, OUTPUT_BASE, sanitizePathSegment(topic));
     this.stateFilePath = join(this.outputDir, STATE_FILE);
     this.progressLogPath = join(this.outputDir, PROGRESS_LOG);
   }
