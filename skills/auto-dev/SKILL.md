@@ -14,7 +14,7 @@ auto_dev_init(projectRoot, topic, mode?, skipE2e?, tdd?, costMode?, onConflict?,
 ```
 
 - `mode` — `full`（默认）/ `quick`（跳过设计计划）/ `turbo`（仅实现）。**bugfix 类型不传 mode 时框架自动选 quick**
-- `costMode` — `beast`（默认，全部最强模型）/ `economy`（按阶段选模型）
+- `costMode` — `economy`（默认，按阶段选模型）/ `beast`（全部最强模型）
 - `onConflict` — `resume`（恢复上次）/ `overwrite`（覆盖重来）
 - `designDoc` — 指定已有设计文档路径（如 `docs/design-xxx.md`），自动复制并跳过重新设计
   - 不指定时，框架自动匹配 `docs/design-*{topic}*.md`

@@ -387,7 +387,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     behaviorUpdates["tdd"] = tdd === true; // TDD off by default, --tdd to enable
     if (brainstorm)
         behaviorUpdates["brainstorm"] = true;
-    behaviorUpdates["costMode"] = costMode ?? "beast"; // beast=全部最强(默认), economy=按阶段选模型
+    behaviorUpdates["costMode"] = costMode ?? "economy"; // economy=按阶段选模型(默认), beast=全部最强
     if (mode === "full" && (estimatedLines ?? 999) <= 50 && (estimatedFiles ?? 999) <= 3) {
         behaviorUpdates["skipSteps"] = ["1b", "2b"];
     }
