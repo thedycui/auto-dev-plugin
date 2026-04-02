@@ -89,6 +89,21 @@
 ## TC-2: ...
 ```
 
+## AC 绑定规范
+
+5. 读取 `{output_dir}/acceptance-criteria.json`（如存在），对所有 `layer: "test-bound"` 的 AC：
+   - 为每条 AC 设计至少一个对应测试用例
+   - 在测试用例标题中标注 `[AC-N]` 前缀
+
+每个 `layer: "test-bound"` 的 AC 必须在测试代码中有对应标注：
+
+**Java**: `@DisplayName("[AC-1] 描述")` 或方法名 `AC1_methodName`
+**TypeScript**: `test("[AC-1] description", ...)` 或 `describe("AC-1: ...", ...)`
+**Python**: `def test_ac1_description():` 或 `@pytest.mark.ac("AC-1")`
+
+验收阶段框架会自动扫描这些标注并运行对应测试，作为 AC 的自动验证。
+**未绑定测试的 test-bound AC 会导致验收阶段前置检查失败。**
+
 ## Anti-Laziness Rule
 
 **禁止偷工减料的测试覆盖**：
@@ -104,6 +119,20 @@
 
 - 如果某功能点没有负向/边界测试，必须标注 `-` 并说明原因
 - **测试用例数 < 功能点数 x 2 时**，必须解释为什么覆盖充分
+
+## AC 绑定矩阵
+
+如果 `acceptance-criteria.json` 存在且包含 `layer: "test-bound"` 的 AC，在覆盖矩阵后附加 AC 绑定矩阵：
+
+```markdown
+## AC 绑定矩阵
+
+| AC | 描述 | 绑定测试 | 测试文件 |
+|----|------|---------|---------|
+| AC-1 | 传入空列表时返回 400 | TC-3: [AC-1] shouldReturn400... | UserServiceTest.java |
+| AC-2 | max-retry 默认值为 3 | (structural, 无需绑定) | — |
+| AC-3 | 代码风格一致 | (manual, 无需绑定) | — |
+```
 
 ## Review Checklist
 

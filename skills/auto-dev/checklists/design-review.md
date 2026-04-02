@@ -53,3 +53,10 @@
 - [ ] 有架构图 / 流程图？
 - [ ] 技术约束和假设显式声明？
 - [ ] 迁移路径（如果替换旧系统）？
+
+## I. 结构化 AC 审查
+- [ ] acceptance-criteria.json 文件已生成且 schema 合法？
+- [ ] 每条 AC 都有 layer 标注（structural / test-bound / manual）？
+- [ ] structural 类型的 AC 断言是否合理（path 是否可能存在、pattern 是否正确）？
+- [ ] manual 占比是否 <= 40%？
+- [ ] test-bound 类型的 AC 描述是否足够具体，让 Phase 5 能写出对应测试？

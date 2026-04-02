@@ -60,14 +60,28 @@ const PHASE_6_CHECKLIST = `## 裁决检查清单（Phase 6: 验收裁决）
 
 > **审查范围约束**: 只验证本次任务的验收标准（AC），不得引入任务范围外的要求。P0/P1 必须关联具体的验收标准（acRef）。
 
-### 验收标准逐条验证
-- [ ] 从 design.md 中提取每条验收标准（AC）
+### A. 框架自动验证（硬数据，最高权重）
+- [ ] 读取 framework-ac-results.json（如存在）
+- [ ] Layer 1 (structural) 有 FAIL 项？→ 直接 FAIL（除非 Agent 给出充分的 AC 定义缺陷证据）
+- [ ] Layer 2 (test-bound) 有 FAIL 项？→ 直接 FAIL（测试不通过 = AC 未满足）
+- [ ] 框架 PASS 项与 Agent 报告一致？不一致则以框架结果为准
+
+### B. AC 绑定完整性
+- [ ] 所有 test-bound AC 是否都有绑定测试？
+- [ ] 是否有 AC 被降级为 manual？如果有，降级理由是否充分？
+- [ ] structural 断言是否覆盖了 AC 描述的关键点？
+
+### C. Manual AC 验证
+- [ ] 从 design.md 中提取 manual AC（或所有 AC 如无 framework-ac-results.json）
+- [ ] Agent 的主观判断是否有充分的代码证据？
 - [ ] 对每条标准，在 diff 中找到对应实现
 - [ ] 找不到实现的标准 → FAIL
 - [ ] SKIP 必须有合理理由（真的做不到，不是偷懒）
 
-### 输出要求
-- AC 验证表：AC: {描述} → PASS/FAIL/SKIP → {证据或原因}
+### D. 输出要求
+- AC 验证表（含层级、验证方式、框架结果引用）
+- 框架 FAIL 分析（如有）
+- AC: {描述} → PASS/FAIL/SKIP → {证据或原因}
 `;
 const PHASE_7_CHECKLIST = `## 裁决检查清单（Phase 7: 复盘裁决）
 

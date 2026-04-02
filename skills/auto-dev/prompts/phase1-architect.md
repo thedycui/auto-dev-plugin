@@ -49,6 +49,53 @@
 - 例：`AC-N: 关键数据转换节点有 WARN 级别日志，包含输入/输出值和类型，可通过 grep '[TRACE]' 验证`
 - 例：`AC-N: 外部 API 调用有日志记录请求摘要和响应状态，便于部署后定位问题`
 
+8. **结构化验收标准** — 在写入 design.md 的同时，将 AC 以结构化格式写入 `{output_dir}/acceptance-criteria.json`
+
+### acceptance-criteria.json 编写指南
+
+每条 AC 需要指定验证层级：
+- `structural`：可以通过文件检查、配置值检查验证的 AC — 必须写 structuralAssertions
+- `test-bound`：需要通过运行测试验证的功能行为 AC — 测试阶段会绑定测试，此处无需写断言
+- `manual`：无法自动验证的 AC（架构合理性、代码风格等）
+
+**约束**：`manual` 占比不得超过 40%。
+
+structural 断言可用类型：
+- `file_exists`：检查文件存在（支持 glob）
+- `file_not_exists`：检查文件已删除
+- `file_contains`：检查文件包含特定内容（正则表达式）
+- `file_not_contains`：检查文件不包含特定内容
+- `config_value`：检查 JSON 配置文件中的键值（点分隔路径）
+- `build_succeeds`：编译通过
+- `test_passes`：指定测试通过
+
+示例：
+```json
+{
+  "version": 1,
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "传入空列表时返回 400 错误码",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-2",
+      "description": "新增配置项 max-retry 默认值为 3",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "file_contains", "path": "src/main/resources/application.yml", "pattern": "max-retry:\\s*3" }
+      ]
+    },
+    {
+      "id": "AC-3",
+      "description": "代码风格一致",
+      "layer": "manual"
+    }
+  ]
+}
+```
+
 ## Constraints
 
 - 不过度设计（YAGNI）

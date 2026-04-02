@@ -13,7 +13,10 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRevisionPrompt, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from "./orchestrator-prompts.js";
 import { StateManager, extractTaskList } from "./state-manager.js";
-import { validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, } from "./phase-enforcer.js";
+import { validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, validateAcIntegrity, } from "./phase-enforcer.js";
+import { runStructuralAssertions } from "./ac-runner.js";
+import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
+import { AcceptanceCriteriaSchema } from "./ac-schema.js";
 import { evaluateTribunal } from "./tribunal.js";
 import { TemplateRenderer } from "./template-renderer.js";
 // ---------------------------------------------------------------------------
@@ -619,6 +622,68 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
             };
         }
         case "6": {
+            // AC framework execution — runs before Tribunal
+            const acJsonPath = join(outputDir, "acceptance-criteria.json");
+            const effectiveCodeRoot = state.codeRoot ?? projectRoot;
+            let acContent = null;
+            try {
+                acContent = await readFileSafe(acJsonPath);
+            }
+            catch { /* no AC JSON → legacy flow */ }
+            if (acContent) {
+                // 1. Hash integrity check (tamper detection)
+                const progressLog = await readFileSafe(join(outputDir, "progress-log.md")) ?? "";
+                const integrityResult = validateAcIntegrity(acContent, progressLog);
+                if (!integrityResult.valid) {
+                    return {
+                        passed: false,
+                        feedback: `[BLOCKED] ${integrityResult.error}`,
+                    };
+                }
+                // 2. Parse AC JSON
+                const acData = AcceptanceCriteriaSchema.parse(JSON.parse(acContent));
+                // 3. Check test-bound AC binding coverage
+                const bindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+                const coverage = validateAcBindingCoverage(acData.criteria, bindings);
+                if (coverage.missing.length > 0) {
+                    return {
+                        passed: false,
+                        feedback: `[BLOCKED] Test-bound AC missing bindings: ${coverage.missing.join(", ")}. ` +
+                            `Please go back to Phase 5 and add [AC-N] annotations to test code, ` +
+                            `or downgrade these ACs to manual in acceptance-criteria.json (requires Phase 1 re-approval).`,
+                    };
+                }
+                // 4. Run structural assertions (Layer 1)
+                const structuralResults = await runStructuralAssertions(acData.criteria, effectiveCodeRoot, { buildCmd, testCmd });
+                // 5. Run test-bound tests (Layer 2)
+                const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, testCmd);
+                // 6. Write framework-ac-results.json
+                const frameworkResults = {
+                    structural: structuralResults,
+                    testBound: Object.fromEntries(testResults),
+                    pendingManual: acData.criteria
+                        .filter((c) => c.layer === "manual")
+                        .map((c) => c.id),
+                    timestamp: new Date().toISOString(),
+                };
+                await writeFile(join(outputDir, "framework-ac-results.json"), JSON.stringify(frameworkResults, null, 2));
+                // 7. Check for failures — short-circuit if structural or test-bound FAIL
+                const structuralFails = Object.entries(structuralResults)
+                    .filter(([, v]) => !v.passed).map(([id]) => id);
+                const testFails = [...testResults.entries()]
+                    .filter(([, v]) => !v.passed).map(([id]) => id);
+                if (structuralFails.length > 0 || testFails.length > 0) {
+                    return {
+                        passed: false,
+                        feedback: [
+                            structuralFails.length > 0 ? `Structural AC FAIL: ${structuralFails.join(", ")}` : "",
+                            testFails.length > 0 ? `Test-bound AC FAIL: ${testFails.join(", ")}` : "",
+                            "See framework-ac-results.json for details.",
+                        ].filter(Boolean).join("\n"),
+                    };
+                }
+            }
+            // Proceed to Tribunal (handles manual AC + overall acceptance)
             const eval6 = await evaluateTribunal(projectRoot, outputDir, 6, topic, "Phase 6 acceptance", state.startCommit);
             return {
                 passed: eval6.verdict === "PASS",

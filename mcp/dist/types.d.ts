@@ -5,6 +5,7 @@
  * TypeScript interfaces are inferred from schemas via `z.infer<>`.
  */
 import { z } from "zod/v4";
+export type { AcceptanceCriterion, AcceptanceCriteria, AssertionType, } from "./ac-schema.js";
 export declare const ModeSchema: z.ZodEnum<{
     full: "full";
     quick: "quick";
@@ -46,11 +47,11 @@ export declare const LessonEntrySchema: z.ZodObject<{
     id: z.ZodOptional<z.ZodString>;
     phase: z.ZodNumber;
     category: z.ZodEnum<{
+        pattern: "pattern";
         pitfall: "pitfall";
         highlight: "highlight";
         process: "process";
         technical: "technical";
-        pattern: "pattern";
         "iteration-limit": "iteration-limit";
         tribunal: "tribunal";
     }>;
@@ -197,9 +198,9 @@ export declare const StateJsonSchema: z.ZodObject<{
     deployBranch: z.ZodOptional<z.ZodString>;
     deployEnv: z.ZodOptional<z.ZodString>;
     verifyMethod: z.ZodOptional<z.ZodEnum<{
+        test: "test";
         api: "api";
         log: "log";
-        test: "test";
         combined: "combined";
     }>>;
     verifyConfig: z.ZodOptional<z.ZodObject<{
@@ -245,9 +246,9 @@ export declare const InitInputSchema: z.ZodObject<{
     deployBranch: z.ZodOptional<z.ZodString>;
     deployEnv: z.ZodOptional<z.ZodString>;
     verifyMethod: z.ZodOptional<z.ZodEnum<{
+        test: "test";
         api: "api";
         log: "log";
-        test: "test";
         combined: "combined";
     }>>;
     verifyConfig: z.ZodOptional<z.ZodObject<{

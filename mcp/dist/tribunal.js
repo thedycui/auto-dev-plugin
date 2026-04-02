@@ -829,4 +829,5 @@ export function buildTribunalLog(phase, verdict, source = "claude-p") {
     log += `## Raw Output\n\`\`\`\n${verdict.raw}\n\`\`\`\n`;
     return log;
 }
+// test
 //# sourceMappingURL=tribunal.js.map
