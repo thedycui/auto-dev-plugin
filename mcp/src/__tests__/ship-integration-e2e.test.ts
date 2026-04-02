@@ -158,7 +158,7 @@ describe("T-INT-02: Complete Phase 8 progression path", () => {
 
     expect(result.done).toBe(false);
     expect(result.step).toBe("8a");
-    expect(result.agent).toBe("auto-dev-developer");
+    expect(result.agent).toBe("auto-dev:auto-dev-developer");
   });
 
   it("Step 2: 8a passes (no unpushed) -> advances to 8b", async () => {
@@ -309,7 +309,7 @@ describe("T-INT-03: Phase 8d CODE_BUG -> regress to Phase 3", () => {
 
     expect(result.done).toBe(false);
     expect(result.step).toBe("3");
-    expect(result.agent).toBe("auto-dev-developer");
+    expect(result.agent).toBe("auto-dev:auto-dev-developer");
     expect(result.message).toContain("CODE_BUG");
     expect(result.message).toContain("round 1");
 

@@ -1161,20 +1161,20 @@ server.tool("auto_dev_preflight", "Pre-flight check: verify prerequisites for a 
         const state = await sm.loadAndValidate();
         const isBeast = state.costMode === "beast";
         const phasePromptMap = {
-            0: { promptFile: "phase0-brainstorm", agent: "auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
-            1: { promptFile: "phase1-architect", agent: "auto-dev-architect", model: "opus" }, // 设计始终用最强
-            2: { promptFile: "phase2-planner", agent: "auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
-            3: { promptFile: "phase3-developer", agent: "auto-dev-developer", model: "opus" }, // 实现始终用最强
-            4: { promptFile: "phase4-full-reviewer", agent: "auto-dev-reviewer", model: "opus" }, // 代码审查始终用最强
-            5: { promptFile: "phase5-test-architect", agent: "auto-dev-test-architect", model: isBeast ? "opus" : "sonnet" },
-            6: { promptFile: "phase6-acceptance", agent: "auto-dev-acceptance-validator", model: isBeast ? "opus" : "sonnet" },
-            7: { promptFile: "phase7-retrospective", agent: "auto-dev-reviewer", model: isBeast ? "opus" : "sonnet" },
+            0: { promptFile: "phase0-brainstorm", agent: "auto-dev:auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
+            1: { promptFile: "phase1-architect", agent: "auto-dev:auto-dev-architect", model: "opus" }, // 设计始终用最强
+            2: { promptFile: "phase2-planner", agent: "auto-dev:auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
+            3: { promptFile: "phase3-developer", agent: "auto-dev:auto-dev-developer", model: "opus" }, // 实现始终用最强
+            4: { promptFile: "phase4-full-reviewer", agent: "auto-dev:auto-dev-reviewer", model: "opus" }, // 代码审查始终用最强
+            5: { promptFile: "phase5-test-architect", agent: "auto-dev:auto-dev-test-architect", model: isBeast ? "opus" : "sonnet" },
+            6: { promptFile: "phase6-acceptance", agent: "auto-dev:auto-dev-acceptance-validator", model: isBeast ? "opus" : "sonnet" },
+            7: { promptFile: "phase7-retrospective", agent: "auto-dev:auto-dev-reviewer", model: isBeast ? "opus" : "sonnet" },
         };
         // Phase 1: if design.md already exists, skip architect → go directly to reviewer
         if (phase === 1) {
             try {
                 await stat(join(outputDir, "design.md"));
-                phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev-reviewer", model: "opus" };
+                phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev:auto-dev-reviewer", model: "opus" };
                 result.designExists = true;
                 result.hint = "design.md already exists. Skipping architect, going directly to design review.";
             }

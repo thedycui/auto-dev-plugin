@@ -149,7 +149,7 @@ describe("computeNextTask", () => {
 
       expect(result.done).toBe(false);
       expect(result.step).toBe("1a");
-      expect(result.agent).toBe("auto-dev-architect");
+      expect(result.agent).toBe("auto-dev:auto-dev-architect");
       expect(result.prompt).toBeDefined();
       expect(result.prompt).not.toBeNull();
     });
@@ -222,7 +222,7 @@ describe("computeNextTask", () => {
 
       expect(result.done).toBe(false);
       expect(result.step).toBe("3");
-      expect(result.agent).toBe("auto-dev-developer");
+      expect(result.agent).toBe("auto-dev:auto-dev-developer");
       expect(result.prompt).toContain("请实现以下功能");
       expect(result.prompt).toContain("test-topic");
     });
@@ -251,7 +251,7 @@ describe("computeNextTask", () => {
 
       expect(result.done).toBe(false);
       expect(result.step).toBe("1b");
-      expect(result.agent).toBe("auto-dev-reviewer");
+      expect(result.agent).toBe("auto-dev:auto-dev-reviewer");
       expect(result.prompt).toBeDefined();
       expect(result.message).toContain("1a");
       expect(result.message).toContain("passed");
@@ -359,7 +359,7 @@ describe("computeNextTask", () => {
       const result = await computeNextTask("/tmp/test-project", "test-topic");
 
       expect(result.step).toBe("3");
-      expect(result.agent).toBe("auto-dev-developer");
+      expect(result.agent).toBe("auto-dev:auto-dev-developer");
     });
   });
 
@@ -1661,7 +1661,7 @@ describe("Phase 8 ship integration", () => {
 
     expect(result.done).toBe(false);
     expect(result.step).toBe("8a");
-    expect(result.agent).toBe("auto-dev-developer");
+    expect(result.agent).toBe("auto-dev:auto-dev-developer");
   });
 
   // AC-6: Step 8a validation - unpushed commits
@@ -1823,7 +1823,7 @@ describe("Phase 8 ship integration", () => {
 
     expect(result.done).toBe(false);
     expect(result.step).toBe("3");
-    expect(result.agent).toBe("auto-dev-developer");
+    expect(result.agent).toBe("auto-dev:auto-dev-developer");
     expect(result.message).toContain("CODE_BUG");
     expect(result.message).toContain("round 1");
 

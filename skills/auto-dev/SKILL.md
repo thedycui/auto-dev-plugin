@@ -72,7 +72,7 @@ while !result.done:
   elif result.escalation:
     if result.escalation.reason == "tribunal_subagent":
       digestPath = result.escalation.digestPath
-      Agent(subagent_type="auto-dev-reviewer", prompt="""
+      Agent(subagent_type="auto-dev:auto-dev-reviewer", prompt="""
         你是独立裁决者。请先用 Read 工具读取文件 "{digestPath}"，
         然后按照其中的检查清单逐条裁决。
         裁决完成后调用 auto_dev_tribunal_verdict 提交结果。
