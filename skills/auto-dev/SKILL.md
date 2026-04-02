@@ -130,6 +130,8 @@ auto_dev_init(
 
 未传 `ship=true` 时 Phase 8 不激活，不影响 Phase 1-7 的行为。
 
+> **注意（Worktree 模式）**：当 `useWorktree=true`（默认）时，**必须先调用 `auto_dev_complete` 完成 worktree 合并，再推进 Phase 8**。在 worktree 合并之前调用 Phase 8 会被阻止（`validateStep("8a")` 返回失败）。
+
 ### 5. 设计文档模板（推荐）
 
 使用以下模板编写设计文档，可让 auto-dev **跳过 Phase 1a（设计重写）**，直接进入 Phase 1b（审查），节省约 10-15 分钟。
