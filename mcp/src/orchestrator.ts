@@ -158,6 +158,35 @@ const SKILLS_DIR = resolve(
 );
 
 // ---------------------------------------------------------------------------
+// Reset Validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate an auto_dev_reset request before mutating state.
+ * Returns an error string if validation fails, or null if valid.
+ */
+export function validateResetRequest(
+  state: { status: string; phase: number; mode: string },
+  targetPhase: number,
+  reason: string,
+): string | null {
+  if (state.status === "COMPLETED") {
+    return "Cannot reset a COMPLETED project.";
+  }
+  if (targetPhase > state.phase) {
+    return `targetPhase (${targetPhase}) must not exceed current phase (${state.phase}). Forward jumps are forbidden.`;
+  }
+  if (!reason || reason.trim() === "") {
+    return "reason must be a non-empty string.";
+  }
+  const validPhases = PHASE_SEQUENCE[state.mode] ?? [];
+  if (!validPhases.includes(targetPhase)) {
+    return `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(", ")}).`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Model Routing
 // ---------------------------------------------------------------------------
 

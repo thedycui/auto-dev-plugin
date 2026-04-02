@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parseTaskList, firstStepForPhase, PHASE_SEQUENCE } from "../orchestrator.js";
+import { parseTaskList, firstStepForPhase, PHASE_SEQUENCE, validateResetRequest } from "../orchestrator.js";
 import { parseDiffSummary } from "../tribunal.js";
 import { StateJsonSchema } from "../types.js";
 
@@ -172,17 +172,19 @@ describe("auto_dev_reset 校验逻辑 — AC-1, AC-2, AC-3, AC-13", () => {
   });
 
   // [AC-2] U-RESET-2
-  it("[AC-2] U-RESET-2: targetPhase > currentPhase 时校验条件为真（禁止前跳）", () => {
-    const currentPhase = 3;
-    const targetPhase = 5;
-    expect(targetPhase > currentPhase).toBe(true);
+  it("[AC-2] U-RESET-2: targetPhase > currentPhase 时 validateResetRequest 返回错误（禁止前跳）", () => {
+    const state = { status: "IN_PROGRESS", phase: 3, mode: "full" };
+    const error = validateResetRequest(state, 5, "some reason");
+    expect(error).not.toBeNull();
+    expect(error).toContain("Forward jumps are forbidden");
   });
 
   // [AC-3] U-RESET-3
-  it("[AC-3] U-RESET-3: COMPLETED 状态下返回错误", () => {
-    const state = { status: "COMPLETED" as const, phase: 5, mode: "full" as const };
-    // 直接验证触发条件
-    expect(state.status === "COMPLETED").toBe(true);
+  it("[AC-3] U-RESET-3: COMPLETED 状态下 validateResetRequest 返回错误", () => {
+    const state = { status: "COMPLETED", phase: 5, mode: "full" };
+    const error = validateResetRequest(state, 3, "rollback");
+    expect(error).not.toBeNull();
+    expect(error).toContain("COMPLETED");
   });
 
   // U-RESET-5

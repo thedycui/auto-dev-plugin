@@ -2583,5 +2583,10 @@ describe("lastFailureDetail filling", () => {
     // atomicUpdate should have been called
     const updateCalls = mockAtomicUpdate.mock.calls;
     expect(updateCalls.length).toBeGreaterThan(0);
+    // AC-15: at least one atomicUpdate call must set lastFailureDetail to a non-empty string
+    expect(updateCalls.some((call: unknown[]) => {
+      const update = call[0] as Record<string, unknown>;
+      return typeof update.lastFailureDetail === "string" && update.lastFailureDetail.length > 0;
+    })).toBe(true);
   });
 });

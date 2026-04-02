@@ -45,6 +45,7 @@ import {
   crossValidate,
   classifyTribunalError,
   parseDiffSummary,
+  prepareTribunalInput,
 } from "../tribunal.js";
 import type { TribunalCrashInfo } from "../tribunal.js";
 import { TRIBUNAL_PHASES } from "../tribunal-schema.js";
@@ -1661,5 +1662,66 @@ describe("parseDiffSummary", () => {
     const result = parseDiffSummary("1 file changed, 5 insertions(+)");
     expect(result.files).toBe(1);
     expect(result.insertions).toBe(5);
+  });
+});
+
+// ===========================================================================
+// Task 7 — prepareTribunalInput integration tests (AC-8, AC-9)
+// Verify that the production code injects HIGH/LOW scale level into content.
+// ===========================================================================
+
+describe("prepareTribunalInput — AC-8 HIGH and AC-9 LOW scale signal injection", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await makeTmpDir();
+    mockExecFile.mockReset();
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("[AC-8] prepareTribunalInput — HIGH scale: content contains HIGH and 必须逐文件审查", async () => {
+    // Mock execFile to handle git calls made by prepareTribunalInput:
+    //   1. git diff --stat HEAD  (getDiffStatWithUntracked call 1)
+    //   2. git ls-files --others --exclude-standard  (getDiffStatWithUntracked call 2)
+    //   3. git diff HEAD~1 -- ...  (getKeyDiff)
+    let callCount = 0;
+    mockExecFile.mockImplementation((...args: any[]) => {
+      const cb = args[args.length - 1];
+      callCount++;
+      if (callCount === 1) {
+        // git diff --stat HEAD — return a HIGH diffStat summary
+        cb(null, "mcp/src/foo.ts | 200 +++\n21 files changed, 700 insertions(+), 100 deletions(-)\n", "");
+      } else {
+        // git ls-files, git diff (getKeyDiff), and any other calls — return empty
+        cb(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const { digestContent } = await prepareTribunalInput(4, dir, "/tmp/fake-project");
+    expect(digestContent).toContain("HIGH");
+    expect(digestContent).toContain("必须逐文件审查");
+  });
+
+  it("[AC-9] prepareTribunalInput — LOW scale: content contains LOW and does not contain 必须逐文件审查", async () => {
+    let callCount = 0;
+    mockExecFile.mockImplementation((...args: any[]) => {
+      const cb = args[args.length - 1];
+      callCount++;
+      if (callCount === 1) {
+        // git diff --stat HEAD — return a LOW diffStat summary
+        cb(null, "mcp/src/bar.ts | 10 +\n3 files changed, 30 insertions(+), 20 deletions(-)\n", "");
+      } else {
+        cb(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    const { digestContent } = await prepareTribunalInput(4, dir, "/tmp/fake-project");
+    expect(digestContent).toContain("LOW");
+    expect(digestContent).not.toContain("必须逐文件审查");
   });
 });

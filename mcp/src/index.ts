@@ -25,7 +25,7 @@ import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js"
 import type { ToolResult } from "./tribunal.js";
 import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
-import { computeNextTask, firstStepForPhase, PHASE_SEQUENCE } from "./orchestrator.js";
+import { computeNextTask, firstStepForPhase, validateResetRequest } from "./orchestrator.js";
 import { runStructuralAssertions } from "./ac-runner.js";
 import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
 import { AcceptanceCriteriaSchema } from "./ac-schema.js";
@@ -2086,18 +2086,9 @@ server.tool(
     const state = await sm.loadAndValidate();
 
     // Validation guards (fail fast, no state mutation)
-    if (state.status === "COMPLETED") {
-      return textResult({ error: "Cannot reset a COMPLETED project." });
-    }
-    if (targetPhase > state.phase) {
-      return textResult({ error: `targetPhase (${targetPhase}) must not exceed current phase (${state.phase}). Forward jumps are forbidden.` });
-    }
-    if (!reason || reason.trim() === "") {
-      return textResult({ error: "reason must be a non-empty string." });
-    }
-    const validPhases = PHASE_SEQUENCE[state.mode] ?? [];
-    if (!validPhases.includes(targetPhase)) {
-      return textResult({ error: `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(", ")}).` });
+    const validationError = validateResetRequest(state, targetPhase, reason);
+    if (validationError) {
+      return textResult({ error: validationError });
     }
 
     // Compute reset step using firstStepForPhase (not String(targetPhase))
