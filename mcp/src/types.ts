@@ -201,6 +201,7 @@ export const StateJsonSchema = z.object({
   step: z.string().nullable().optional(),
   stepIteration: z.number().int().optional(),
   lastValidation: z.string().nullable().optional(),
+  lastFailureDetail: z.string().nullable().optional(),
   approachState: z.any().nullable().optional(), // Complex nested object, validated at orchestrator level
 
   // Phase-level escalation counter (Issue #2: ESCALATE auto-regress)

@@ -25,7 +25,7 @@ import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js"
 import type { ToolResult } from "./tribunal.js";
 import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
-import { computeNextTask } from "./orchestrator.js";
+import { computeNextTask, firstStepForPhase, PHASE_SEQUENCE } from "./orchestrator.js";
 import { runStructuralAssertions } from "./ac-runner.js";
 import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
 import { AcceptanceCriteriaSchema } from "./ac-schema.js";
@@ -2069,7 +2069,82 @@ server.tool(
 );
 
 // ===========================================================================
-// 16. auto_dev_next (Step Orchestrator — Invisible Framework)
+// 16. auto_dev_reset (Manual phase reset with safety guards)
+// ===========================================================================
+
+server.tool(
+  "auto_dev_reset",
+  "Reset the auto-dev state to a target phase. Useful to manually re-run a phase. Safety guards: cannot reset a COMPLETED project, cannot jump forward, requires a non-empty reason.",
+  {
+    projectRoot: z.string(),
+    topic: z.string(),
+    targetPhase: z.number(),
+    reason: z.string(),
+  },
+  async ({ projectRoot, topic, targetPhase, reason }) => {
+    const sm = await StateManager.create(projectRoot, topic);
+    const state = await sm.loadAndValidate();
+
+    // Validation guards (fail fast, no state mutation)
+    if (state.status === "COMPLETED") {
+      return textResult({ error: "Cannot reset a COMPLETED project." });
+    }
+    if (targetPhase > state.phase) {
+      return textResult({ error: `targetPhase (${targetPhase}) must not exceed current phase (${state.phase}). Forward jumps are forbidden.` });
+    }
+    if (!reason || reason.trim() === "") {
+      return textResult({ error: "reason must be a non-empty string." });
+    }
+    const validPhases = PHASE_SEQUENCE[state.mode] ?? [];
+    if (!validPhases.includes(targetPhase)) {
+      return textResult({ error: `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(", ")}).` });
+    }
+
+    // Compute reset step using firstStepForPhase (not String(targetPhase))
+    const resetStep = firstStepForPhase(targetPhase);
+
+    // Filter tribunalSubmits and phaseEscalateCount: keep only keys < targetPhase
+    const filteredTribunalSubmits: Record<string, number> = {};
+    for (const [k, v] of Object.entries(state.tribunalSubmits ?? {})) {
+      if (parseInt(k, 10) < targetPhase) filteredTribunalSubmits[k] = v;
+    }
+    const filteredPhaseEscalateCount: Record<string, number> = {};
+    for (const [k, v] of Object.entries(state.phaseEscalateCount ?? {})) {
+      if (parseInt(k, 10) < targetPhase) filteredPhaseEscalateCount[k] = v;
+    }
+
+    // Append audit line to progress-log
+    const timestamp = new Date().toISOString();
+    await sm.appendToProgressLog(
+      `\n<!-- RESET phase=${targetPhase} reason="${reason}" timestamp=${timestamp} -->\n`,
+    );
+
+    // Apply state reset
+    await sm.atomicUpdate({
+      phase: targetPhase,
+      status: "IN_PROGRESS",
+      step: resetStep,
+      stepIteration: 0,
+      lastValidation: null,
+      lastFailureDetail: null,
+      approachState: null,
+      tribunalSubmits: filteredTribunalSubmits,
+      phaseEscalateCount: filteredPhaseEscalateCount,
+    });
+
+    return textResult({
+      status: "RESET",
+      phase: targetPhase,
+      step: resetStep,
+      reason,
+      timestamp,
+      message: `State reset to phase ${targetPhase} (step="${resetStep}"). Previous tribunal/escalation counters for phases >= ${targetPhase} cleared.`,
+    });
+  },
+);
+
+// ===========================================================================
+// 17. auto_dev_next (Step Orchestrator — Invisible Framework)
 // ===========================================================================
 
 server.tool(

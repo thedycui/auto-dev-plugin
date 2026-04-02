@@ -136,6 +136,33 @@ export async function getKeyDiff(
 }
 
 // ---------------------------------------------------------------------------
+// parseDiffSummary — parse git diff --stat summary line
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a git diff --stat summary line like:
+ *   "5 files changed, 120 insertions(+), 30 deletions(-)"
+ * Handles edge cases: only insertions, only deletions, unrecognized format.
+ * Returns { files: 0, insertions: 0, deletions: 0 } on any parse failure.
+ */
+export function parseDiffSummary(summaryLine: string): { files: number; insertions: number; deletions: number } {
+  try {
+    const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
+    const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
+    const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
+
+    const files = filesMatch ? parseInt(filesMatch[1], 10) : 0;
+    const insertions = insertMatch ? parseInt(insertMatch[1], 10) : 0;
+    const deletions = deleteMatch ? parseInt(deleteMatch[1], 10) : 0;
+
+    if (!filesMatch) return { files: 0, insertions: 0, deletions: 0 };
+    return { files, insertions, deletions };
+  } catch {
+    return { files: 0, insertions: 0, deletions: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tribunal Input Preparation
 // ---------------------------------------------------------------------------
 
@@ -214,6 +241,31 @@ export async function prepareTribunalInput(
     : diffStat;
   content += `## 框架统计（可信数据）\n\`\`\`\n${truncatedDiffStat}\n\`\`\`\n\n`;
 
+  // 1b. Change scale signal (injected between 框架统计 and 关键代码变更)
+  let keyDiffBudget = 300;
+  try {
+    const nonEmptyLines = diffStat.split("\n").filter(l => l.trim().length > 0);
+    const summaryLine = nonEmptyLines[nonEmptyLines.length - 1] ?? "";
+    const { insertions, deletions } = parseDiffSummary(summaryLine);
+    const totalLines = insertions + deletions;
+    let scaleLevel: string;
+    let scaleInstruction: string;
+    if (totalLines > 500) {
+      scaleLevel = "HIGH";
+      scaleInstruction = "变更行数超过 500 行，必须逐文件审查，不得遗漏。";
+      keyDiffBudget = 500;
+    } else if (totalLines > 100) {
+      scaleLevel = "MEDIUM";
+      scaleInstruction = "变更规模适中，重点审查核心逻辑。";
+    } else {
+      scaleLevel = "LOW";
+      scaleInstruction = "变更规模较小，快速审查即可。";
+    }
+    content += `## 变更规模\n\n`;
+    content += `- 规模等级：**${scaleLevel}**（+${insertions} -${deletions}，共 ${totalLines} 行）\n`;
+    content += `- 审查指令：${scaleInstruction}\n\n`;
+  } catch { /* scale injection failed, skip silently */ }
+
   // 2. Inline review materials (truncated to reasonable length)
   const filesToInline = getPhaseFiles(phase, outputDir);
   for (const { label, path, maxLines } of filesToInline) {
@@ -222,7 +274,7 @@ export async function prepareTribunalInput(
   }
 
   // 3. Key code diff (excluding test/config/dist, truncated)
-  const keyDiff = await getKeyDiff(projectRoot, startCommit, 300);
+  const keyDiff = await getKeyDiff(projectRoot, startCommit, keyDiffBudget);
   content += `## 关键代码变更\n\`\`\`diff\n${keyDiff}\n\`\`\`\n\n`;
 
   // 4. Inject tribunal-category lessons (calibration)

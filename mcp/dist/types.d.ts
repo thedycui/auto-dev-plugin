@@ -191,6 +191,7 @@ export declare const StateJsonSchema: z.ZodObject<{
     step: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     stepIteration: z.ZodOptional<z.ZodNumber>;
     lastValidation: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    lastFailureDetail: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     approachState: z.ZodOptional<z.ZodNullable<z.ZodAny>>;
     phaseEscalateCount: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodNumber>>;
     ship: z.ZodOptional<z.ZodBoolean>;

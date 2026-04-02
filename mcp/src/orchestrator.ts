@@ -70,6 +70,14 @@ export function checkDesignDocCompliance(content: string): { compliant: boolean;
 // Types
 // ---------------------------------------------------------------------------
 
+export interface TaskInfo {
+  taskNumber: number;
+  title: string;
+  description: string;
+  files: string[];
+  dependencies: number[];
+}
+
 export interface NextTaskResult {
   /** Whether all phases are done */
   done: boolean;
@@ -93,6 +101,10 @@ export interface NextTaskResult {
   mandate?: string;
   /** Informational message */
   message: string;
+  /** Last failure detail (feedback from validation) — populated on failure paths */
+  lastFailureDetail?: string;
+  /** Parsed task list from plan.md — only populated for step "3" */
+  tasks?: TaskInfo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +114,7 @@ export interface NextTaskResult {
 const MAX_STEP_ITERATIONS = 3;
 const MAX_APPROACH_FAILURES = 2;
 
-const PHASE_SEQUENCE: Record<string, number[]> = {
+export const PHASE_SEQUENCE: Record<string, number[]> = {
   full: [1, 2, 3, 4, 5, 6, 7],
   quick: [3, 4, 5, 7],
   turbo: [3],
@@ -677,11 +689,14 @@ async function handleTribunalEscalation(
   });
 
   const prompt = await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, feedback, ctx.getExtraVars("3"));
+  const planContent = await readFileSafe(join(outputDir, "plan.md"));
+  const tasks = parseTaskList(planContent);
   return {
     done: false,
     step: "3",
     agent: STEP_AGENTS["3"] ?? null,
     prompt,
+    tasks,
     message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
   };
 }
@@ -1133,6 +1148,75 @@ export async function buildTaskForStep(
 }
 
 // ---------------------------------------------------------------------------
+// parseTaskList — parse plan.md task blocks for step "3" injection
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse plan.md content into a list of TaskInfo objects.
+ * Splits on "## Task N" headers and extracts taskNumber, title, description,
+ * files (from "新建:" / "修改:" lines), and dependencies (from "依赖: Task N" lines).
+ * Returns [] on any parse failure or when planContent is null/empty.
+ */
+export function parseTaskList(planContent: string | null): TaskInfo[] {
+  if (!planContent) return [];
+  try {
+    // Split on ## Task N headers
+    const blocks = planContent.split(/(?=^## Task\s+\d+)/m).filter(b => b.trim().length > 0);
+    const tasks: TaskInfo[] = [];
+
+    for (const block of blocks) {
+      const headerMatch = block.match(/^## Task\s+(\d+)[:\s]*(.*)/m);
+      if (!headerMatch) continue;
+
+      const taskNumber = parseInt(headerMatch[1], 10);
+      const title = headerMatch[2]?.trim() ?? "";
+
+      // Description: lines after the header line, before the first sub-section (###) or until end
+      const bodyLines = block.split("\n").slice(1); // skip header line
+      const descLines: string[] = [];
+      for (const line of bodyLines) {
+        if (/^###/.test(line)) break;
+        descLines.push(line);
+      }
+      const description = descLines.join("\n").trim();
+
+      // Files: lines matching "新建:" or "修改:" — extract paths
+      const files: string[] = [];
+      const fileRegex = /(?:新建|修改)[:：]\s*(.+)/g;
+      let fileMatch: RegExpExecArray | null;
+      while ((fileMatch = fileRegex.exec(block)) !== null) {
+        // May be a comma-separated list or single path
+        const raw = fileMatch[1].trim();
+        for (const part of raw.split(/[,，]/)) {
+          const p = part.trim().replace(/`/g, "");
+          if (p.length > 0) files.push(p);
+        }
+      }
+
+      // Dependencies: "依赖: Task N" or "依赖: Task N, Task M"
+      const dependencies: number[] = [];
+      const depRegex = /依赖[:：]\s*(.*)/g;
+      let depMatch: RegExpExecArray | null;
+      while ((depMatch = depRegex.exec(block)) !== null) {
+        const raw = depMatch[1];
+        const nums = raw.match(/\d+/g);
+        if (nums) {
+          for (const n of nums) {
+            dependencies.push(parseInt(n, 10));
+          }
+        }
+      }
+
+      tasks.push({ taskNumber, title, description, files, dependencies });
+    }
+
+    return tasks;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Extracted sub-functions for computeNextTask
 // ---------------------------------------------------------------------------
 
@@ -1173,13 +1257,18 @@ async function resolveInitialStep(
       nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep),
     );
 
-    return {
+    const result: NextTaskResult = {
       done: false,
       step: nextStep,
       agent: STEP_AGENTS[nextStep] ?? null,
       prompt,
       message: `Phase ${completedPhase} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
     };
+    if (nextStep === "3") {
+      const planContent = await readFileSafe(join(outputDir, "plan.md"));
+      result.tasks = parseTaskList(planContent);
+    }
+    return result;
   }
 
   // Normal startup: use state.phase if already mid-flow, otherwise the mode's first phase.
@@ -1221,13 +1310,18 @@ async function resolveInitialStep(
     firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep),
   );
 
-  return {
+  const startupResult: NextTaskResult = {
     done: false,
     step: firstStep,
     agent: STEP_AGENTS[firstStep] ?? null,
     prompt,
     message: `Starting step ${firstStep} (phase ${firstPhase}).`,
   };
+  if (firstStep === "3") {
+    const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    startupResult.tasks = parseTaskList(planContent);
+  }
+  return startupResult;
 }
 
 /**
@@ -1263,6 +1357,7 @@ async function handlePhaseRegress(
     lastValidation: "SHIP_REGRESS",
     approachState: null,
     status: "IN_PROGRESS",
+    lastFailureDetail: validation.feedback,
   });
 
   const prompt = await buildTaskForStep(
@@ -1297,6 +1392,7 @@ async function handleCircuitBreaker(
     await sm.atomicUpdate({
       stepIteration: 0, lastValidation: "CIRCUIT_BREAK",
       approachState: approachResult.approachState,
+      lastFailureDetail: validation.feedback,
     });
 
     return {
@@ -1306,6 +1402,7 @@ async function handleCircuitBreaker(
         agent: STEP_AGENTS[currentStep] ?? null,
         prompt: approachResult.prompt,
         freshContext: true,
+        lastFailureDetail: validation.feedback,
         message: `方案 "${approachResult.failedApproach}" 已熔断，切换到 "${approachResult.nextApproach}"。`,
       },
       approachAction: approachResult,
@@ -1315,6 +1412,7 @@ async function handleCircuitBreaker(
   if (approachResult.action === "ALL_EXHAUSTED") {
     await sm.atomicUpdate({
       lastValidation: "ALL_APPROACHES_EXHAUSTED", status: "BLOCKED",
+      lastFailureDetail: validation.feedback,
     });
 
     return {
@@ -1324,6 +1422,7 @@ async function handleCircuitBreaker(
           reason: "all_approaches_exhausted",
           lastFeedback: validation.feedback,
         },
+        lastFailureDetail: validation.feedback,
         message: `Step ${currentStep} 所有方案均已失败，需要人工介入。`,
       },
       approachAction: approachResult,
@@ -1378,6 +1477,7 @@ async function handleValidationFailure(
     await sm.atomicUpdate({
       stepIteration: currentIteration + 1, lastValidation: "FAILED",
       tribunalSubmits: { ...submits, [phaseKey]: count },
+      lastFailureDetail: validation.feedback,
     });
 
     const prompt = await buildTaskForStep(
@@ -1388,6 +1488,7 @@ async function handleValidationFailure(
       step: currentStep,
       agent: STEP_AGENTS[currentStep] ?? null,
       prompt,
+      lastFailureDetail: validation.feedback,
       message: `Step ${currentStep} tribunal FAIL (attempt ${count}/3). Revision needed.`,
     };
   }
@@ -1431,6 +1532,7 @@ async function handleValidationFailure(
   const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
   await sm.atomicUpdate({
     step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
+    lastFailureDetail: validation.feedback,
   });
 
   let combinedFeedback = validation.feedback;
@@ -1447,6 +1549,7 @@ async function handleValidationFailure(
     step: effectiveStep,
     agent: STEP_AGENTS[effectiveStep] ?? STEP_AGENTS[currentStep] ?? null,
     prompt,
+    lastFailureDetail: validation.feedback,
     message: `Step ${currentStep} validation failed (iteration ${newIteration}/${MAX_STEP_ITERATIONS}). Revision needed.`,
   };
 }
@@ -1547,6 +1650,7 @@ async function advanceToNextStep(
   const nextPhase = phaseForStep(nextStep);
   await sm.atomicUpdate({
     step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
+    lastFailureDetail: null,
     phase: nextPhase, status: "IN_PROGRESS",
     ...tribunalUpdates,
   });
@@ -1555,13 +1659,18 @@ async function advanceToNextStep(
     nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep),
   );
 
-  return {
+  const advanceResult: NextTaskResult = {
     done: false,
     step: nextStep,
     agent: STEP_AGENTS[nextStep] ?? null,
     prompt,
     message: `Step ${currentStep} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
   };
+  if (nextStep === "3") {
+    const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    advanceResult.tasks = parseTaskList(planContent);
+  }
+  return advanceResult;
 }
 
 // ---------------------------------------------------------------------------

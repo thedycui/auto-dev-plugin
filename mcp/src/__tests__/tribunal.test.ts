@@ -44,6 +44,7 @@ import {
   runTribunalWithRetry,
   crossValidate,
   classifyTribunalError,
+  parseDiffSummary,
 } from "../tribunal.js";
 import type { TribunalCrashInfo } from "../tribunal.js";
 import { TRIBUNAL_PHASES } from "../tribunal-schema.js";
@@ -1592,5 +1593,73 @@ describe("IMP-002: tryRunViaHub catch logs warning", () => {
     delete process.env.TRIBUNAL_HUB_URL;
     vi.doUnmock("../hub-client.js");
     warnSpy.mockRestore();
+  });
+});
+
+// ===========================================================================
+// Task 7 — parseDiffSummary unit tests (AC-8, AC-9)
+// ===========================================================================
+
+describe("parseDiffSummary", () => {
+  it("AC-8: 700 insertions + 100 deletions = HIGH (totalLines=800)", () => {
+    const result = parseDiffSummary("10 files changed, 700 insertions(+), 100 deletions(-)");
+    expect(result.files).toBe(10);
+    expect(result.insertions).toBe(700);
+    expect(result.deletions).toBe(100);
+    // Verify that the total (800) exceeds the HIGH threshold (500)
+    expect(result.insertions + result.deletions).toBeGreaterThan(500);
+  });
+
+  it("AC-9: 30 insertions + 20 deletions = LOW (totalLines=50)", () => {
+    const result = parseDiffSummary("3 files changed, 30 insertions(+), 20 deletions(-)");
+    expect(result.insertions).toBe(30);
+    expect(result.deletions).toBe(20);
+    expect(result.insertions + result.deletions).toBeLessThanOrEqual(100);
+  });
+
+  it("only insertions, no deletions — parses correctly", () => {
+    const result = parseDiffSummary("2 files changed, 50 insertions(+)");
+    expect(result.insertions).toBe(50);
+    expect(result.deletions).toBe(0);
+    expect(result.files).toBe(2);
+  });
+
+  it("only deletions, no insertions — parses correctly", () => {
+    const result = parseDiffSummary("1 file changed, 15 deletions(-)");
+    expect(result.deletions).toBe(15);
+    expect(result.insertions).toBe(0);
+    expect(result.files).toBe(1);
+  });
+
+  it("unrecognized format does not throw and returns zeros", () => {
+    expect(() => parseDiffSummary("not a diff stat")).not.toThrow();
+    const result = parseDiffSummary("not a diff stat");
+    expect(result).toEqual({ files: 0, insertions: 0, deletions: 0 });
+  });
+
+  it("empty string does not throw and returns zeros", () => {
+    expect(() => parseDiffSummary("")).not.toThrow();
+    const result = parseDiffSummary("");
+    expect(result).toEqual({ files: 0, insertions: 0, deletions: 0 });
+  });
+
+  it("AC-8: HIGH scale level triggers 'must review per-file' instruction concept (totalLines > 500)", () => {
+    const result = parseDiffSummary("20 files changed, 700 insertions(+), 100 deletions(-)");
+    const totalLines = result.insertions + result.deletions;
+    const scaleLevel = totalLines > 500 ? "HIGH" : totalLines > 100 ? "MEDIUM" : "LOW";
+    expect(scaleLevel).toBe("HIGH");
+  });
+
+  it("AC-9: LOW scale level does not trigger extended review", () => {
+    const result = parseDiffSummary("2 files changed, 30 insertions(+), 20 deletions(-)");
+    const totalLines = result.insertions + result.deletions;
+    const scaleLevel = totalLines > 500 ? "HIGH" : totalLines > 100 ? "MEDIUM" : "LOW";
+    expect(scaleLevel).toBe("LOW");
+  });
+
+  it("singular 'file changed' format parses correctly", () => {
+    const result = parseDiffSummary("1 file changed, 5 insertions(+)");
+    expect(result.files).toBe(1);
+    expect(result.insertions).toBe(5);
   });
 });
