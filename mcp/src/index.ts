@@ -2033,7 +2033,9 @@ server.tool(
         );
 
         // Test-bound bindings (Layer 2)
-        const bindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+        const allBindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+        const validAcIds = new Set(acData.criteria.map((c) => c.id));
+        const bindings = allBindings.filter((b) => validAcIds.has(b.acId));
         const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, state.stack.testCmd);
 
         // Write framework results

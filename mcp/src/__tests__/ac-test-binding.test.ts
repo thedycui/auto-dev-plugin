@@ -15,6 +15,10 @@ import type { AcceptanceCriterion } from "../ac-schema.js";
 
 let tempDir: string;
 
+// Use interpolated AC numbers in fixture strings so the scanner does not pick
+// up this source file itself as an AC binding (the scanner matches literal text).
+const F91 = 91, F92 = 92, F93 = 93, F95 = 95;
+
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), "ac-binding-test-"));
 });
@@ -35,11 +39,11 @@ describe("discoverAcBindings - node", () => {
       `
 import { describe, test, expect } from "vitest";
 
-test("[AC-1] should return 400 when list is empty", () => {
+test("[AC-${F91}] should return 400 when list is empty", () => {
   expect(true).toBe(true);
 });
 
-test("[AC-2] should create user successfully", () => {
+test("[AC-${F92}] should create user successfully", () => {
   expect(true).toBe(true);
 });
 `,
@@ -47,9 +51,9 @@ test("[AC-2] should create user successfully", () => {
 
     const bindings = await discoverAcBindings(tempDir, "node");
     expect(bindings).toHaveLength(2);
-    expect(bindings[0]!.acId).toBe("AC-1");
+    expect(bindings[0]!.acId).toBe("AC-91");
     expect(bindings[0]!.testFile).toContain("user.test.ts");
-    expect(bindings[1]!.acId).toBe("AC-2");
+    expect(bindings[1]!.acId).toBe("AC-92");
   });
 
   it("should discover describe() with AC-N: prefix", async () => {
@@ -57,7 +61,7 @@ test("[AC-2] should create user successfully", () => {
     await writeFile(
       join(tempDir, "__tests__", "api.test.ts"),
       `
-describe("AC-3: validation logic", () => {
+describe("AC-${F93}: validation logic", () => {
   it("validates input", () => {});
 });
 `,
@@ -65,7 +69,7 @@ describe("AC-3: validation logic", () => {
 
     const bindings = await discoverAcBindings(tempDir, "node");
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]!.acId).toBe("AC-3");
+    expect(bindings[0]!.acId).toBe("AC-93");
   });
 
   it("should discover it() with [AC-N] annotation", async () => {
@@ -73,13 +77,13 @@ describe("AC-3: validation logic", () => {
     await writeFile(
       join(tempDir, "__tests__", "service.spec.ts"),
       `
-it("[AC-5] handles edge case", () => {});
+it("[AC-${F95}] handles edge case", () => {});
 `,
     );
 
     const bindings = await discoverAcBindings(tempDir, "node");
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]!.acId).toBe("AC-5");
+    expect(bindings[0]!.acId).toBe("AC-95");
   });
 });
 
@@ -94,14 +98,14 @@ describe("discoverAcBindings - java", () => {
       join(tempDir, "src", "test", "java", "UserServiceTest.java"),
       `
 @Test
-@DisplayName("[AC-1] should return 400 for empty list")
+@DisplayName("[AC-${F91}] should return 400 for empty list")
 void shouldReturn400WhenListIsEmpty() {}
 `,
     );
 
     const bindings = await discoverAcBindings(tempDir, "java");
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]!.acId).toBe("AC-1");
+    expect(bindings[0]!.acId).toBe("AC-91");
   });
 
   it("should discover void ACN_ method pattern", async () => {
@@ -110,13 +114,13 @@ void shouldReturn400WhenListIsEmpty() {}
       join(tempDir, "src", "test", "java", "OrderTest.java"),
       `
 @Test
-void AC2_shouldCalculateTotal() {}
+void AC${F92}_shouldCalculateTotal() {}
 `,
     );
 
     const bindings = await discoverAcBindings(tempDir, "java");
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]!.acId).toBe("AC-2");
+    expect(bindings[0]!.acId).toBe("AC-92");
   });
 });
 
@@ -130,18 +134,18 @@ describe("discoverAcBindings - python", () => {
     await writeFile(
       join(tempDir, "tests", "test_user.py"),
       `
-def test_ac1_empty_list_returns_400():
+def test_ac${F91}_empty_list_returns_400():
     assert True
 
-def test_ac3_creates_user():
+def test_ac${F93}_creates_user():
     assert True
 `,
     );
 
     const bindings = await discoverAcBindings(tempDir, "python");
     expect(bindings).toHaveLength(2);
-    expect(bindings[0]!.acId).toBe("AC-1");
-    expect(bindings[1]!.acId).toBe("AC-3");
+    expect(bindings[0]!.acId).toBe("AC-91");
+    expect(bindings[1]!.acId).toBe("AC-93");
   });
 
   it("should discover @pytest.mark.ac pattern", async () => {
@@ -149,7 +153,7 @@ def test_ac3_creates_user():
     await writeFile(
       join(tempDir, "tests", "test_order.py"),
       `
-@pytest.mark.ac("AC-2")
+@pytest.mark.ac("AC-${F92}")
 def test_order_total():
     assert True
 `,
@@ -157,7 +161,7 @@ def test_order_total():
 
     const bindings = await discoverAcBindings(tempDir, "python");
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]!.acId).toBe("AC-2");
+    expect(bindings[0]!.acId).toBe("AC-92");
   });
 });
 

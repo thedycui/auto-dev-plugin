@@ -1,0 +1,98 @@
+[
+  {
+    "phase": 1,
+    "category": "pitfall",
+    "lesson": "设计文档中 step 字段值写法与实现函数不一致，导致非 phase=3 场景存在潜在 bug",
+    "context": "设计文档 4.1 节写 `step = String(targetPhase)`，但正确调用是 `firstStepForPhase(targetPhase)`。Phase=1 时两者结果不同（'1' vs '1a'）。AC-1 只测试了 phase=3，掩盖了差异。设计审查第一轮发现此问题（P2-1），计划审查升级为 P1-1 并强制修复。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 1,
+    "category": "pitfall",
+    "lesson": "handleValidationFailure 有 5 条 return 路径，设计文档只列了部分，必须逐一枚举",
+    "context": "设计审查第一轮（NEEDS_REVISION）发现 handleValidationFailure 有 5 条 return 路径但设计只覆盖了部分（P1-3）。regressToPhase 和 ALL_APPROACHES_EXHAUSTED 两条路径在原代码中均未持久化 lastFailureDetail。对多分支函数的变更，必须在设计阶段枚举全部路径并逐一确认处理方式。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 2,
+    "category": "pitfall",
+    "lesson": "buildTaskForStep 调用点分散在 3 处函数中，计划最初只描述了 1 处，导致 P0 级遗漏",
+    "context": "plan.md 初版 Task 4 描述写'step 3 分支（约第 679 行）'，但实际调用点有 3 处：resolveInitialStep（line ~1220）、advanceToNextStep（line ~1554）、handleTribunalEscalation（line 679）。若只修改 679 行，tasks 字段在正常路径完全缺失，AC-5/6/7 无法通过。计划审查第一轮直接判 NEEDS_REVISION（P0-1）。",
+    "severity": "critical",
+    "reusable": true
+  },
+  {
+    "phase": 2,
+    "category": "process",
+    "lesson": "计划审查应验证'调用点散列'风险：一个逻辑改动点在代码中有多少个物理位置",
+    "context": "本次 Task 4 的错误根因是 agent 只看到了设计文档中提到的典型路径，没有去代码中 grep 全部调用点。计划审查发现了这个问题并要求枚举全部 3 个调用点，避免了运行时遗漏。规则：凡计划中说'修改 X 函数的调用点'，必须列出全部调用点个数和位置。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 3,
+    "category": "highlight",
+    "lesson": "并行 Task 派发（Wave 策略）在本次 Phase 3 中得到了实际应用并正常完成",
+    "context": "Phase 3 只有一个 CHECKPOINT PASS 记录，耗时约 10 分钟，说明 Task 并行派发运行顺畅。实际代码变更量达 917 行，远超设计估算的 200 行，但单次 Phase 3 即通过，说明并行化对大体量变更有明显提速效果。",
+    "severity": "minor",
+    "reusable": false
+  },
+  {
+    "phase": 4,
+    "category": "pitfall",
+    "lesson": "Tribunal 在 Phase 4 消耗了 3 次提交配额后触发 FALLBACK，说明 tribunal 对大变更（917 行）审查深度和通过标准存在不稳定性",
+    "context": "state.json 中 tribunalSubmits['4'] = 3，说明 Phase 4 tribunal 三次未达一致裁决，最终走 FALLBACK 路径通过。进入 Phase 4 的实际变更量为 917 行（18 个文件），远超设计估算的 200 行。Large diff 情形下 tribunal 稳定性不足，这也是本次改动要解决的问题（变更规模信号注入）。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 4,
+    "category": "pitfall",
+    "lesson": "AC-2/AC-3 测试仅验证抽象校验逻辑（validateResetRequest），未通过 handler 本身调用；AC-14 断言力度不足，未验证 atomicUpdate 字段内容",
+    "context": "Tribunal Phase 4 裁决中标注 P1 问题：AC-2/AC-3 守卫测试只调用了从 orchestrator.ts 导出的 validateResetRequest 函数，若 index.ts 中 handler 代码拼写字段名错误，测试无法捕获。AC-14 仅断言 updateCalls.length > 0，未验证 atomicUpdate 参数中包含 lastFailureDetail 字段。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 5,
+    "category": "pitfall",
+    "lesson": "Phase 5 tribunal 提交了 5 次配额（超过默认上限 3），说明 FALLBACK 被多次使用，E2E 测试阶段稳定性最差",
+    "context": "state.json 显示 tribunalSubmits['5'] = 5，而 progress-log 中 Phase 5 也记录了 TRIBUNAL-FALLBACK。Phase 5 是本 session 中 tribunal 消耗最多的阶段，说明测试覆盖度审查是最难通过的关口。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 5,
+    "category": "pitfall",
+    "lesson": "框架 AC 绑定机制（framework-ac-results.json）对 AC-1/AC-2/AC-3/AC-5 定向到 fixture 测试文件（ac-test-binding.test.ts），导致绑定执行输出 18/18 skipped，框架误判 PASS",
+    "context": "framework-ac-results.json 中 AC-1 对应运行的是 ac-test-binding.test.ts（18 tests | 18 skipped），而真正覆盖 AC-1 的测试在 orchestrator-ux-improvements.test.ts 中。框架通过 '测试文件跑完无 FAIL' 判断通过，但 skipped 也被判 PASS，实际上 AC-1 的绑定测试没有实际运行。这是框架 AC 绑定查找逻辑的缺陷。",
+    "severity": "critical",
+    "reusable": true
+  },
+  {
+    "phase": 5,
+    "category": "technical",
+    "lesson": "AC-15 测试通过 approachState.currentIndex 越界间接触发 ALL_EXHAUSTED 路径，触发机制不够直接，且未断言 status=BLOCKED",
+    "context": "tribunal Phase 5 裁决标注了 P2 问题：AC-15 测试构造了 exhaustedApproachState 并依赖 build 失败来间接触发 ALL_EXHAUSTED 路径，但验证代码（orchestrator.test.ts line 2586-2595）只断言 lastFailureDetail 非空，未验证 status='BLOCKED'。AC-15 描述要求 'status 为 BLOCKED' 这一条件实际上未被测试覆盖。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 4,
+    "category": "technical",
+    "lesson": "AC-12 的 structural assertion 使用了 file_not_contains 模式检查 orchestrator.ts，但 framework-ac-results.json 显示该文件 'does not exist'，structural 检查结论可疑",
+    "context": "framework-ac-results.json 中 AC-12 structural 结果：detail 为 'File does not exist (pattern trivially absent): mcp/src/orchestrator.ts'。这意味着框架执行结构断言时路径解析失败，文件找不到，但仍判 passed=true（'pattern trivially absent'）。用文件不存在来证明 pattern 不存在是逻辑错误，AC-12 的结构性验证实际上是空操作。",
+    "severity": "critical",
+    "reusable": true
+  },
+  {
+    "phase": 6,
+    "category": "highlight",
+    "lesson": "验收报告对 AC-10（manual 层级）的代码链路审查完整且有说服力",
+    "context": "AC-10 无自动测试，验收报告通过三段链路（types.ts schema 声明 → atomicUpdate 写入 → state_get 直接序列化）论证了满足条件，逻辑清晰。对 manual 层级 AC 进行代码审查代替运行时验证是可接受的处理方式。",
+    "severity": "minor",
+    "reusable": true
+  }
+]

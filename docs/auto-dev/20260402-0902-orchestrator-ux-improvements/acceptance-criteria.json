@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "调用 auto_dev_reset(targetPhase=3) 后，state.json 中 phase=3、step=\"3\"、stepIteration=0、lastValidation=null，且 progress-log 包含 RESET phase=3 标记",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-2",
+      "description": "auto_dev_reset(targetPhase > currentPhase) 返回错误，state.json 不变（禁止前跳）",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-3",
+      "description": "auto_dev_reset 在 status=COMPLETED 状态下返回错误，不允许重开已完成的 session",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-4",
+      "description": "Step 5b FAIL 后调用 auto_dev_next，返回的 lastFailureDetail 非空且内容与 validation.feedback 一致",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-5",
+      "description": "Step 3 auto_dev_next 返回的 tasks 数组长度与 plan.md 中 ## Task N 块的数量相等",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-6",
+      "description": "tasks[n].files 包含 plan.md 对应 Task 中 新建: 和 修改: 后列出的全部路径",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-7",
+      "description": "tasks[n].dependencies 正确提取 plan.md 中 依赖: Task N 声明的依赖编号列表",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-8",
+      "description": "700+ 行变更（insertions+deletions）时，tribunal digest 包含 HIGH 字样和必须逐文件审查指令",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-9",
+      "description": "50 行以内变更时，tribunal digest 包含 LOW 字样，且不包含必须逐文件审查字样",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-10",
+      "description": "Step 5b FAIL 后调用 auto_dev_state_get，返回的 state 中 lastFailureDetail 为非空字符串",
+      "layer": "manual"
+    },
+    {
+      "id": "AC-11",
+      "description": "Step 3 auto_dev_next 在 prompt 字段仍返回完整任务描述，与无 tasks 字段时行为相同（向后兼容）",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-12",
+      "description": "buildTaskForStep 函数签名保持 Promise<string> 不变，tasks 字段只在 step 3 的上层调用点组装，不通过 buildTaskForStep 返回",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "file_not_contains", "path": "mcp/src/orchestrator.ts", "pattern": "buildTaskForStep.*Promise<\\{" }
+      ]
+    },
+    {
+      "id": "AC-13",
+      "description": "auto_dev_reset(targetPhase=3) 后，state.json 中 tribunalSubmits 不含 parseInt(key) >= 3 的条目，phaseEscalateCount 不含 parseInt(key) >= 3 的条目",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-14",
+      "description": "regressToPhase 路径（CODE_BUG 回退）触发后，state.json 中 lastFailureDetail 为非空字符串，内容与 validation.feedback 一致",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-15",
+      "description": "ALL_APPROACHES_EXHAUSTED 路径触发后，state.json 中 lastFailureDetail 为非空字符串，status 为 BLOCKED",
+      "layer": "test-bound"
+    }
+  ]
+}

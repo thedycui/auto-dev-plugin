@@ -29,7 +29,7 @@ function makeAcJson(criteria: AcceptanceCriterion[]): string {
 }
 
 const STRUCTURAL_AC: AcceptanceCriterion = {
-  id: "AC-1",
+  id: "AC-101",
   description: "Config file exists",
   layer: "structural",
   structuralAssertions: [
@@ -38,7 +38,7 @@ const STRUCTURAL_AC: AcceptanceCriterion = {
 };
 
 const STRUCTURAL_AC_CONTAINS: AcceptanceCriterion = {
-  id: "AC-2",
+  id: "AC-102",
   description: "Config has correct value",
   layer: "structural",
   structuralAssertions: [
@@ -47,13 +47,13 @@ const STRUCTURAL_AC_CONTAINS: AcceptanceCriterion = {
 };
 
 const TEST_BOUND_AC: AcceptanceCriterion = {
-  id: "AC-3",
+  id: "AC-103",
   description: "Empty list returns 400",
   layer: "test-bound",
 };
 
 const MANUAL_AC: AcceptanceCriterion = {
-  id: "AC-4",
+  id: "AC-104",
   description: "Code style consistency",
   layer: "manual",
 };
@@ -88,11 +88,11 @@ describe("Scenario 1: AC JSON + all PASS → proceeds to Tribunal", () => {
 
     // Run structural assertions
     const results = await runStructuralAssertions(criteria, tempDir);
-    expect(results["AC-1"]!.passed).toBe(true);
-    expect(results["AC-2"]!.passed).toBe(true);
+    expect(results["AC-101"]!.passed).toBe(true);
+    expect(results["AC-102"]!.passed).toBe(true);
 
     // Manual ACs should not appear in structural results
-    expect(results["AC-4"]).toBeUndefined();
+    expect(results["AC-104"]).toBeUndefined();
 
     // No structural failures
     const fails = Object.entries(results).filter(([, v]) => !v.passed);
@@ -112,14 +112,14 @@ describe("Scenario 2: AC JSON + structural FAIL → short-circuit failure", () =
 
     // Run structural assertions — AC-1 expects config.json to exist
     const results = await runStructuralAssertions(criteria, tempDir);
-    expect(results["AC-1"]!.passed).toBe(false);
-    expect(results["AC-1"]!.details[0]!.detail).toContain("not found");
+    expect(results["AC-101"]!.passed).toBe(false);
+    expect(results["AC-101"]!.details[0]!.detail).toContain("not found");
 
     // Verify short-circuit logic
     const structuralFails = Object.entries(results)
       .filter(([, v]) => !v.passed)
       .map(([id]) => id);
-    expect(structuralFails).toContain("AC-1");
+    expect(structuralFails).toContain("AC-101");
     expect(structuralFails.length).toBeGreaterThan(0);
   });
 
@@ -128,8 +128,8 @@ describe("Scenario 2: AC JSON + structural FAIL → short-circuit failure", () =
     const criteria = [STRUCTURAL_AC_CONTAINS];
 
     const results = await runStructuralAssertions(criteria, tempDir);
-    expect(results["AC-2"]!.passed).toBe(false);
-    expect(results["AC-2"]!.details[0]!.detail).toContain("not found");
+    expect(results["AC-102"]!.passed).toBe(false);
+    expect(results["AC-102"]!.details[0]!.detail).toContain("not found");
   });
 });
 
@@ -187,19 +187,19 @@ describe("Scenario 5: Test-bound AC missing bindings → BLOCKED", () => {
     const bindings: { acId: string; testFile: string; testName: string; language: string }[] = [];
 
     const coverage = validateAcBindingCoverage(criteria, bindings);
-    expect(coverage.missing).toContain("AC-3");
+    expect(coverage.missing).toContain("AC-103");
     expect(coverage.covered).toHaveLength(0);
   });
 
   it("should pass when all test-bound ACs are covered", () => {
     const criteria = [STRUCTURAL_AC, TEST_BOUND_AC, MANUAL_AC];
     const bindings = [
-      { acId: "AC-3", testFile: "test.ts", testName: "test1", language: "node" },
+      { acId: "AC-103", testFile: "test.ts", testName: "test1", language: "node" },
     ];
 
     const coverage = validateAcBindingCoverage(criteria, bindings);
     expect(coverage.missing).toHaveLength(0);
-    expect(coverage.covered).toEqual(["AC-3"]);
+    expect(coverage.covered).toEqual(["AC-103"]);
   });
 
   it("should report extra bindings that reference non-existent ACs", () => {
@@ -223,7 +223,7 @@ describe("Scenario 6: Index.ts fallback path — full AC framework validation", 
     await mkdir(join(tempDir, "__tests__"), { recursive: true });
     await writeFile(
       join(tempDir, "__tests__", "api.test.ts"),
-      `test("[AC-3] should return 400 when list is empty", () => { expect(true).toBe(true); });`,
+      `test("[AC-${103}] should return 400 when list is empty", () => { expect(true).toBe(true); });`,
     );
 
     const criteria = [STRUCTURAL_AC, STRUCTURAL_AC_CONTAINS, TEST_BOUND_AC, MANUAL_AC];
@@ -253,8 +253,8 @@ describe("Scenario 6: Index.ts fallback path — full AC framework validation", 
       acData.criteria,
       tempDir,
     );
-    expect(structuralResults["AC-1"]!.passed).toBe(true);
-    expect(structuralResults["AC-2"]!.passed).toBe(true);
+    expect(structuralResults["AC-101"]!.passed).toBe(true);
+    expect(structuralResults["AC-102"]!.passed).toBe(true);
     const structuralFails = Object.entries(structuralResults)
       .filter(([, v]) => !v.passed);
     expect(structuralFails).toHaveLength(0);
@@ -263,11 +263,11 @@ describe("Scenario 6: Index.ts fallback path — full AC framework validation", 
     // Note: discoverAcBindings is async and walks filesystem,
     // but we directly test validateAcBindingCoverage with known bindings
     const bindings = [
-      { acId: "AC-3", testFile: "__tests__/api.test.ts", testName: "should return 400 when list is empty", language: "node" },
+      { acId: "AC-103", testFile: "__tests__/api.test.ts", testName: "should return 400 when list is empty", language: "node" },
     ];
     const coverage = validateAcBindingCoverage(acData.criteria, bindings);
     expect(coverage.missing).toHaveLength(0);
-    expect(coverage.covered).toEqual(["AC-3"]);
+    expect(coverage.covered).toEqual(["AC-103"]);
 
     // Step 6: Compose results (simulating framework-ac-results.json)
     const frameworkResults = {
@@ -278,7 +278,7 @@ describe("Scenario 6: Index.ts fallback path — full AC framework validation", 
         .map((c) => c.id),
       timestamp: new Date().toISOString(),
     };
-    expect(frameworkResults.pendingManual).toEqual(["AC-4"]);
+    expect(frameworkResults.pendingManual).toEqual(["AC-104"]);
     expect(Object.keys(frameworkResults.structural)).toHaveLength(2);
     expect(Object.keys(frameworkResults.testBound)).toHaveLength(1);
   });
@@ -302,7 +302,7 @@ describe("Scenario 6: Index.ts fallback path — full AC framework validation", 
     const invalidJson = JSON.stringify({
       version: 1,
       criteria: [
-        { id: "AC-1", layer: "structural" }, // missing description
+        { id: "AC-101", layer: "structural" }, // missing description
       ],
     });
 
@@ -381,15 +381,15 @@ describe("TC-E2E-01: orchestrator Phase 6 full PASS pipeline", () => {
       pendingManual: acData.criteria.filter(c => c.layer === "manual").map(c => c.id),
       timestamp: new Date().toISOString(),
     };
-    expect(structuralResults["AC-1"]!.passed).toBe(true);
-    expect(frameworkResults.pendingManual).toEqual(["AC-4"]);
+    expect(structuralResults["AC-101"]!.passed).toBe(true);
+    expect(frameworkResults.pendingManual).toEqual(["AC-104"]);
 
     // Write and verify framework-ac-results.json
     const { writeFile: fsWriteFile, readFile: fsReadFile } = await import("node:fs/promises");
     await fsWriteFile(join(tempDir, "framework-ac-results.json"), JSON.stringify(frameworkResults, null, 2));
     const written = JSON.parse(await fsReadFile(join(tempDir, "framework-ac-results.json"), "utf-8"));
-    expect(written.structural["AC-1"].passed).toBe(true);
-    expect(written.pendingManual).toContain("AC-4");
+    expect(written.structural["AC-101"].passed).toBe(true);
+    expect(written.pendingManual).toContain("AC-104");
   });
 });
 
@@ -411,14 +411,14 @@ describe("TC-E2E-02: orchestrator Phase 6 structural FAIL short-circuit", () => 
     const structuralFails = Object.entries(structuralResults)
       .filter(([, v]) => !v.passed).map(([id]) => id);
     expect(structuralFails.length).toBeGreaterThan(0);
-    expect(structuralFails).toContain("AC-1");
+    expect(structuralFails).toContain("AC-101");
 
     // Compose feedback (mimicking orchestrator logic)
     const feedback = structuralFails.length > 0
       ? `Structural AC FAIL: ${structuralFails.join(", ")}`
       : "";
     expect(feedback).toContain("Structural AC FAIL");
-    expect(feedback).toContain("AC-1");
+    expect(feedback).toContain("AC-101");
   });
 });
 
@@ -440,14 +440,14 @@ describe("TC-E2E-04: orchestrator Phase 6 binding missing BLOCKED", () => {
 
     // No bindings discovered
     const coverage = validateAcBindingCoverage(criteria, []);
-    expect(coverage.missing).toContain("AC-3");
+    expect(coverage.missing).toContain("AC-103");
 
     // Compose feedback (mimicking orchestrator logic)
     const feedback = coverage.missing.length > 0
       ? `[BLOCKED] Test-bound AC missing bindings: ${coverage.missing.join(", ")}. Please go back to Phase 5`
       : "";
     expect(feedback).toContain("missing bindings");
-    expect(feedback).toContain("AC-3");
+    expect(feedback).toContain("AC-103");
     expect(feedback).toContain("Phase 5");
   });
 });
@@ -503,7 +503,7 @@ describe("TC-E2E-07: Phase 1 checkpoint AC schema invalid rejection", () => {
     const invalidJson = JSON.stringify({
       version: 1,
       criteria: [
-        { id: "AC-1", layer: "structural" }, // missing description
+        { id: "AC-101", layer: "structural" }, // missing description
       ],
     });
 
@@ -518,10 +518,10 @@ describe("TC-E2E-08: Phase 1 checkpoint manual ratio exceeded", () => {
   it("should reject when manual AC ratio exceeds 40%", () => {
     // 3 manual out of 4 = 75%
     const criteria = [
-      { id: "AC-1", description: "s1", layer: "structural" as const, structuralAssertions: [{ type: "file_exists" as const, path: "a.txt" }] },
-      { id: "AC-2", description: "m1", layer: "manual" as const },
-      { id: "AC-3", description: "m2", layer: "manual" as const },
-      { id: "AC-4", description: "m3", layer: "manual" as const },
+      { id: "AC-101", description: "s1", layer: "structural" as const, structuralAssertions: [{ type: "file_exists" as const, path: "a.txt" }] },
+      { id: "AC-102", description: "m1", layer: "manual" as const },
+      { id: "AC-103", description: "m2", layer: "manual" as const },
+      { id: "AC-104", description: "m3", layer: "manual" as const },
     ];
     const acJson = makeAcJson(criteria);
     const result = validateAcJson(acJson);
@@ -569,8 +569,8 @@ describe("TC-E2E-09: index.ts Phase 6 submit legacy path full PASS", () => {
 
     // Verify file was written correctly
     const written = JSON.parse(await fsReadFile(join(tempDir, "framework-ac-results.json"), "utf-8"));
-    expect(written.structural["AC-1"].passed).toBe(true);
-    expect(written.structural["AC-2"].passed).toBe(true);
+    expect(written.structural["AC-101"].passed).toBe(true);
+    expect(written.structural["AC-102"].passed).toBe(true);
   });
 });
 

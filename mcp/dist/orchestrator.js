@@ -9,7 +9,7 @@
  */
 import { execFile } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildRevisionPrompt, buildPreviousAttemptSummary, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from "./orchestrator-prompts.js";
 import { StateManager, extractTaskList, effortKeyForStep, hashContent } from "./state-manager.js";
@@ -391,27 +391,46 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
  * it's a pre-existing issue — returns null (pass through).
  * If it's a new failure introduced by our changes, returns the failure result.
  */
-async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = "BUILD_FAILED") {
+async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = "BUILD_FAILED", worktreeRoot) {
     const result = await shell(cmd, projectRoot);
     if (result.exitCode === 0)
         return null; // Success, no issue
     // Command failed — check if it was already broken before our changes.
-    // Only attempt if startCommit exists and git stash succeeds (real git repo).
     if (startCommit) {
-        const stashResult = await shell("git stash --include-untracked -q", projectRoot, 10_000);
-        if (stashResult.exitCode === 0) {
-            try {
-                const baselineResult = await shell(cmd, projectRoot, 300_000);
-                if (baselineResult.exitCode !== 0) {
-                    // Pre-existing failure — not caused by our changes, pass through
-                    return null;
+        if (worktreeRoot) {
+            // Worktree mode: create temporary detached worktree for baseline check (no stash risk)
+            const baselineDir = `${worktreeRoot}-baseline`;
+            const addResult = await shell(`git worktree add --detach "${baselineDir}" ${startCommit}`, worktreeRoot, 10_000);
+            if (addResult.exitCode === 0) {
+                try {
+                    const baselineResult = await shell(cmd, baselineDir, 300_000);
+                    if (baselineResult.exitCode !== 0) {
+                        // Pre-existing failure — not caused by our changes, pass through
+                        return null;
+                    }
+                }
+                finally {
+                    await shell(`git worktree remove --force "${baselineDir}"`, worktreeRoot, 10_000);
                 }
             }
-            finally {
-                await shell("git stash pop -q", projectRoot, 10_000);
-            }
         }
-        // git stash failed (no git repo, nothing to stash, etc.) — skip baseline check
+        else {
+            // Non-worktree mode: use git stash (legacy behavior)
+            const stashResult = await shell("git stash --include-untracked -q", projectRoot, 10_000);
+            if (stashResult.exitCode === 0) {
+                try {
+                    const baselineResult = await shell(cmd, projectRoot, 300_000);
+                    if (baselineResult.exitCode !== 0) {
+                        // Pre-existing failure — not caused by our changes, pass through
+                        return null;
+                    }
+                }
+                finally {
+                    await shell("git stash pop -q", projectRoot, 10_000);
+                }
+            }
+            // git stash failed (no git repo, nothing to stash, etc.) — skip baseline check
+        }
     }
     return {
         passed: false,
@@ -572,7 +591,7 @@ async function handleTribunalEscalation(ctx, phaseKey, currentStep, feedback) {
         message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
     };
 }
-export async function validateStep(step, outputDir, projectRoot, buildCmd, testCmd, sm, state, topic) {
+export async function validateStep(step, outputDir, projectRoot, buildCmd, testCmd, sm, state, topic, worktreeRoot) {
     switch (step) {
         case "1a": {
             const designPath = join(outputDir, "design.md");
@@ -695,20 +714,20 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                 }
             }
             // Build + test (with pre-existing failure detection)
-            const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit);
+            const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, "BUILD_FAILED", worktreeRoot);
             if (buildFail3)
                 return buildFail3;
-            const testFail3 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED");
+            const testFail3 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED", worktreeRoot);
             if (testFail3)
                 return testFail3;
             return { passed: true, feedback: "" };
         }
         case "4a": {
             // Build + test first (with pre-existing failure detection)
-            const buildFail4 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit);
+            const buildFail4 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, "BUILD_FAILED", worktreeRoot);
             if (buildFail4)
                 return buildFail4;
-            const testFail4 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED");
+            const testFail4 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED", worktreeRoot);
             if (testFail4)
                 return testFail4;
             // Tribunal (pure evaluation — no state side effects)
@@ -856,6 +875,13 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
         }
         // Phase 8: Ship (delivery verification) — no tribunal
         case "8a": {
+            // Worktree guard (AC-16): must complete merge before shipping
+            if (worktreeRoot) {
+                return {
+                    passed: false,
+                    feedback: "请先调用 auto_dev_complete 完成合并，再执行 Phase 8",
+                };
+            }
             // Check all commits are pushed
             try {
                 const gitResult = await shell("git log --oneline --branches --not --remotes", projectRoot, 10_000);
@@ -1559,8 +1585,14 @@ export async function computeNextTask(projectRoot, topic) {
     const buildCmd = state.stack.buildCmd;
     const testCmd = state.stack.testCmd;
     const skipSteps = state.skipSteps ?? [];
+    // effectiveRoot: worktree path when worktree mode active, else projectRoot (used for git ops)
+    const effectiveRoot = state.worktreeRoot ?? projectRoot;
     // codeRoot: actual directory where code lives (may differ from projectRoot for skill projects)
-    const effectiveCodeRoot = state.codeRoot ?? projectRoot;
+    const effectiveCodeRoot = state.worktreeRoot
+        ? (state.codeRoot
+            ? join(state.worktreeRoot, relative(projectRoot, state.codeRoot))
+            : state.worktreeRoot)
+        : (state.codeRoot ?? projectRoot);
     // Ship extra variables for Phase 8 prompt rendering
     const shipExtraVars = state.ship === true
         ? {
@@ -1585,7 +1617,7 @@ export async function computeNextTask(projectRoot, topic) {
     }
     // Build orchestrator context for extracted sub-functions
     const ctx = {
-        sm, state, outputDir, projectRoot, effectiveCodeRoot,
+        sm, state, outputDir, projectRoot, effectiveRoot, effectiveCodeRoot,
         topic, buildCmd, testCmd, phases, skipSteps, getExtraVars,
     };
     // 2. Read step state
@@ -1611,7 +1643,7 @@ export async function computeNextTask(projectRoot, topic) {
             message: `Step ${currentStep} prerequisite check failed: missing ${prereqCheck.missing.join(", ")}.`,
         };
     }
-    const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic);
+    const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic, state.worktreeRoot);
     if (!validation.passed) {
         return handleValidationFailure(ctx, stepState, validation);
     }

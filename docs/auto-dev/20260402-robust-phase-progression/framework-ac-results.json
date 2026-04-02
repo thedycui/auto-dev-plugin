@@ -1,0 +1,131 @@
+{
+  "structural": {
+    "AC-S1": {
+      "passed": true,
+      "details": [
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /StepEffort/ found in mcp/src/types.ts"
+        },
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /totalAttempts/ found in mcp/src/types.ts"
+        },
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /revisionCycles/ found in mcp/src/types.ts"
+        },
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /tribunalAttempts/ found in mcp/src/types.ts"
+        }
+      ]
+    },
+    "AC-S2": {
+      "passed": true,
+      "details": [
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /worktreeRoot/ found in mcp/src/types.ts"
+        }
+      ]
+    },
+    "AC-S3": {
+      "passed": true,
+      "details": [
+        {
+          "type": "file_contains",
+          "passed": true,
+          "detail": "Pattern /effortKeyForStep/ found in mcp/src/orchestrator.ts"
+        }
+      ]
+    },
+    "AC-S4": {
+      "passed": true,
+      "details": [
+        {
+          "type": "build_succeeds",
+          "passed": true,
+          "detail": "Build succeeded"
+        }
+      ]
+    }
+  },
+  "testBound": {
+    "AC-1": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/improvements.test.ts (11 tests | 10 skipped) 3ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 10 skipped (11)\n   Start at  15:10:49\n   Duration  831ms (transform 131ms, setup 0ms, collect 233ms, tests 3ms, environment 0ms, prepare 141ms)\n\n"
+    },
+    "AC-6": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/improvements.test.ts (11 tests | 6 skipped) 7ms\n\n Test Files  1 passed (1)\n      Tests  5 passed | 6 skipped (11)\n   Start at  15:10:51\n   Duration  761ms (transform 123ms, setup 0ms, collect 210ms, tests 7ms, environment 0ms, prepare 148ms)\n\n"
+    },
+    "AC-5": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:10:54\n   Duration  1.10s (transform 352ms, setup 0ms, collect 492ms, tests 5ms, environment 0ms, prepare 236ms)\n\n"
+    },
+    "AC-7": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:10:56\n   Duration  1.10s (transform 311ms, setup 0ms, collect 469ms, tests 5ms, environment 0ms, prepare 151ms)\n\n"
+    },
+    "AC-11": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 4ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:10:58\n   Duration  1.08s (transform 327ms, setup 0ms, collect 506ms, tests 4ms, environment 0ms, prepare 160ms)\n\n"
+    },
+    "AC-8": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 23 skipped) 4ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 23 skipped (25)\n   Start at  15:11:01\n   Duration  1.16s (transform 316ms, setup 0ms, collect 486ms, tests 4ms, environment 0ms, prepare 213ms)\n\n"
+    },
+    "AC-9": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 23 skipped) 4ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 23 skipped (25)\n   Start at  15:11:03\n   Duration  1.19s (transform 344ms, setup 0ms, collect 565ms, tests 4ms, environment 0ms, prepare 189ms)\n\n"
+    },
+    "AC-13": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 4ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:11:06\n   Duration  1.18s (transform 352ms, setup 0ms, collect 547ms, tests 4ms, environment 0ms, prepare 215ms)\n\n"
+    },
+    "AC-2": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 4ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:11:08\n   Duration  1.25s (transform 360ms, setup 0ms, collect 664ms, tests 4ms, environment 0ms, prepare 162ms)\n\n"
+    },
+    "AC-3": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator-ux-improvements.test.ts (25 tests | 24 skipped) 3ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 24 skipped (25)\n   Start at  15:11:11\n   Duration  1.13s (transform 333ms, setup 0ms, collect 523ms, tests 3ms, environment 0ms, prepare 162ms)\n\n"
+    },
+    "AC-4": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator.test.ts (113 tests | 112 skipped) 8ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 112 skipped (113)\n   Start at  15:11:13\n   Duration  1.16s (transform 416ms, setup 0ms, collect 567ms, tests 8ms, environment 0ms, prepare 167ms)\n\n"
+    },
+    "AC-14": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator.test.ts (113 tests | 111 skipped) 10ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 111 skipped (113)\n   Start at  15:11:16\n   Duration  1.28s (transform 460ms, setup 0ms, collect 598ms, tests 10ms, environment 0ms, prepare 179ms)\n\n"
+    },
+    "AC-15": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator.test.ts (113 tests | 111 skipped) 9ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 111 skipped (113)\n   Start at  15:11:18\n   Duration  1.16s (transform 428ms, setup 0ms, collect 568ms, tests 9ms, environment 0ms, prepare 179ms)\n\n"
+    },
+    "AC-17": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/orchestrator.test.ts (113 tests | 111 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 111 skipped (113)\n   Start at  15:11:21\n   Duration  1.16s (transform 417ms, setup 0ms, collect 548ms, tests 5ms, environment 0ms, prepare 138ms)\n\n"
+    },
+    "AC-12": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/worktree-handlers.test.ts (4 tests | 2 skipped) 6ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 2 skipped (4)\n   Start at  15:11:23\n   Duration  1.01s (transform 277ms, setup 0ms, collect 404ms, tests 6ms, environment 0ms, prepare 191ms)\n\n"
+    },
+    "AC-10": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/worktree-integration.test.ts (8 tests | 7 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  1 passed | 7 skipped (8)\n   Start at  15:11:26\n   Duration  1.19s (transform 319ms, setup 0ms, collect 453ms, tests 5ms, environment 0ms, prepare 144ms)\n\n"
+    },
+    "AC-16": {
+      "passed": true,
+      "output": "\n RUN  v2.1.9 /Users/admin/dycui/auto-dev-plugin\n\n ✓ mcp/src/__tests__/worktree-integration.test.ts (8 tests | 6 skipped) 5ms\n\n Test Files  1 passed (1)\n      Tests  2 passed | 6 skipped (8)\n   Start at  15:11:28\n   Duration  1.02s (transform 295ms, setup 0ms, collect 444ms, tests 5ms, environment 0ms, prepare 130ms)\n\n"
+    }
+  },
+  "pendingManual": [],
+  "timestamp": "2026-04-02T07:11:29.814Z"
+}

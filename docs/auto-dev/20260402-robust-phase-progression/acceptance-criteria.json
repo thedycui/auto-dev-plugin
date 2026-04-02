@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "criteria": [
+    {
+      "id": "AC-1",
+      "description": "auto_dev_init(useWorktree=true) 创建独立的 git worktree 和分支，所有后续 agent 操作在 worktree 中执行，不影响主 working tree",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-2",
+      "description": "auto_dev_complete 将 worktree 分支合并回 sourceBranch 并清理 worktree 目录，complete 后 sourceBranch 包含 worktree 的 commit，worktree 目录不存在",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-3",
+      "description": "Tribunal 的 git diff startCommit 在 worktree 模式下只包含 auto-dev 的修改，不包含主 working tree 的修改",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-4",
+      "description": "checkBuildWithBaseline 在 worktree 模式下不使用 git stash，改用临时 worktree 做 baseline 检查",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-5",
+      "description": "Revision 循环（1b→1c→1b→1c...）在 maxRevisionCycles（默认2）轮后返回 BLOCKED escalation，不再无限循环",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-6",
+      "description": "Revision step（1c/2c）的 validateStep 使用 hash delta 检查产物变更，产物未修改时返回 passed=false；5c 使用进入 5c 前记录的测试文件聚合 hash 进行比对（而非基于 startCommit 的 git diff），测试文件未修改时返回 passed=false",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-7",
+      "description": "Phase 3 验证在无代码变更（git diff 为空）时返回 passed=false",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-8",
+      "description": "StepEffort 的 totalAttempts 在达到上限（默认6）时返回 BLOCKED escalation，reason 为 effort_exhausted",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-9",
+      "description": "前置守卫在 design.md 缺失时阻止 step '2a' 执行，返回 prerequisite_missing escalation",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-10",
+      "description": "--no-worktree 模式（useWorktree=false）下所有功能正常，行为与当前版本一致（向后兼容）",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-11",
+      "description": "旧 state.json（不含 worktreeRoot/stepEffort 字段）不会 crash，fallback 到旧行为正常推进",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-12",
+      "description": "会话中断后 resume 时，如果 worktree 仍存在则复用，如果被删则从分支重建成功",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-13",
+      "description": "Phase 4a 首次执行（无 feedback）时不 dispatch developer agent，computeNextTask 返回 agent=null、prompt=null",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-14",
+      "description": "Revision prompt 采用 markdown 标题格式（含 '## 修订任务'、'## 审查反馈' 等标题），并填充 previousAttemptSummary；stepEffort.totalAttempts=2 时 prompt 包含'第 3 次尝试'和失败原因摘要；orchestrator-prompts.test.ts 中的旧格式断言同步更新",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-15",
+      "description": "Phase 3 的 scoped_prompt 包含完整 task 描述和设计目标摘要，prompt 中标注'不需要再读 plan.md'",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-16",
+      "description": "Worktree 模式下，Phase 8 的 validateStep 检查 state.worktreeRoot 是否已清空；若 worktree 仍存在（auto_dev_complete 未执行）则返回 passed=false，feedback 包含'auto_dev_complete'关键词",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-17",
+      "description": "case '5c' 的 delta check 使用进入 5c 前记录的测试文件聚合 hash（lastArtifactHashes['test-files']）与当前 hash 比对；未修改时返回 passed=false；修改后通过",
+      "layer": "test-bound"
+    },
+    {
+      "id": "AC-S1",
+      "description": "types.ts 包含 StepEffort 类型定义（含 totalAttempts、revisionCycles、tribunalAttempts 字段）",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "file_contains", "path": "mcp/src/types.ts", "pattern": "StepEffort" },
+        { "type": "file_contains", "path": "mcp/src/types.ts", "pattern": "totalAttempts" },
+        { "type": "file_contains", "path": "mcp/src/types.ts", "pattern": "revisionCycles" },
+        { "type": "file_contains", "path": "mcp/src/types.ts", "pattern": "tribunalAttempts" }
+      ]
+    },
+    {
+      "id": "AC-S2",
+      "description": "types.ts 包含 worktreeRoot 字段定义",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "file_contains", "path": "mcp/src/types.ts", "pattern": "worktreeRoot" }
+      ]
+    },
+    {
+      "id": "AC-S3",
+      "description": "orchestrator.ts 包含 effortKeyForStep 函数定义",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "file_contains", "path": "mcp/src/orchestrator.ts", "pattern": "effortKeyForStep" }
+      ]
+    },
+    {
+      "id": "AC-S4",
+      "description": "项目构建成功（npm run build 无错误）",
+      "layer": "structural",
+      "structuralAssertions": [
+        { "type": "build_succeeds", "path": "mcp" }
+      ]
+    }
+  ]
+}

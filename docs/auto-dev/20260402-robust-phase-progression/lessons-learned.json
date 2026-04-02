@@ -1,0 +1,98 @@
+[
+  {
+    "phase": 1,
+    "category": "process",
+    "lesson": "设计审查阶段（Phase 1b）触发两次修订（1c），说明首版设计有多个 P1 问题未闭环",
+    "context": "progress-log.md 显示 1b 在 05:11 通过初始，但随后出现两条 '1c passed, re-validating 1b' 记录（05:20 和 05:25），说明设计文档经过两轮修订才最终通过 1b。design-review.md 列出了 4 个 P1 问题（P1-A~P1-D），反映首版设计在 effectiveCodeRoot 组合规则、Phase 8 守卫、5c hash delta、buildRevisionPrompt 格式重写 4 个关键点上均存在设计缺口，返工成本约 14 分钟。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 2,
+    "category": "process",
+    "lesson": "计划审查阶段（Phase 2b）同样触发修订（2c），但只经历 1 次修订即通过，说明 P1 问题集中在依赖关系和完成标准遗漏",
+    "context": "progress-log.md 显示 2b 在 05:29 通过，但 05:34 出现 '2c passed, re-validating 2b'，随后 2b 最终通过。plan-review.md 中 P1-1/P1-2/P1-3 均已解决，说明修订集中在 Task 8 依赖字段更正、Task 12 完成标准补充（SKILL.md 更新要求 + worktree 依赖安装验证）。修订成本约 5 分钟。",
+    "severity": "minor",
+    "reusable": false
+  },
+  {
+    "phase": 3,
+    "category": "highlight",
+    "lesson": "Phase 3 实现阶段一次通过，说明设计+计划双重审查的修订成本换来了实现质量",
+    "context": "progress-log.md 显示 Phase 3 在 06:10:38 通过，没有重试记录。整个实现阶段（约 36 分钟，从 Phase 2 结束到 Phase 3 通过）生成了 7 个提交、约 2087 行变更（22 个文件），构建和 733 个测试全部通过。这说明在 Phase 1/2 投入修订成本是合理的。",
+    "severity": "minor",
+    "reusable": true
+  },
+  {
+    "phase": 4,
+    "category": "integrity",
+    "lesson": "Phase 4 代码审查使用 [TRIBUNAL-FALLBACK] 机制，没有独立的 code-review.md 文件，依赖 tribunal-phase4.md 代替",
+    "context": "会话目录中不存在 code-review.md 文件。Phase 4 的代码审查通过 tribunal-fallback-subagent 执行，结果记录在 tribunal-phase4.md 中，包含了具体的文件名:行号引用（如 orchestrator.ts:1825, orchestrator.ts:877-881 等）。这是框架设计决策，不是跳过审查，但 tribunal 仅提出 2 个 P2 建议项，P1 问题（如 tribunalAttempts 与 tribunalSubmits 双写同步验证）被降级为 P2 而非 P1，可能存在低估风险。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 4,
+    "category": "pitfall",
+    "lesson": "Tribunal 将 plan-review P2-3（tribunalAttempts 与 tribunalSubmits 双写验证缺口）维持为 P2，未在代码审查阶段推动修复",
+    "context": "plan-review.md P2-3 明确指出 Task 3 完成标准未验证 tribunalAttempts 与 tribunalSubmits 的同步一致性。tribunal-phase4.md 回应为 'handleValidationFailure 的 tribunalAttempts 增量更新未同步更新 tribunalSubmits'，同样评为 P2。这意味着双写的一致性在整个 session 内都未被单元测试显式覆盖，存在潜在的隐藏 bug。",
+    "severity": "important",
+    "reusable": false
+  },
+  {
+    "phase": 5,
+    "category": "highlight",
+    "lesson": "Phase 5 测试审查（5a + tribunal）均一次通过，测试覆盖质量较高",
+    "context": "progress-log.md 显示 Phase 5 的 5a 在 06:24:11 通过，tribunal 在 06:34:54 通过，均无重试。tribunal-phase5.md 提供了具体的测试行号引用（如 orchestrator.test.ts:2607, worktree-handlers.test.ts:289），验证了 7 条关键 AC 的断言存在且有意义。733 个测试全部通过，无 SKIP/DEFERRED。",
+    "severity": "minor",
+    "reusable": false
+  },
+  {
+    "phase": 6,
+    "category": "integrity",
+    "lesson": "AC 框架扫描器存在跨 topic AC 编号碰撞问题，导致 5 条 AC（AC-1/2/3/5/6）被误映射到其他 topic 的历史测试文件",
+    "context": "framework-ac-results.json 显示 AC-1 通过 improvements.test.ts（运行结果为 10 skipped/1 passed），AC-5 通过 orchestrator-ux-improvements.test.ts（24 skipped/1 passed），AC-3 通过 orchestrator-ux-improvements.test.ts（24 skipped/1 passed）。这些都是其他 topic 遗留的 [AC-N] 标签。acceptance-report.md 对此有详细说明，框架 FAIL 判定为误判，实际测试在正确文件中通过。但这个问题会在每次 AC 验收时引入混淆，需要框架级修复。",
+    "severity": "critical",
+    "reusable": true
+  },
+  {
+    "phase": 6,
+    "category": "pitfall",
+    "lesson": "框架 AC 扫描器全局搜索 [AC-N] 字面量不区分 topic 边界，是系统性缺陷而非偶发问题",
+    "context": "framework-ac-results.json 显示 AC-3 绑定到 orchestrator-ux-improvements.test.ts 中的测试（该测试实际测的是 auto_dev_reset 的 U-RESET-3 功能），而本 topic 的真实 AC-3（tribunal git diff 隔离）在 worktree-integration.test.ts L181/189。这种错误绑定发生在 AC-1/2/3/5/6 共 5 条，说明框架扫描逻辑需要加入 topic 作用域约束。",
+    "severity": "critical",
+    "reusable": true
+  },
+  {
+    "phase": 7,
+    "category": "integrity",
+    "lesson": "Phase 7（测试覆盖分析）未完成——session 在 Phase 7 IN_PROGRESS 状态中断，未产出 phase 7 的 CHECKPOINT 记录",
+    "context": "state.json 显示 phase=7, status=IN_PROGRESS, step='7'，progress-log.md 中最后一条 CHECKPOINT 为 Phase 6（07:12:06Z）。会话在 Phase 7 执行过程中中断，lastFailureDetail 包含 'AC-3, AC-91, AC-92, AC-93, AC-95 FAIL'（来自 ac-test-binding.test.ts 的内部测试用例，不是真正的覆盖缺口），说明框架在 Phase 7 扫描时遭遇了与 Phase 6 类似的 AC 编号碰撞问题，session 未能完成。",
+    "severity": "important",
+    "reusable": false
+  },
+  {
+    "phase": 3,
+    "category": "integrity",
+    "lesson": "TDD 设为 false，实现提交（feat）均早于对应测试提交（test），不违反 TDD 约束但存在测试滞后",
+    "context": "state.json 显示 tdd=false。git log 确认提交顺序为：feat(types,state) 13:38 → feat(orchestrator) 13:44 → test(orchestrator) 13:49 → feat(worktree) 13:56/14:01 → test(worktree) 14:05 → fix(worktree) 14:09。实现在测试之前提交符合 tdd=false 的设定，不构成违规，但 Task 9（测试）和 Task 13（集成测试）均在对应实现之后提交，说明这不是 TDD 驱动的开发模式。",
+    "severity": "minor",
+    "reusable": false
+  },
+  {
+    "phase": 3,
+    "category": "technical",
+    "lesson": "effectiveCodeRoot 在 validateStep 中被意外覆盖，需要额外的 fix commit 恢复",
+    "context": "最后一个提交 96d50d3 的 message 为 'fix(worktree): restore effectiveCodeRoot in validateStep to preserve codeRoot build path'，说明在实现 worktree 功能时，validateStep 中的 effectiveCodeRoot 计算逻辑出现了回归——worktree 模式下应使用 path.join(worktreeRoot, relative(projectRoot, codeRoot))，但首次实现时遗漏了这个组合规则（design-review P1-A 特别强调过该规则）。需要额外 bugfix commit 修复，说明 P1-A 的修订在实现时未能完全落地。",
+    "severity": "important",
+    "reusable": true
+  },
+  {
+    "phase": 4,
+    "category": "technical",
+    "lesson": "设计审查中 P1-A 明确要求的 effectiveCodeRoot 组合规则在实现阶段被遗漏，最终触发 bugfix",
+    "context": "design-review.md P1-A 说明：'effectiveCodeRoot 通过 path.join(worktreeRoot, path.relative(projectRoot, codeRoot)) 计算'，并指出 validateStep 接收 effectiveCodeRoot（build/test 相关）。但从 git log 看，96d50d3（最终 fix 提交）才真正修复了这个遗漏。这说明审查→实现的信息传递存在损耗，关键约束未被实现者充分理解或执行。",
+    "severity": "important",
+    "reusable": true
+  }
+]

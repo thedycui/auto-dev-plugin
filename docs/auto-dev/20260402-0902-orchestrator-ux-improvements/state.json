@@ -1,0 +1,31 @@
+{
+  "topic": "orchestrator-ux-improvements",
+  "mode": "full",
+  "phase": 7,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "node",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/dycui/auto-dev-plugin/docs/auto-dev/20260402-0902-orchestrator-ux-improvements",
+  "projectRoot": "/Users/admin/dycui/auto-dev-plugin",
+  "startedAt": "2026-04-02T01:02:53.355Z",
+  "updatedAt": "2026-04-02T03:32:32.795Z",
+  "startCommit": "cfa7d419403797de7b5013c010011c21776a5dde",
+  "codeRoot": "/Users/admin/dycui/auto-dev-plugin/mcp/src",
+  "tdd": false,
+  "costMode": "economy",
+  "step": null,
+  "stepIteration": 0,
+  "lastValidation": "DONE",
+  "approachState": null,
+  "iteration": 0,
+  "phaseTimings": {},
+  "tribunalSubmits": {
+    "4": 3,
+    "5": 5,
+    "6": 1
+  }
+}

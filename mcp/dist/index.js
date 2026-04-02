@@ -1820,7 +1820,9 @@ server.tool("auto_dev_submit", "提交当前 Phase 产物进行独立裁决。Ph
             // Structural assertions (Layer 1)
             const structuralResults = await runStructuralAssertions(acData.criteria, effectiveCodeRoot, { buildCmd: state.stack.buildCmd, testCmd: state.stack.testCmd });
             // Test-bound bindings (Layer 2)
-            const bindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+            const allBindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+            const validAcIds = new Set(acData.criteria.map((c) => c.id));
+            const bindings = allBindings.filter((b) => validAcIds.has(b.acId));
             const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, state.stack.testCmd);
             // Write framework results
             const frameworkResults = {

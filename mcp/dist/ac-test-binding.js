@@ -60,6 +60,7 @@ async function findTestFiles(root, language) {
         return [];
     const dirs = TEST_DIRS[normalized] ?? [];
     const results = [];
+    const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git"]);
     async function walk(dir) {
         let entries;
         try {
@@ -70,7 +71,7 @@ async function findTestFiles(root, language) {
         }
         for (const entry of entries) {
             const fullPath = join(dir, entry.name);
-            if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
+            if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
                 await walk(fullPath);
             }
             else if (entry.isFile() && pattern.test(entry.name)) {
