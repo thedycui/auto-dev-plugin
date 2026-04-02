@@ -1,6 +1,6 @@
 {
   "name": "auto-dev",
-  "version": "9.4.6",
+  "version": "9.4.7",
   "description": "Intelligent development automation plugin that provides guided workflows, context-aware code generation, and best-practice enforcement for full-stack projects",
   "author": {
     "name": "Auto Dev Team"
