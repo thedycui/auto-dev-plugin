@@ -401,9 +401,8 @@ describe("Issue #10: Checklist scope constraints", () => {
 
       const { digestContent } = await prepareTribunalInput(4, tmpDir, tmpDir);
 
-      expect(digestContent).toContain("范围限制");
+      expect(digestContent).toContain("审查范围");
       expect(digestContent).toContain("acRef");
-      expect(digestContent).toContain("降级为 advisory");
     } finally {
       vi.resetAllMocks();
       await rm(tmpDir, { recursive: true, force: true });
@@ -465,7 +464,7 @@ describe("Tribunal Calibration: Lessons injection", () => {
 
       const { digestContent } = await prepareTribunalInput(4, tmpDir, tmpDir);
 
-      expect(digestContent).toContain("裁决校准经验");
+      expect(digestContent).toContain("经验校准");
       expect(digestContent).toContain("Do not judge beyond AC scope");
     } finally {
       vi.resetAllMocks();
@@ -492,7 +491,7 @@ describe("Tribunal Calibration: Lessons injection", () => {
 
       const { digestContent } = await prepareTribunalInput(4, tmpDir, tmpDir);
 
-      expect(digestContent).not.toContain("裁决校准经验");
+      expect(digestContent).not.toContain("经验校准");
     } finally {
       vi.resetAllMocks();
       await rm(tmpDir, { recursive: true, force: true });
@@ -618,11 +617,11 @@ describe("Integration Entry Point: prepareTribunalInput full pipeline", () => {
     expect(fileContent).toBe(digestContent);
 
     // Verify scope limitation section
-    expect(digestContent).toContain("范围限制");
+    expect(digestContent).toContain("审查范围");
     expect(digestContent).toContain("acRef");
 
     // Verify tribunal lessons were injected
-    expect(digestContent).toContain("裁决校准经验");
+    expect(digestContent).toContain("经验校准");
     expect(digestContent).toContain("Tribunal should not require changes beyond AC scope");
     expect(digestContent).toContain("Avoid judging test naming conventions as P0");
 

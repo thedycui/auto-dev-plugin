@@ -21,40 +21,34 @@ export function containsFrameworkTerms(text) {
 /** Builds a revision prompt from structured input. */
 export function buildRevisionPrompt(input) {
     const lines = [];
-    lines.push("## 修订任务");
-    lines.push("");
+    lines.push("修订:");
     lines.push(input.originalTask);
-    lines.push("");
     if (input.previousAttemptSummary) {
-        lines.push("## 历史尝试");
         lines.push("");
+        lines.push("上次:");
         lines.push(input.previousAttemptSummary);
-        lines.push("");
     }
-    lines.push("## 审查反馈（必须逐条回应）");
     lines.push("");
+    lines.push("反馈:");
     lines.push(input.feedback);
-    lines.push("");
     if (input.artifacts.length > 0) {
-        lines.push("## 待修改文件");
         lines.push("");
+        lines.push("文件:");
         for (const a of input.artifacts) {
             lines.push(`- ${a}`);
         }
-        lines.push("");
     }
     return lines.join("\n");
 }
 /** Builds a previous attempt summary from step effort and current feedback. */
 export function buildPreviousAttemptSummary(stepId, effort, currentFeedback) {
-    const lines = [];
-    lines.push(`步骤 ${stepId} 已尝试 ${effort.totalAttempts} 次（修订循环 ${effort.revisionCycles} 次，审查失败 ${effort.tribunalAttempts} 次）。`);
+    const parts = [`${stepId}:${effort.totalAttempts}/${effort.revisionCycles}/${effort.tribunalAttempts}`];
     if (currentFeedback) {
         const firstLine = currentFeedback.split("\n").find(l => l.trim().length > 0) ?? currentFeedback;
-        const summary = firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine;
-        lines.push(`上次失败原因：${summary}`);
+        const summary = firstLine.length > 80 ? firstLine.slice(0, 80) + "..." : firstLine;
+        parts.push(`原:${summary}`);
     }
-    return lines.join("\n");
+    return parts.join(" ");
 }
 /** Translates framework error codes to plain technical feedback. */
 export function translateFailureToFeedback(errorCode, detail) {
@@ -154,30 +148,23 @@ export function extractOneLineReason(feedback) {
 // ---------------------------------------------------------------------------
 export function buildCircuitBreakPrompt(params) {
     const lines = [];
-    lines.push("# 任务");
-    lines.push("");
     lines.push(params.goal);
     lines.push("");
-    lines.push("## 方案");
-    lines.push("");
-    lines.push("请按以下方案执行：");
+    lines.push("方案:");
     lines.push(params.approach);
     lines.push("");
     if (params.prohibited.length > 0) {
-        lines.push("## 约束（以下方案已失败，禁止使用）");
-        lines.push("");
+        lines.push("禁止方案:");
         for (const p of params.prohibited) {
-            lines.push(`- 禁止: ${p.summary}（原因: ${p.failReason}）`);
+            lines.push(`- ${p.summary}(${p.failReason})`);
         }
         lines.push("");
     }
-    lines.push("## 要求");
+    lines.push("约束:");
+    lines.push("- 禁用上述方案");
+    lines.push("- 遇困难先分析根因");
     lines.push("");
-    lines.push("- 不要尝试任何已禁止的方案");
-    lines.push("- 如果当前方案也遇到困难，先分析根因再决定下一步");
-    lines.push("");
-    lines.push(`输出目录: ${params.outputDir}`);
-    lines.push("");
+    lines.push(`输出:${params.outputDir}`);
     return lines.join("\n");
 }
 //# sourceMappingURL=orchestrator-prompts.js.map

@@ -70,9 +70,9 @@ describe("buildRevisionPrompt", () => {
       feedback: "缺少输入校验",
       artifacts: ["src/login.ts"],
     });
-    expect(result).toContain("## 修订任务");
-    expect(result).toContain("## 审查反馈（必须逐条回应）");
-    expect(result).toContain("## 待修改文件");
+    expect(result).toContain("修订:");
+    expect(result).toContain("反馈:");
+    expect(result).toContain("文件:");
   });
 
   it("includes previousAttemptSummary section when provided", () => {
@@ -83,7 +83,7 @@ describe("buildRevisionPrompt", () => {
       previousAttemptSummary: "上次缺少错误处理",
     });
     expect(result).toContain("上次缺少错误处理");
-    expect(result).toContain("## 历史尝试");
+    expect(result).toContain("上次:");
   });
 
   it("omits 历史尝试 section when previousAttemptSummary is not provided", () => {
@@ -92,7 +92,7 @@ describe("buildRevisionPrompt", () => {
       feedback: "有问题",
       artifacts: [],
     });
-    expect(result).not.toContain("## 历史尝试");
+    expect(result).not.toContain("上次:");
   });
 
   it("output does not contain framework terms", () => {

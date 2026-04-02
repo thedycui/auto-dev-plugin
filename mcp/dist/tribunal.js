@@ -173,14 +173,9 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     if (phase === 7) {
         await generateRetrospectiveData(outputDir);
     }
-    let content = `# Phase ${phase} 独立裁决\n\n`;
-    content += `你是独立裁决者。你的默认立场是 FAIL。\n`;
-    content += `PASS 必须对每条检查项提供证据（文件名:行号），FAIL 只需说明理由。\n`;
-    content += `PASS 的举证成本远大于 FAIL —— 如果你不确定，判 FAIL。\n\n`;
-    content += `## 范围限制\n\n`;
-    content += `- 你只能审查本次 diff 涉及的变更，不得对 diff 之外的代码提出阻塞性问题（P0/P1）。\n`;
-    content += `- P0/P1 问题必须提供 acRef（关联验收标准编号），否则将被降级为 advisory。\n`;
-    content += `- 不在本次任务范围内的改进建议请放入 advisory 字段。\n\n`;
+    let content = `# Phase ${phase} 裁决\n\n`;
+    content += `默认立场 FAIL。PASS 需逐条举证(文件:行号)。\n`;
+    content += `审查范围限本次 diff。P0/P1 必须提供 acRef。\n\n`;
     // 1. Framework statistics (hard data — git diff --stat + untracked files)
     // IMP-003: Use unified GitManager.getDiffStatWithUntracked
     const gm = new GitManager(projectRoot);
@@ -188,9 +183,9 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     // Truncate diffStat if too large (monorepos can produce thousands of lines)
     const diffStatLines = diffStat.split("\n");
     const truncatedDiffStat = diffStatLines.length > 100
-        ? diffStatLines.slice(0, 100).join("\n") + `\n... (${diffStatLines.length - 100} more files omitted)`
+        ? diffStatLines.slice(0, 100).join("\n") + `\n... (+${diffStatLines.length - 100} files)`
         : diffStat;
-    content += `## 框架统计（可信数据）\n\`\`\`\n${truncatedDiffStat}\n\`\`\`\n\n`;
+    content += `## 统计\n\`\`\`\n${truncatedDiffStat}\n\`\`\`\n\n`;
     // 1b. Change scale signal (injected between 框架统计 and 关键代码变更)
     let keyDiffBudget = 300;
     try {
@@ -202,20 +197,18 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
         let scaleInstruction;
         if (totalLines > 500) {
             scaleLevel = "HIGH";
-            scaleInstruction = "变更行数超过 500 行，必须逐文件审查，不得遗漏。";
+            scaleInstruction = "逐文件审查";
             keyDiffBudget = 500;
         }
         else if (totalLines > 100) {
             scaleLevel = "MEDIUM";
-            scaleInstruction = "变更规模适中，重点审查核心逻辑。";
+            scaleInstruction = "重点审查核心逻辑";
         }
         else {
             scaleLevel = "LOW";
-            scaleInstruction = "变更规模较小，快速审查即可。";
+            scaleInstruction = "快速审查";
         }
-        content += `## 变更规模\n\n`;
-        content += `- 规模等级：**${scaleLevel}**（+${insertions} -${deletions}，共 ${totalLines} 行）\n`;
-        content += `- 审查指令：${scaleInstruction}\n\n`;
+        content += `## 变更: ${scaleLevel} (+${insertions} -${deletions}) ${scaleInstruction}\n\n`;
     }
     catch { /* scale injection failed, skip silently */ }
     // 2. Inline review materials (truncated to reasonable length)
@@ -227,7 +220,7 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     }
     // 3. Key code diff (excluding test/config/dist, truncated)
     const keyDiff = await getKeyDiff(projectRoot, startCommit, keyDiffBudget);
-    content += `## 关键代码变更\n\`\`\`diff\n${keyDiff}\n\`\`\`\n\n`;
+    content += `## Diff\n\`\`\`diff\n${keyDiff}\n\`\`\`\n\n`;
     // 4. Inject tribunal-category lessons (calibration)
     try {
         const lessonsManager = new LessonsManager(outputDir, projectRoot);
@@ -235,7 +228,7 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
             .filter((l) => !l.retired)
             .slice(0, 5);
         if (tribunalLessons.length > 0) {
-            content += `## 裁决校准经验（历史积累）\n\n`;
+            content += `## 经验校准\n\n`;
             for (const l of tribunalLessons) {
                 content += `- [${l.severity ?? "minor"}] ${l.lesson}\n`;
             }
@@ -251,7 +244,7 @@ export async function prepareTribunalInput(phase, outputDir, projectRoot, startC
     if (content.length > MAX_DIGEST_CHARS) {
         const truncatePoint = content.lastIndexOf("\n", MAX_DIGEST_CHARS);
         content = content.slice(0, truncatePoint > 0 ? truncatePoint : MAX_DIGEST_CHARS)
-            + `\n\n... (digest truncated from ${content.length} to ~${MAX_DIGEST_CHARS} chars to avoid token limits)\n`;
+            + `\n\n... (truncated: ${content.length}→${MAX_DIGEST_CHARS} chars)\n`;
     }
     await writeFile(digestFile, content, "utf-8");
     return { digestPath: digestFile, digestContent: content };
@@ -320,8 +313,8 @@ export async function runTribunal(digestContent, phase, digestPath) {
     // Short digests inline; long digests reference the file
     const useFile = digestPath && digestContent.length > INLINE_THRESHOLD;
     const prompt = useFile
-        ? `你是独立裁决者。请先用 Read 工具读取文件 "${digestPath}"，然后按照其中的检查清单逐条裁决。`
-        : `以下是待裁决的材料，请按照检查清单逐条裁决。\n\n${digestContent}`;
+        ? `读取"${digestPath}"并按清单裁决。`
+        : `按清单裁决:\n\n${digestContent}`;
     const schemaStr = JSON.stringify(TRIBUNAL_SCHEMA);
     const args = [
         "-p", prompt,
@@ -453,8 +446,8 @@ async function tryRunViaHub(hubClient, digestContent, phase, digestPath) {
         // 4. Build prompt for worker
         const useFile = digestPath && digestContent.length > INLINE_THRESHOLD;
         const prompt = useFile
-            ? `你是独立裁决者。请先用 Read 工具读取文件 "${digestPath}"，然后按照其中的检查清单逐条裁决。输出 JSON 格式的裁决结果，包含 verdict ("PASS"/"FAIL") 和 issues 数组。`
-            : `以下是待裁决的材料，请按照检查清单逐条裁决。输出 JSON 格式的裁决结果，包含 verdict ("PASS"/"FAIL") 和 issues 数组。\n\n${digestContent}`;
+            ? `读取"${digestPath}"并按清单裁决。输出JSON格式:verdict+issues数组。`
+            : `按清单裁决。输出JSON格式:verdict+issues数组。\n\n${digestContent}`;
         // 5. Execute via Hub (10 min timeout)
         const result = await hubClient.executePrompt(worker.id, prompt, 600_000);
         if (!result)

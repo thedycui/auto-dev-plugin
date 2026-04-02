@@ -3055,7 +3055,7 @@ describe("AC-17: buildRevisionPrompt markdown section format", () => {
     );
 
     expect(result).not.toBeNull();
-    expect(result).toContain("## 审查反馈（必须逐条回应）");
+    expect(result).toContain("反馈:");
     expect(result).toContain("缺少输入校验逻辑");
   });
 
@@ -3069,7 +3069,7 @@ describe("AC-17: buildRevisionPrompt markdown section format", () => {
     );
 
     expect(result).not.toBeNull();
-    expect(result).toContain("## 修订任务");
-    expect(result).toContain("## 审查反馈（必须逐条回应）");
+    expect(result).toContain("修订:");
+    expect(result).toContain("反馈:");
   });
 });

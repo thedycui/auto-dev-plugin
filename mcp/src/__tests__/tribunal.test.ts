@@ -1324,8 +1324,8 @@ describe("runTribunalWithRetry — Three-Tier Strategy", () => {
     await runTribunalWithRetry(largeDigest, 5, "/tmp/digest.md");
 
     const prompt = mockHubClient.executePrompt.mock.calls[0]![1] as string;
-    expect(prompt).toContain("Read 工具读取文件");
-    expect(prompt).toContain("/tmp/digest.md");
+    expect(prompt).toContain('读取"/tmp/digest.md"');
+    expect(prompt).toContain("按清单裁决");
     expect(prompt).not.toContain(largeDigest);
   });
 
@@ -1703,7 +1703,7 @@ describe("prepareTribunalInput — AC-8 HIGH and AC-9 LOW scale signal injection
 
     const { digestContent } = await prepareTribunalInput(4, dir, "/tmp/fake-project");
     expect(digestContent).toContain("HIGH");
-    expect(digestContent).toContain("必须逐文件审查");
+    expect(digestContent).toContain("逐文件审查");
   });
 
   it("[AC-9] prepareTribunalInput — LOW scale: content contains LOW and does not contain 必须逐文件审查", async () => {
@@ -1722,6 +1722,6 @@ describe("prepareTribunalInput — AC-8 HIGH and AC-9 LOW scale signal injection
 
     const { digestContent } = await prepareTribunalInput(4, dir, "/tmp/fake-project");
     expect(digestContent).toContain("LOW");
-    expect(digestContent).not.toContain("必须逐文件审查");
+    expect(digestContent).not.toContain("逐文件审查");
   });
 });
