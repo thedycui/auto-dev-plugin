@@ -1,0 +1,34 @@
+{
+  "topic": "executable-ac",
+  "mode": "full",
+  "phase": 7,
+  "status": "COMPLETED",
+  "stack": {
+    "language": "TypeScript/JavaScript",
+    "buildCmd": "npm run build",
+    "testCmd": "npm test",
+    "langChecklist": "code-review-typescript.md"
+  },
+  "outputDir": "/Users/admin/dycui/auto-dev-plugin/docs/auto-dev/20260401-2045-executable-ac",
+  "projectRoot": "/Users/admin/dycui/auto-dev-plugin",
+  "startedAt": "2026-04-01T12:45:26.775Z",
+  "updatedAt": "2026-04-01T14:16:57.366Z",
+  "startCommit": "665d8b1998de04844ea798640e6fb5e4f7403482",
+  "tdd": false,
+  "costMode": "economy",
+  "step": null,
+  "stepIteration": 0,
+  "lastValidation": "DONE",
+  "phaseTimings": {
+    "1": {
+      "startedAt": "2026-04-01T12:51:38.559Z"
+    }
+  },
+  "approachState": null,
+  "tribunalSubmits": {
+    "4": 1,
+    "5": 2,
+    "6": 1
+  },
+  "iteration": 0
+}

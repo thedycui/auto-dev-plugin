@@ -1,0 +1,38 @@
+[
+  {
+    "id": "86a58f44-dbc",
+    "phase": 6,
+    "category": "acceptance",
+    "severity": "medium",
+    "lesson": "SKILL.md 等面向用户的文档更新容易被遗漏。Plan 中将\"文档更新\"作为最后一个 Task（Task 12）与编译验证捆绑，导致实现阶段完成代码后忘记更新 SKILL.md。建议：文档更新 Task 应独立于编译验证，并在 Phase 6 验收 checklist 中增加\"SKILL.md 是否同步更新\"检查项。",
+    "topic": "executable-ac",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-04-01T14:14:59.280Z",
+    "score": 3
+  },
+  {
+    "id": "f23fe089-23c",
+    "phase": 1,
+    "category": "design-review",
+    "severity": "low",
+    "lesson": "设计审查发现的 P0 问题（additionalRepos 引用残留、逐条 AC 独立运行）证明设计审查流程有效。但 P1 中有多个\"工具函数不存在\"的问题被推迟到实现阶段处理，说明设计文档中的伪代码引用了未实现的函数。建议：设计文档中引用的所有函数名都应标注\"已有\"或\"待实现\"。",
+    "topic": "executable-ac",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-04-01T14:15:03.773Z",
+    "score": 3
+  },
+  {
+    "id": "90d4c914-fad",
+    "phase": 4,
+    "category": "code-review",
+    "severity": "medium",
+    "lesson": "Phase 4 代码审查使用了 TRIBUNAL-FALLBACK 模式（5.5 分钟），仅产出 2 个建议项。对于 2157 行新代码+714 行修改的中大型变更，FALLBACK 模式的审查深度可能不足。应关注 TRIBUNAL-FALLBACK 是否在大型变更中导致审查缺漏。",
+    "topic": "executable-ac",
+    "reusable": true,
+    "appliedCount": 0,
+    "timestamp": "2026-04-01T14:15:09.064Z",
+    "score": 3
+  }
+]
