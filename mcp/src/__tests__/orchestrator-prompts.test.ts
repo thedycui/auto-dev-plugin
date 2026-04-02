@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   containsFrameworkTerms,
   buildRevisionPrompt,
+  buildPreviousAttemptSummary,
   translateFailureToFeedback,
   parseApproachPlan,
   extractOneLineReason,
@@ -63,7 +64,18 @@ describe("buildRevisionPrompt", () => {
     expect(result).toContain("- src/validator.ts");
   });
 
-  it("includes previousAttemptSummary when provided", () => {
+  it("uses markdown section headers in new format", () => {
+    const result = buildRevisionPrompt({
+      originalTask: "实现用户登录功能",
+      feedback: "缺少输入校验",
+      artifacts: ["src/login.ts"],
+    });
+    expect(result).toContain("## 修订任务");
+    expect(result).toContain("## 审查反馈（必须逐条回应）");
+    expect(result).toContain("## 待修改文件");
+  });
+
+  it("includes previousAttemptSummary section when provided", () => {
     const result = buildRevisionPrompt({
       originalTask: "实现功能",
       feedback: "有问题",
@@ -71,6 +83,16 @@ describe("buildRevisionPrompt", () => {
       previousAttemptSummary: "上次缺少错误处理",
     });
     expect(result).toContain("上次缺少错误处理");
+    expect(result).toContain("## 历史尝试");
+  });
+
+  it("omits 历史尝试 section when previousAttemptSummary is not provided", () => {
+    const result = buildRevisionPrompt({
+      originalTask: "实现功能",
+      feedback: "有问题",
+      artifacts: [],
+    });
+    expect(result).not.toContain("## 历史尝试");
   });
 
   it("output does not contain framework terms", () => {
@@ -80,6 +102,31 @@ describe("buildRevisionPrompt", () => {
       artifacts: ["src/login.ts"],
     });
     expect(containsFrameworkTerms(result)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPreviousAttemptSummary
+// ---------------------------------------------------------------------------
+
+describe("buildPreviousAttemptSummary", () => {
+  it("includes step id and attempt count", () => {
+    const result = buildPreviousAttemptSummary(
+      "1b",
+      { totalAttempts: 2, revisionCycles: 1, tribunalAttempts: 0 },
+      "缺少测试覆盖",
+    );
+    expect(result).toContain("1b");
+    expect(result).toContain("2");
+  });
+
+  it("includes truncated first line of current feedback", () => {
+    const result = buildPreviousAttemptSummary(
+      "2b",
+      { totalAttempts: 1, revisionCycles: 0, tribunalAttempts: 0 },
+      "编译失败：找不到模块\n详细信息：xxx",
+    );
+    expect(result).toContain("编译失败");
   });
 });
 

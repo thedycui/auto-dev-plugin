@@ -21,20 +21,39 @@ export function containsFrameworkTerms(text) {
 /** Builds a revision prompt from structured input. */
 export function buildRevisionPrompt(input) {
     const lines = [];
-    lines.push("你之前的工作有以下需要修订的地方：");
+    lines.push("## 修订任务");
+    lines.push("");
+    lines.push(input.originalTask);
+    lines.push("");
+    if (input.previousAttemptSummary) {
+        lines.push("## 历史尝试");
+        lines.push("");
+        lines.push(input.previousAttemptSummary);
+        lines.push("");
+    }
+    lines.push("## 审查反馈（必须逐条回应）");
+    lines.push("");
     lines.push(input.feedback);
+    lines.push("");
     if (input.artifacts.length > 0) {
-        lines.push("请修订以下文件：");
+        lines.push("## 待修改文件");
+        lines.push("");
         for (const a of input.artifacts) {
             lines.push(`- ${a}`);
         }
+        lines.push("");
     }
-    if (input.previousAttemptSummary) {
-        lines.push("上次尝试摘要：");
-        lines.push(input.previousAttemptSummary);
+    return lines.join("\n");
+}
+/** Builds a previous attempt summary from step effort and current feedback. */
+export function buildPreviousAttemptSummary(stepId, effort, currentFeedback) {
+    const lines = [];
+    lines.push(`步骤 ${stepId} 已尝试 ${effort.totalAttempts} 次（修订循环 ${effort.revisionCycles} 次，审查失败 ${effort.tribunalAttempts} 次）。`);
+    if (currentFeedback) {
+        const firstLine = currentFeedback.split("\n").find(l => l.trim().length > 0) ?? currentFeedback;
+        const summary = firstLine.length > 120 ? firstLine.slice(0, 120) + "..." : firstLine;
+        lines.push(`上次失败原因：${summary}`);
     }
-    lines.push("原始任务描述供参考：");
-    lines.push(input.originalTask);
     return lines.join("\n");
 }
 /** Translates framework error codes to plain technical feedback. */

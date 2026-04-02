@@ -11,14 +11,15 @@ import { execFile } from "node:child_process";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildRevisionPrompt, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from "./orchestrator-prompts.js";
-import { StateManager, extractTaskList } from "./state-manager.js";
+import { buildRevisionPrompt, buildPreviousAttemptSummary, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from "./orchestrator-prompts.js";
+import { StateManager, extractTaskList, effortKeyForStep, hashContent } from "./state-manager.js";
 import { validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, validateAcIntegrity, } from "./phase-enforcer.js";
 import { runStructuralAssertions } from "./ac-runner.js";
 import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
 import { AcceptanceCriteriaSchema } from "./ac-schema.js";
 import { evaluateTribunal } from "./tribunal.js";
 import { TemplateRenderer } from "./template-renderer.js";
+import { EFFORT_LIMITS, StepEffortSchema } from "./types.js";
 // ---------------------------------------------------------------------------
 // Design Doc Compliance Check
 // ---------------------------------------------------------------------------
@@ -82,6 +83,36 @@ const REVISION_TO_REVIEW = {
 const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
 const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills", "auto-dev");
 // ---------------------------------------------------------------------------
+// Step Prerequisites (P1-3)
+// ---------------------------------------------------------------------------
+/** Map of step → required artifact files (relative to outputDir) */
+export const STEP_PREREQUISITES = {
+    "1b": ["design.md"],
+    "1c": ["design.md", "design-review.md"],
+    "2a": ["design.md"],
+    "2b": ["plan.md"],
+    "2c": ["plan.md", "plan-review.md"],
+    "3": ["plan.md"],
+    "4a": [],
+    "5a": [],
+    "5b": ["e2e-test-cases.md"],
+    "5c": ["e2e-test-cases.md"],
+};
+/**
+ * Check if required prerequisites exist for the given step.
+ * Returns { ok: true } if all prerequisites are met, or { ok: false, missing: string[] } otherwise.
+ */
+export async function checkPrerequisites(step, outputDir) {
+    const required = STEP_PREREQUISITES[step] ?? [];
+    const missing = [];
+    for (const artifact of required) {
+        const exists = await fileExists(join(outputDir, artifact));
+        if (!exists)
+            missing.push(artifact);
+    }
+    return { ok: missing.length === 0, missing };
+}
+// ---------------------------------------------------------------------------
 // Reset Validation
 // ---------------------------------------------------------------------------
 /**
@@ -132,6 +163,24 @@ export async function readFileSafe(path) {
     }
     catch {
         return null;
+    }
+}
+/**
+ * Compute aggregate hash of test files in projectRoot.
+ * Finds files matching common test file patterns and hashes their combined content.
+ */
+async function computeTestFilesHash(projectRoot) {
+    try {
+        const result = await shell("git ls-files | grep -E '\\.(test|spec)\\.(ts|js|tsx|jsx)$|__tests__/' | sort", projectRoot, 10_000);
+        const testFiles = result.stdout.trim().split("\n").filter(Boolean);
+        if (testFiles.length === 0)
+            return "";
+        const contents = await Promise.all(testFiles.map(f => readFileSafe(join(projectRoot, f))));
+        const combined = testFiles.map((f, i) => `${f}:${contents[i] ?? ""}`).join("\n");
+        return hashContent(combined);
+    }
+    catch {
+        return "";
     }
 }
 // ---------------------------------------------------------------------------
@@ -534,6 +583,10 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     feedback: "design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。",
                 };
             }
+            // Record design.md hash for 1c change detection
+            await sm.atomicUpdate({
+                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "design.md": hashContent(content) },
+            });
             return { passed: true, feedback: "" };
         }
         case "1b": {
@@ -559,14 +612,36 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     }
                 }
             }
+            // Record design.md hash at 1b validation point for 1c change detection
+            const designContent1b = await readFileSafe(join(outputDir, "design.md"));
+            await sm.atomicUpdate({
+                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "design.md": hashContent(designContent1b) },
+            });
+            return { passed: true, feedback: "" };
+        }
+        case "1c": {
+            const designPath1c = join(outputDir, "design.md");
+            const content1c = await readFileSafe(designPath1c);
+            if (!content1c || content1c.length < 100) {
+                return { passed: false, feedback: "design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。" };
+            }
+            const previousHash1c = (state.lastArtifactHashes ?? {})["design.md"] ?? "";
+            const currentHash1c = hashContent(content1c);
+            if (previousHash1c && currentHash1c === previousHash1c) {
+                return { passed: false, feedback: "design.md 内容未发生变化（hash 未改变），请根据审查反馈修订设计方案。" };
+            }
             return { passed: true, feedback: "" };
         }
         case "2a": {
             const planPath = join(outputDir, "plan.md");
-            const exists = await fileExists(planPath);
-            if (!exists) {
+            const planContent2a = await readFileSafe(planPath);
+            if (!planContent2a) {
                 return { passed: false, feedback: "plan.md 不存在，请生成完整的实施计划。" };
             }
+            // Record plan.md hash for 2c change detection
+            await sm.atomicUpdate({
+                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "plan.md": hashContent(planContent2a) },
+            });
             return { passed: true, feedback: "" };
         }
         case "2b": {
@@ -592,9 +667,33 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     }
                 }
             }
+            // Record plan.md hash at 2b validation point for 2c change detection
+            const planContent2b = await readFileSafe(join(outputDir, "plan.md"));
+            await sm.atomicUpdate({
+                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "plan.md": hashContent(planContent2b) },
+            });
+            return { passed: true, feedback: "" };
+        }
+        case "2c": {
+            const planContent2c = await readFileSafe(join(outputDir, "plan.md"));
+            if (!planContent2c) {
+                return { passed: false, feedback: "plan.md 不存在，请生成完整的实施计划。" };
+            }
+            const previousHash2c = (state.lastArtifactHashes ?? {})["plan.md"] ?? "";
+            const currentHash2c = hashContent(planContent2c);
+            if (previousHash2c && currentHash2c === previousHash2c) {
+                return { passed: false, feedback: "plan.md 内容未发生变化（hash 未改变），请根据审查反馈修订实施计划。" };
+            }
             return { passed: true, feedback: "" };
         }
         case "3": {
+            // Idling detection (P1-1): if startCommit exists, check for actual code changes
+            if (state.startCommit) {
+                const diffResult3 = await shell(`git diff --stat ${state.startCommit} -- . ':!docs/'`, projectRoot, 10_000);
+                if (diffResult3.exitCode === 0 && diffResult3.stdout.trim() === "") {
+                    return { passed: false, feedback: "未检测到代码变更（git diff 为空）。Phase 3 要求提交实际代码实现，不能只写文档。" };
+                }
+            }
             // Build + test (with pre-existing failure detection)
             const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit);
             if (buildFail3)
@@ -639,6 +738,13 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                 };
             }
             const eval5 = await evaluateTribunal(projectRoot, outputDir, 5, topic, "Phase 5 E2E test", state.startCommit);
+            if (eval5.verdict === "PASS") {
+                // Record aggregate test-files hash for 5c change detection
+                const testFilesHash5b = await computeTestFilesHash(projectRoot);
+                await sm.atomicUpdate({
+                    lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "test-files": testFilesHash5b },
+                });
+            }
             return {
                 passed: eval5.verdict === "PASS",
                 feedback: eval5.verdict === "FAIL"
@@ -646,6 +752,23 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     : "",
                 tribunalResult: eval5,
             };
+        }
+        case "5c": {
+            // Check test files changed since 5b
+            const previousTestHash5c = (state.lastArtifactHashes ?? {})["test-files"] ?? "";
+            const currentTestHash5c = await computeTestFilesHash(projectRoot);
+            if (previousTestHash5c && currentTestHash5c === previousTestHash5c) {
+                return { passed: false, feedback: "测试文件内容未发生变化（hash 未改变），请根据审查反馈修订测试实现。" };
+            }
+            // Run tests
+            const testResult5c = await shell(testCmd, projectRoot);
+            if (testResult5c.exitCode !== 0) {
+                return {
+                    passed: false,
+                    feedback: translateFailureToFeedback("TEST_FAILED", testResult5c.stdout + "\n" + testResult5c.stderr),
+                };
+            }
+            return { passed: true, feedback: "" };
         }
         case "6": {
             // AC framework execution — runs before Tribunal
@@ -812,7 +935,7 @@ function extractTaskDetails(planContent) {
     }
     return matches.join("\n\n");
 }
-export async function buildTaskForStep(step, outputDir, projectRoot, topic, buildCmd, testCmd, feedback, extraVars) {
+export async function buildTaskForStep(step, outputDir, projectRoot, topic, buildCmd, testCmd, feedback, extraVars, previousAttemptSummary) {
     const variables = {
         topic,
         output_dir: outputDir,
@@ -827,6 +950,7 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
             originalTask: `设计方案：${topic}`,
             feedback,
             artifacts: [join(outputDir, "design.md")],
+            previousAttemptSummary,
         }) + ISOLATION_FOOTER;
     }
     if (step === "2c" && feedback) {
@@ -834,6 +958,7 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
             originalTask: `实施计划：${topic}`,
             feedback,
             artifacts: [join(outputDir, "plan.md")],
+            previousAttemptSummary,
         }) + ISOLATION_FOOTER;
     }
     if (step === "5c" && feedback) {
@@ -841,6 +966,7 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
             originalTask: `测试实现：${topic}`,
             feedback,
             artifacts: [],
+            previousAttemptSummary,
         }) + ISOLATION_FOOTER;
     }
     // Approach plan instruction for steps that may need circuit breaker
@@ -886,20 +1012,32 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
                 reviewSection = `\n\n**⚠ 计划审查 P0/P1 修订要求（必须在实现中落实）：**\n${p0p1Lines.map(l => `- ${l}`).join("\n")}\n`;
             }
         }
-        return `请完成以下任务：\n\n${taskDetails}${reviewSection}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
+        // AC-15: embed design.md summary to avoid redundant file reads
+        let designSummary = "";
+        const designContent3 = await readFileSafe(join(outputDir, "design.md"));
+        if (designContent3) {
+            const summaryMatch = designContent3.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/);
+            const snippet = summaryMatch?.[1]?.trim() ?? designContent3.split("\n").slice(0, 10).join("\n").trim();
+            if (snippet) {
+                designSummary = `\n\n**设计目标摘要（不需要再读 plan.md 或 design.md — 以下已摘录）：**\n${snippet}\n`;
+            }
+        }
+        return `请完成以下任务：\n\n${taskDetails}${reviewSection}${designSummary}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
             `**重要：每完成一个 task，先验证其完成标准是否满足，再开始下一个。**` +
             approachPlanInstruction + ISOLATION_FOOTER;
     }
     // Step 4a: implementation fix/verify
+    // AC-13: return null when feedback is empty (no issues to fix → skip dispatch)
     if (step === "4a") {
-        if (feedback) {
-            return buildRevisionPrompt({
-                originalTask: `代码验证：${topic}`,
-                feedback,
-                artifacts: [],
-            }) + approachPlanInstruction + ISOLATION_FOOTER;
+        if (!feedback || feedback.trim() === "") {
+            return null;
         }
-        return `请检查并修复代码，确保编译和测试通过。\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
+        return buildRevisionPrompt({
+            originalTask: `代码验证：${topic}`,
+            feedback,
+            artifacts: [],
+            previousAttemptSummary,
+        }) + approachPlanInstruction + ISOLATION_FOOTER;
     }
     const template = stepToTemplate[step];
     if (template) {
@@ -1158,6 +1296,21 @@ async function handleValidationFailure(ctx, stepState, validation) {
     const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, getExtraVars } = ctx;
     const currentStep = stepState.step;
     const currentIteration = stepState.stepIteration;
+    // --- Effort budget pre-check ---
+    const effortKey = effortKeyForStep(currentStep);
+    const rawEffort = (state.stepEffort ?? {})[effortKey];
+    const effort = StepEffortSchema.parse(rawEffort ?? {});
+    if (effort.totalAttempts >= EFFORT_LIMITS.maxTotalAttempts) {
+        await sm.atomicUpdate({ lastValidation: "ESCALATED", status: "BLOCKED" });
+        return {
+            done: false, step: currentStep, agent: null, prompt: null,
+            escalation: {
+                reason: "effort_exhausted",
+                lastFeedback: validation.feedback,
+            },
+            message: `Step ${currentStep} effort exhausted (${effort.totalAttempts}/${EFFORT_LIMITS.maxTotalAttempts} total attempts). Escalating.`,
+        };
+    }
     // --- Tribunal FAIL: handle counter + ESCALATE ---
     if (validation.tribunalResult) {
         const phaseKey = String(phaseForStep(currentStep));
@@ -1178,10 +1331,16 @@ async function handleValidationFailure(ctx, stepState, validation) {
             return handleTribunalEscalation(ctx, phaseKey, currentStep, validation.feedback);
         }
         // Tribunal FAIL but under limit — increment counter and return revision
+        const updatedEffortTribunal = {
+            ...effort,
+            totalAttempts: effort.totalAttempts + 1,
+            tribunalAttempts: effort.tribunalAttempts + 1,
+        };
         await sm.atomicUpdate({
             stepIteration: currentIteration + 1, lastValidation: "FAILED",
             tribunalSubmits: { ...submits, [phaseKey]: count },
             lastFailureDetail: validation.feedback,
+            stepEffort: { [effortKey]: updatedEffortTribunal },
         });
         const prompt = await buildTaskForStep(currentStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback, getExtraVars(currentStep));
         return {
@@ -1227,15 +1386,18 @@ async function handleValidationFailure(ctx, stepState, validation) {
     if (currentStep === "5b")
         revisionStep = "5c";
     const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
+    const updatedEffortRetry = { ...effort, totalAttempts: effort.totalAttempts + 1 };
     await sm.atomicUpdate({
         step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
         lastFailureDetail: validation.feedback,
+        stepEffort: { [effortKey]: updatedEffortRetry },
     });
     let combinedFeedback = validation.feedback;
     if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
         combinedFeedback += `\n\n${approachResult.planFeedback}`;
     }
-    const prompt = await buildTaskForStep(effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback, getExtraVars(effectiveStep));
+    const attemptSummary = buildPreviousAttemptSummary(effortKey, updatedEffortRetry, validation.feedback);
+    const prompt = await buildTaskForStep(effectiveStep, outputDir, projectRoot, topic, buildCmd, testCmd, combinedFeedback, getExtraVars(effectiveStep), attemptSummary);
     return {
         done: false,
         step: effectiveStep,
@@ -1252,21 +1414,46 @@ async function advanceToNextStep(ctx, currentStep, validation) {
     const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
     const currentPhase = phaseForStep(currentStep);
     // [FIX-1] Revision steps (1c/2c/5c) are not in STEP_ORDER.
-    // When a revision step passes, go back to the parent step for re-validation
-    // instead of calling computeNextStep (which would return null → premature done=true).
+    // When a revision step passes, go back to the parent step for re-validation.
+    // Guard against infinite revision loops by counting revisionCycles.
     const REVISION_TO_PARENT = { "1c": "1b", "2c": "2b", "5c": "5b" };
     const parentStep = REVISION_TO_PARENT[currentStep];
     if (parentStep) {
-        await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Revision step ${currentStep} passed. Re-validating ${parentStep}.`) + "\n");
+        const parentEffortKey = effortKeyForStep(parentStep);
+        const rawParentEffort = (state.stepEffort ?? {})[parentEffortKey];
+        const parentEffort = StepEffortSchema.parse(rawParentEffort ?? {});
+        const newRevisionCycles = parentEffort.revisionCycles + 1;
+        const newParentEffort = {
+            ...parentEffort,
+            revisionCycles: newRevisionCycles,
+            totalAttempts: parentEffort.totalAttempts + 1,
+        };
+        if (newRevisionCycles >= EFFORT_LIMITS.maxRevisionCycles) {
+            await sm.atomicUpdate({
+                lastValidation: "ESCALATED", status: "BLOCKED",
+                stepEffort: { [parentEffortKey]: newParentEffort },
+            });
+            await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "BLOCKED", `Revision cycles exhausted for ${parentStep} (${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) + "\n");
+            return {
+                done: false, step: parentStep, agent: null, prompt: null,
+                escalation: {
+                    reason: "revision_cycles_exhausted",
+                    lastFeedback: `Revision step ${currentStep} passed but parent ${parentStep} has exceeded max revision cycles (${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`,
+                },
+                message: `Revision cycles exhausted for ${parentStep}. Escalating.`,
+            };
+        }
+        await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Revision step ${currentStep} passed. Re-validating ${parentStep} (revision cycle ${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) + "\n");
         await sm.atomicUpdate({
             step: parentStep, stepIteration: 0, lastValidation: null, approachState: null,
+            stepEffort: { [parentEffortKey]: newParentEffort },
         });
         return {
             done: false,
             step: parentStep,
             agent: null,
             prompt: null,
-            message: `Revision step ${currentStep} completed. Re-validating parent step ${parentStep}.`,
+            message: `Revision step ${currentStep} completed. Re-validating parent step ${parentStep} (cycle ${newRevisionCycles}).`,
         };
     }
     // Write progress-log checkpoint (audit only)
@@ -1330,6 +1517,16 @@ async function advanceToNextStep(ctx, currentStep, validation) {
         ...tribunalUpdates,
     });
     const prompt = await buildTaskForStep(nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep));
+    // AC-13: null prompt means no dispatch needed (e.g. 4a with empty feedback)
+    if (prompt === null) {
+        return {
+            done: false,
+            step: nextStep,
+            agent: null,
+            prompt: null,
+            message: `Step ${currentStep} passed. Step ${nextStep} has no prompt (skipped).`,
+        };
+    }
     const advanceResult = {
         done: false,
         step: nextStep,
@@ -1399,6 +1596,21 @@ export async function computeNextTask(projectRoot, topic) {
     }
     // 4. Step exists — validate previous step's artifacts
     const currentStep = stepState.step;
+    // 4a. Prerequisite guard (P1-3): check required artifacts exist before validation
+    const prereqCheck = await checkPrerequisites(currentStep, outputDir);
+    if (!prereqCheck.ok) {
+        return {
+            done: false,
+            step: currentStep,
+            agent: null,
+            prompt: null,
+            escalation: {
+                reason: "prerequisite_missing",
+                lastFeedback: `Step ${currentStep} requires the following artifacts that are missing: ${prereqCheck.missing.join(", ")}`,
+            },
+            message: `Step ${currentStep} prerequisite check failed: missing ${prereqCheck.missing.join(", ")}.`,
+        };
+    }
     const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic);
     if (!validation.passed) {
         return handleValidationFailure(ctx, stepState, validation);
