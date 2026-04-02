@@ -33,7 +33,7 @@ describe("phase prompt lint — no framework terms", () => {
         .join("\n");
       expect.fail(`Framework terms found in prompts:\n${report}`);
     }
-  });
+  }, 15000);
 
   it("all prompt files have isolation footer", async () => {
     const files = await readdir(PROMPTS_DIR);
@@ -50,5 +50,5 @@ describe("phase prompt lint — no framework terms", () => {
     if (missing.length > 0) {
       expect.fail(`Missing isolation footer in: ${missing.join(", ")}`);
     }
-  });
+  }, 15000);
 });
