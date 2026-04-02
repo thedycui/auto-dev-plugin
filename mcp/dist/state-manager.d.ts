@@ -11,6 +11,17 @@ import type { StateJson, StackInfo } from "./types.js";
 import type { NextDirective } from "./phase-enforcer.js";
 export declare function extractDocSummary(content: string, maxLines: number): string;
 export declare function extractTaskList(content: string): string;
+/**
+ * Returns the effort key for a given step.
+ * Revision steps (1c, 2c, 5c) map to their parent review step.
+ * All other steps map to themselves.
+ */
+export declare function effortKeyForStep(step: string): string;
+/**
+ * Returns a 16-character hex SHA-256 hash of the given content.
+ * Returns "" for null input.
+ */
+export declare function hashContent(content: string | null): string;
 export declare class StateManager {
     readonly projectRoot: string;
     readonly topic: string;

@@ -12,7 +12,9 @@ import { join, dirname, resolve } from "node:path";
 import { lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { StateJsonSchema } from "./types.js";
+import { REVISION_TO_REVIEW } from "./types.js";
 import { computeNextDirective } from "./phase-enforcer.js";
 // ---------------------------------------------------------------------------
 // Constants
@@ -103,6 +105,26 @@ function parseStackVariables(content) {
         }
     }
     return vars;
+}
+// ---------------------------------------------------------------------------
+// Effort tracking utilities
+// ---------------------------------------------------------------------------
+/**
+ * Returns the effort key for a given step.
+ * Revision steps (1c, 2c, 5c) map to their parent review step.
+ * All other steps map to themselves.
+ */
+export function effortKeyForStep(step) {
+    return REVISION_TO_REVIEW[step] ?? step;
+}
+/**
+ * Returns a 16-character hex SHA-256 hash of the given content.
+ * Returns "" for null input.
+ */
+export function hashContent(content) {
+    if (content === null)
+        return "";
+    return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
 // ---------------------------------------------------------------------------
 // StateManager
@@ -417,6 +439,13 @@ export class StateManager {
             rawState = { ...(await this.loadAndValidate()) };
         }
         const merged = { ...rawState, ...updates, updatedAt: new Date().toISOString() };
+        // Deep merge stepEffort: merge per-key rather than whole-object overwrite
+        if (updates["stepEffort"] !== undefined || rawState["stepEffort"] !== undefined) {
+            merged["stepEffort"] = {
+                ...(rawState["stepEffort"] ?? {}),
+                ...(updates["stepEffort"] ?? {}),
+            };
+        }
         // Validate only the schema-defined fields (don't strip extras)
         const result = StateJsonSchema.safeParse(merged);
         if (!result.success) {

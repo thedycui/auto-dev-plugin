@@ -94,6 +94,20 @@ export declare const LessonEntrySchema: z.ZodObject<{
     }>>;
 }, z.core.$strip>;
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
+export declare const StepEffortSchema: z.ZodObject<{
+    totalAttempts: z.ZodDefault<z.ZodNumber>;
+    revisionCycles: z.ZodDefault<z.ZodNumber>;
+    tribunalAttempts: z.ZodDefault<z.ZodNumber>;
+}, z.core.$strip>;
+export type StepEffort = z.infer<typeof StepEffortSchema>;
+/** Maximum attempt budgets per step */
+export declare const EFFORT_LIMITS: {
+    readonly maxTotalAttempts: 6;
+    readonly maxRevisionCycles: 2;
+    readonly maxTribunalAttempts: 3;
+};
+/** Maps revision steps to their parent review step */
+export declare const REVISION_TO_REVIEW: Record<string, string>;
 export declare const ApproachEntrySchema: z.ZodObject<{
     id: z.ZodString;
     summary: z.ZodString;
@@ -213,6 +227,15 @@ export declare const StateJsonSchema: z.ZodObject<{
     }, z.core.$strip>>;
     shipRound: z.ZodOptional<z.ZodNumber>;
     shipMaxRounds: z.ZodOptional<z.ZodNumber>;
+    stepEffort: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{
+        totalAttempts: z.ZodDefault<z.ZodNumber>;
+        revisionCycles: z.ZodDefault<z.ZodNumber>;
+        tribunalAttempts: z.ZodDefault<z.ZodNumber>;
+    }, z.core.$strip>>>;
+    lastArtifactHashes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    worktreeRoot: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    worktreeBranch: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    sourceBranch: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;

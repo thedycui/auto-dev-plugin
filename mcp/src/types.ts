@@ -96,6 +96,32 @@ export const LessonEntrySchema = z.object({
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
 
 // ---------------------------------------------------------------------------
+// StepEffort — per-step effort tracking
+// ---------------------------------------------------------------------------
+
+export const StepEffortSchema = z.object({
+  totalAttempts: z.number().int().default(0),
+  revisionCycles: z.number().int().default(0),
+  tribunalAttempts: z.number().int().default(0),
+});
+
+export type StepEffort = z.infer<typeof StepEffortSchema>;
+
+/** Maximum attempt budgets per step */
+export const EFFORT_LIMITS = {
+  maxTotalAttempts: 6,
+  maxRevisionCycles: 2,
+  maxTribunalAttempts: 3,
+} as const;
+
+/** Maps revision steps to their parent review step */
+export const REVISION_TO_REVIEW: Record<string, string> = {
+  "1c": "1b",
+  "2c": "2b",
+  "5c": "5b",
+};
+
+// ---------------------------------------------------------------------------
 // ApproachState — circuit breaker approach tracking
 // ---------------------------------------------------------------------------
 
@@ -222,6 +248,17 @@ export const StateJsonSchema = z.object({
   }).optional(),
   shipRound: z.number().int().optional(),
   shipMaxRounds: z.number().int().optional(),
+
+  // Per-step effort tracking
+  stepEffort: z.record(z.string(), StepEffortSchema).optional(),
+
+  // Last artifact content hashes for change detection
+  lastArtifactHashes: z.record(z.string(), z.string()).optional(),
+
+  // Worktree fields
+  worktreeRoot: z.string().nullable().optional(),
+  worktreeBranch: z.string().nullable().optional(),
+  sourceBranch: z.string().nullable().optional(),
 
   // Timestamps
   startedAt: z.string(),
