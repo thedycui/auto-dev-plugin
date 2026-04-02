@@ -2530,6 +2530,11 @@ describe("lastFailureDetail filling", () => {
     expect(updateCalls.length).toBeGreaterThan(0);
     // result should not be done
     expect(result.done).toBe(false);
+    // 验证 atomicUpdate 被调用时包含非空 lastFailureDetail
+    expect(mockAtomicUpdate.mock.calls.some((call: unknown[]) => {
+      const update = call[0] as Record<string, unknown>;
+      return typeof update.lastFailureDetail === 'string' && update.lastFailureDetail.length > 0;
+    })).toBe(true);
   });
 
   it("AC-15: ALL_APPROACHES_EXHAUSTED path — atomicUpdate includes BLOCKED status", async () => {
