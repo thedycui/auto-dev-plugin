@@ -2045,7 +2045,7 @@ export async function computeNextTask(
   }
 
   const validation = await validateStep(
-    currentStep, outputDir, effectiveRoot, buildCmd, testCmd, sm, state, topic, state.worktreeRoot,
+    currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic, state.worktreeRoot,
   );
 
   if (!validation.passed) {

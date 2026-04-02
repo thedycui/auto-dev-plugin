@@ -132,6 +132,23 @@ function inferChangeTypeFromContent(content) {
     return bestScore >= 3 ? best : undefined;
 }
 // ---------------------------------------------------------------------------
+// Worktree helpers
+// ---------------------------------------------------------------------------
+function getWorktreeDir(projectRoot, topic) {
+    const sanitized = topic
+        .replace(/[^a-zA-Z0-9\u4e00-\u9fff-]/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 50);
+    return join(resolve(projectRoot, ".."), `.auto-dev-wt-${sanitized}`);
+}
+function getWorktreeBranch(topic) {
+    const sanitized = topic
+        .replace(/[^a-zA-Z0-9\u4e00-\u9fff-]/g, "-")
+        .replace(/-+/g, "-")
+        .slice(0, 50);
+    return `auto-dev/${sanitized}`;
+}
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 const server = new McpServer({
@@ -171,7 +188,8 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
     }).optional(),
     shipMaxRounds: z.number().int().optional(),
     codeRoot: z.string().optional(),
-}, async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds, codeRoot }) => {
+    useWorktree: z.boolean().optional().default(true),
+}, async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds, codeRoot, useWorktree }) => {
     const sm = await StateManager.create(projectRoot, topic);
     // Handle existing directory
     if (await sm.outputDirExists()) {
@@ -220,6 +238,58 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
                 }
             }
             catch { /* no progress log yet */ }
+            // Worktree resume recovery (design 4.1.7)
+            let worktreeResumeWarning;
+            if (state.worktreeRoot) {
+                let wtExists = false;
+                try {
+                    await stat(state.worktreeRoot);
+                    wtExists = true;
+                }
+                catch { /* not found */ }
+                if (wtExists) {
+                    // Verify branch is correct
+                    const { execFile: execFileWt } = await import("node:child_process");
+                    const currentBranch = await new Promise((resolve) => {
+                        execFileWt("git", ["branch", "--show-current"], { cwd: state.worktreeRoot }, (_err, stdout) => {
+                            resolve(stdout?.trim() ?? "");
+                        });
+                    });
+                    if (state.worktreeBranch && currentBranch !== state.worktreeBranch) {
+                        worktreeResumeWarning = `Worktree 分支不一致：期望 ${state.worktreeBranch}，实际 ${currentBranch}`;
+                    }
+                }
+                else {
+                    // Worktree deleted — try to rebuild from branch
+                    const { execFile: execFileWt2 } = await import("node:child_process");
+                    const branchList = await new Promise((resolve) => {
+                        execFileWt2("git", ["branch", "--list", state.worktreeBranch], { cwd: projectRoot }, (_err, stdout) => {
+                            resolve(stdout?.trim() ?? "");
+                        });
+                    });
+                    if (branchList) {
+                        // Branch exists — recreate worktree
+                        const rebuildResult = await new Promise((resolve) => {
+                            execFileWt2("git", ["worktree", "add", state.worktreeRoot, state.worktreeBranch], { cwd: projectRoot }, (err, _stdout, stderr) => {
+                                resolve({ ok: !err, err: stderr ?? "" });
+                            });
+                        });
+                        if (!rebuildResult.ok) {
+                            return textResult({
+                                error: "WORKTREE_REBUILD_FAILED",
+                                message: `Worktree 目录已删除，重建失败：${rebuildResult.err}。请重新 init。`,
+                            });
+                        }
+                        worktreeResumeWarning = `Worktree 已重建（从分支 ${state.worktreeBranch}）`;
+                    }
+                    else {
+                        return textResult({
+                            error: "WORKTREE_NOT_RECOVERABLE",
+                            message: `Worktree 和分支（${state.worktreeBranch}）都不存在，无法恢复。请重新 init。`,
+                        });
+                    }
+                }
+            }
             return textResult({
                 projectRoot: state.projectRoot,
                 outputDir: sm.outputDir,
@@ -234,6 +304,8 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
                 langChecklist: state.stack.langChecklist,
                 resumeTask,
                 resumeTaskStatus,
+                ...(state.worktreeRoot ? { worktreeRoot: state.worktreeRoot, worktreeBranch: state.worktreeBranch } : {}),
+                ...(worktreeResumeWarning ? { worktreeResumeWarning } : {}),
             });
         }
         if (onConflict === "overwrite") {
@@ -409,6 +481,25 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         behaviorUpdates["shipMaxRounds"] = shipMaxRounds ?? 5;
     }
     await sm.atomicUpdate(behaviorUpdates);
+    // --- Worktree creation (useWorktree=true, new session only) ---
+    if (useWorktree !== false) {
+        const wtDir = getWorktreeDir(projectRoot, topic);
+        const wtBranch = getWorktreeBranch(topic);
+        const { execFile: execFileWtCreate } = await import("node:child_process");
+        const wtResult = await new Promise((resolve) => {
+            execFileWtCreate("git", ["worktree", "add", "-b", wtBranch, wtDir, "HEAD"], { cwd: projectRoot }, (err, _stdout, stderr) => resolve({ ok: !err, stderr: stderr ?? "" }));
+        });
+        if (wtResult.ok) {
+            const gitManager2 = new GitManager(projectRoot);
+            const git2 = await gitManager2.getStatus();
+            await sm.atomicUpdate({
+                worktreeRoot: wtDir,
+                worktreeBranch: wtBranch,
+                sourceBranch: git2.currentBranch ?? "main",
+            });
+        }
+        // Worktree creation failure is non-fatal (fall back to no-worktree mode)
+    }
     // --- Design doc binding (Issue #7) ---
     let designDocSource;
     const { copyFile: copyFileAsync } = await import("node:fs/promises");
@@ -517,6 +608,7 @@ server.tool("auto_dev_init", "Initialize auto-dev session: create work dir, dete
         tribunalReady,
         ...(tribunalWarning ? { tribunalWarning } : {}),
         ...(designDocSource ? { designDocSource, designDocBound: true } : {}),
+        ...(state.worktreeRoot ? { worktreeRoot: state.worktreeRoot, worktreeBranch: state.worktreeBranch, sourceBranch: state.sourceBranch } : {}),
     });
 });
 // ===========================================================================
@@ -1536,6 +1628,43 @@ server.tool("auto_dev_complete", "Completion gate: validates ALL required phases
             }
         }
         catch { /* test command execution failed — non-fatal, continue */ }
+    }
+    // --- Worktree merge & cleanup (if worktreeRoot is set) ---
+    if (state.worktreeRoot && state.worktreeBranch && state.sourceBranch) {
+        const { execFile: execFileWtComplete } = await import("node:child_process");
+        // Step 1: commit any uncommitted changes in worktree
+        const statusResult = await new Promise((resolve) => {
+            execFileWtComplete("git", ["status", "--porcelain"], { cwd: state.worktreeRoot }, (_err, stdout) => {
+                resolve(stdout?.trim() ?? "");
+            });
+        });
+        if (statusResult) {
+            await new Promise((resolve) => {
+                execFileWtComplete("git", ["add", "-A"], { cwd: state.worktreeRoot }, () => resolve());
+            });
+            await new Promise((resolve) => {
+                execFileWtComplete("git", ["commit", "-m", `auto-dev: ${state.topic}`], { cwd: state.worktreeRoot }, () => resolve());
+            });
+        }
+        // Step 2: merge worktree branch into sourceBranch in projectRoot
+        const mergeResult = await new Promise((resolve) => {
+            execFileWtComplete("git", ["merge", state.worktreeBranch, "--no-ff", "-m", `auto-dev: ${state.topic}`], { cwd: projectRoot }, (err, stdout, stderr) => resolve({ ok: !err, stdout: stdout ?? "", stderr: stderr ?? "" }));
+        });
+        if (!mergeResult.ok) {
+            // Merge conflict — report to user, don't mark COMPLETED
+            return textResult({
+                error: "WORKTREE_MERGE_CONFLICT",
+                canComplete: false,
+                message: `Worktree 合并时发生冲突，请手动解决后重试：\n${mergeResult.stderr || mergeResult.stdout}`,
+                mandate: "[BLOCKED] 请手动解决 git merge 冲突后，再次调用 auto_dev_complete。",
+            });
+        }
+        // Step 3: remove worktree
+        await new Promise((resolve) => {
+            execFileWtComplete("git", ["worktree", "remove", state.worktreeRoot], { cwd: projectRoot }, () => resolve());
+        });
+        // Step 4: clear worktreeRoot in state
+        await sm.atomicUpdate({ worktreeRoot: null });
     }
     // All phases passed — mark as COMPLETED
     const completeLine = sm.getCheckpointLine(state.phase, undefined, "COMPLETED", "All required phases passed. Session complete.");
