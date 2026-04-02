@@ -37,13 +37,28 @@ const TEST_DIRS = {
     python: ["tests", "test"],
 };
 // ---------------------------------------------------------------------------
+// Language Normalization
+// ---------------------------------------------------------------------------
+function normalizeLanguage(language) {
+    const lower = language.toLowerCase();
+    if (lower.includes("typescript") || lower.includes("javascript") || lower === "ts" || lower === "js" || lower === "node") {
+        return "node";
+    }
+    if (lower.includes("java") && !lower.includes("script"))
+        return "java";
+    if (lower.includes("python") || lower === "py")
+        return "python";
+    return language;
+}
+// ---------------------------------------------------------------------------
 // File Discovery
 // ---------------------------------------------------------------------------
 async function findTestFiles(root, language) {
-    const pattern = TEST_FILE_PATTERNS[language];
+    const normalized = normalizeLanguage(language);
+    const pattern = TEST_FILE_PATTERNS[normalized];
     if (!pattern)
         return [];
-    const dirs = TEST_DIRS[language] ?? [];
+    const dirs = TEST_DIRS[normalized] ?? [];
     const results = [];
     async function walk(dir) {
         let entries;
@@ -82,7 +97,8 @@ async function findTestFiles(root, language) {
  */
 export async function discoverAcBindings(projectRoot, language) {
     const bindings = [];
-    const patterns = AC_PATTERNS[language];
+    const normalized = normalizeLanguage(language);
+    const patterns = AC_PATTERNS[normalized];
     if (!patterns)
         return bindings;
     const testFiles = await findTestFiles(projectRoot, language);
@@ -166,7 +182,7 @@ function escapeRegex(str) {
  * Build a targeted test command for a specific AC binding.
  */
 export function buildTargetedTestCommand(language, testFile, bindings, projectRoot) {
-    switch (language) {
+    switch (normalizeLanguage(language)) {
         case "java": {
             const className = testFile.replace(/.*\//, "").replace(".java", "");
             const methods = bindings.map((b) => b.testName).join("+");
@@ -234,9 +250,20 @@ export async function runAcBoundTests(bindings, projectRoot, language, testCmd) 
             cwd: projectRoot,
             timeout: 120_000,
         });
+        const combined = stdout + stderr;
+        let passed = exitCode === 0;
+        // Detect all-skipped: vitest exits 0 when all tests are skipped,
+        // but no tests actually ran. Treat this as FAIL.
+        if (passed) {
+            const hasPassedTests = /\d+\s+passed/.test(combined);
+            const hasSkippedTests = /\d+\s+skipped/.test(combined);
+            if (hasSkippedTests && !hasPassedTests) {
+                passed = false;
+            }
+        }
         results.set(acId, {
-            passed: exitCode === 0,
-            output: (stdout + stderr).slice(0, 500),
+            passed,
+            output: combined.slice(0, 500),
         });
     }
     return results;

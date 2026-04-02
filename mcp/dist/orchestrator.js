@@ -82,6 +82,29 @@ const REVISION_TO_REVIEW = {
 const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
 const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills", "auto-dev");
 // ---------------------------------------------------------------------------
+// Reset Validation
+// ---------------------------------------------------------------------------
+/**
+ * Validate an auto_dev_reset request before mutating state.
+ * Returns an error string if validation fails, or null if valid.
+ */
+export function validateResetRequest(state, targetPhase, reason) {
+    if (state.status === "COMPLETED") {
+        return "Cannot reset a COMPLETED project.";
+    }
+    if (targetPhase > state.phase) {
+        return `targetPhase (${targetPhase}) must not exceed current phase (${state.phase}). Forward jumps are forbidden.`;
+    }
+    if (!reason || reason.trim() === "") {
+        return "reason must be a non-empty string.";
+    }
+    const validPhases = PHASE_SEQUENCE[state.mode] ?? [];
+    if (!validPhases.includes(targetPhase)) {
+        return `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(", ")}).`;
+    }
+    return null;
+}
+// ---------------------------------------------------------------------------
 // Model Routing
 // ---------------------------------------------------------------------------
 export function getModel(phase, costMode) {
@@ -657,7 +680,8 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     };
                 }
                 // 4. Run structural assertions (Layer 1)
-                const structuralResults = await runStructuralAssertions(acData.criteria, effectiveCodeRoot, { buildCmd, testCmd });
+                // Paths in acceptance-criteria.json are project-root-relative, not codeRoot-relative.
+                const structuralResults = await runStructuralAssertions(acData.criteria, projectRoot, { buildCmd, testCmd });
                 // 5. Run test-bound tests (Layer 2)
                 const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, testCmd);
                 // 6. Write framework-ac-results.json

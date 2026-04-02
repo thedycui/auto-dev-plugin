@@ -903,9 +903,10 @@ export async function validateStep(
         }
 
         // 4. Run structural assertions (Layer 1)
+        // Paths in acceptance-criteria.json are project-root-relative, not codeRoot-relative.
         const structuralResults = await runStructuralAssertions(
           acData.criteria,
-          effectiveCodeRoot,
+          projectRoot,
           { buildCmd, testCmd },
         );
 
