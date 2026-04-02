@@ -9,6 +9,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StateJson } from "./types.js";
 import { isTestFile } from "./tdd-gate.js";
+import { AcceptanceCriteriaSchema, computeAcHash } from "./ac-schema.js";
+import type { AcceptanceCriteria } from "./ac-schema.js";
 
 /** Phase 元数据 */
 const PHASE_META: Record<number, { name: string; description: string }> = {
@@ -588,4 +590,104 @@ export async function isTddExemptTask(outputDir: string, task: number): Promise<
   if (!section) return false;
 
   return /\*\*TDD\*\*:\s*skip/i.test(section);
+}
+
+// ---------------------------------------------------------------------------
+// AC JSON Validation (Phase 1 checkpoint)
+// ---------------------------------------------------------------------------
+
+export interface AcValidationResult {
+  valid: boolean;
+  error?: string;
+  data?: AcceptanceCriteria;
+  hash?: string;
+  stats?: { total: number; structural: number; testBound: number; manual: number };
+}
+
+/**
+ * Validate acceptance-criteria.json: schema + manual ratio check.
+ * Called at Phase 1 checkpoint when AC JSON exists.
+ */
+export function validateAcJson(acContent: string): AcValidationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(acContent);
+  } catch (err) {
+    return { valid: false, error: `AC JSON parse error: ${(err as Error).message}` };
+  }
+
+  const parseResult = AcceptanceCriteriaSchema.safeParse(parsed);
+  if (!parseResult.success) {
+    return {
+      valid: false,
+      error: `AC JSON schema invalid: ${parseResult.error.message}`,
+    };
+  }
+
+  const criteria = parseResult.data.criteria;
+  const manualCount = criteria.filter((c) => c.layer === "manual").length;
+  const manualRatio = criteria.length > 0 ? manualCount / criteria.length : 0;
+
+  if (manualRatio > 0.4) {
+    return {
+      valid: false,
+      error: `manual AC ratio ${Math.round(manualRatio * 100)}% (${manualCount}/${criteria.length}) exceeds 40% limit. Convert more ACs to structural or test-bound.`,
+    };
+  }
+
+  const hash = computeAcHash(criteria);
+  const structuralCount = criteria.filter((c) => c.layer === "structural").length;
+  const testBoundCount = criteria.filter((c) => c.layer === "test-bound").length;
+
+  return {
+    valid: true,
+    data: parseResult.data,
+    hash,
+    stats: { total: criteria.length, structural: structuralCount, testBound: testBoundCount, manual: manualCount },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AC Integrity Validation (Phase 6 pre-check)
+// ---------------------------------------------------------------------------
+
+export interface AcIntegrityResult {
+  valid: boolean;
+  error?: string;
+}
+
+/**
+ * Validate AC hash integrity: compare current AC JSON hash against
+ * the AC_LOCK marker in progress-log.
+ * Called at Phase 6 before running assertions.
+ */
+export function validateAcIntegrity(acContent: string, progressLogContent: string): AcIntegrityResult {
+  const acLockMatch = progressLogContent.match(/<!-- AC_LOCK hash=([a-f0-9]+)/);
+  if (!acLockMatch) {
+    // No AC_LOCK marker — might be legacy project, allow
+    return { valid: true };
+  }
+
+  const storedHash = acLockMatch[1]!;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(acContent);
+  } catch {
+    return { valid: false, error: "AC JSON parse error during integrity check" };
+  }
+
+  const parseResult = AcceptanceCriteriaSchema.safeParse(parsed);
+  if (!parseResult.success) {
+    return { valid: false, error: "AC JSON schema invalid during integrity check" };
+  }
+
+  const currentHash = computeAcHash(parseResult.data.criteria);
+  if (currentHash !== storedHash) {
+    return {
+      valid: false,
+      error: `AC tamper detected: stored hash=${storedHash}, current hash=${currentHash}. AC definitions must not be modified after Phase 1.`,
+    };
+  }
+
+  return { valid: true };
 }

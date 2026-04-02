@@ -7,6 +7,13 @@
 
 import { z } from "zod/v4";
 
+// Re-export AC schema types for external consumers
+export type {
+  AcceptanceCriterion,
+  AcceptanceCriteria,
+  AssertionType,
+} from "./ac-schema.js";
+
 // ---------------------------------------------------------------------------
 // Enums / Shared Literals
 // ---------------------------------------------------------------------------

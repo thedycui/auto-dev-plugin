@@ -7,7 +7,7 @@
     {
       "name": "auto-dev",
       "source": "./",
-      "version": "9.2.1",
+      "version": "9.3.0",
       "description": "自治开发循环 — 从设计到验收的全自动闭环"
     }
   ]

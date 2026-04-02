@@ -16,7 +16,7 @@ import { TemplateRenderer } from "./template-renderer.js";
 import { GitManager } from "./git-manager.js";
 import type { StateJson } from "./types.js";
 import { LessonsManager } from "./lessons-manager.js";
-import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective } from "./phase-enforcer.js";
+import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective, validateAcJson, validateAcIntegrity } from "./phase-enforcer.js";
 import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS, isImplFile } from "./tdd-gate.js";
 import { extractDocSummary, extractTaskList } from "./state-manager.js";
 import { runRetrospective } from "./retrospective.js";
@@ -26,6 +26,9 @@ import type { ToolResult } from "./tribunal.js";
 import { generateRetrospectiveData } from "./retrospective-data.js";
 import { getClaudePath } from "./tribunal.js";
 import { computeNextTask } from "./orchestrator.js";
+import { runStructuralAssertions } from "./ac-runner.js";
+import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
+import { AcceptanceCriteriaSchema } from "./ac-schema.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -733,6 +736,46 @@ server.tool(
           ...phase1Validation,
           note: "Checkpoint rejected BEFORE writing state. No state pollution.",
         });
+      }
+
+      // AC JSON validation (optional enhancement — backward compatible)
+      let acContent: string | null = null;
+      try {
+        acContent = await readFile(join(sm.outputDir, "acceptance-criteria.json"), "utf-8");
+      } catch { /* file doesn't exist */ }
+
+      if (acContent) {
+        const acValidation = validateAcJson(acContent);
+        if (!acValidation.valid) {
+          return textResult({
+            error: "AC_SCHEMA_INVALID",
+            message: acValidation.error,
+            mandate: `[BLOCKED] ${acValidation.error}`,
+            note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          });
+        }
+
+        // Write AC_LOCK marker to progress-log
+        const { hash, stats } = acValidation;
+        await sm.appendToProgressLog(
+          `<!-- AC_LOCK hash=${hash} total=${stats!.total} ` +
+          `structural=${stats!.structural} testBound=${stats!.testBound} manual=${stats!.manual} -->\n`,
+        );
+      } else {
+        // Check if auto-dev generated design.md has AC table but no AC JSON
+        try {
+          const designContent = await readFile(join(sm.outputDir, "design.md"), "utf-8");
+          const hasAcTable = /\|\s*AC-\d+/.test(designContent);
+          const isAutoDevGenerated = !state.designDocBound;
+          if (hasAcTable && isAutoDevGenerated) {
+            return textResult({
+              error: "AC_JSON_MISSING",
+              message: "design.md contains AC table but acceptance-criteria.json is missing. Please generate the structured AC file.",
+              mandate: "[BLOCKED] auto-dev generated design must include acceptance-criteria.json.",
+              note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+            });
+          }
+        } catch { /* design.md doesn't exist, handled elsewhere */ }
       }
     }
 
@@ -1817,6 +1860,75 @@ server.tool(
 
     // Legacy path (non-orchestrator sessions)
     const outputDir = sm.outputDir;
+
+    // AC framework execution for Phase 6 (legacy fallback)
+    if (phase === 6) {
+      let acContent: string | null = null;
+      try {
+        acContent = await readFile(join(outputDir, "acceptance-criteria.json"), "utf-8");
+      } catch { /* no AC JSON → legacy flow */ }
+
+      if (acContent) {
+        // Hash integrity check
+        const progressLog = await readFile(join(outputDir, "progress-log.md"), "utf-8").catch(() => "");
+        const integrityResult = validateAcIntegrity(acContent, progressLog);
+        if (!integrityResult.valid) {
+          return textResult({
+            error: "AC_TAMPER_DETECTED",
+            message: integrityResult.error,
+            mandate: `[BLOCKED] ${integrityResult.error}`,
+          });
+        }
+
+        // Parse and execute
+        const acData = AcceptanceCriteriaSchema.parse(JSON.parse(acContent));
+        const effectiveCodeRoot = state.codeRoot ?? projectRoot;
+
+        // Structural assertions (Layer 1)
+        const structuralResults = await runStructuralAssertions(
+          acData.criteria,
+          effectiveCodeRoot,
+          { buildCmd: state.stack.buildCmd, testCmd: state.stack.testCmd },
+        );
+
+        // Test-bound bindings (Layer 2)
+        const bindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
+        const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, state.stack.testCmd);
+
+        // Write framework results
+        const frameworkResults = {
+          structural: structuralResults,
+          testBound: Object.fromEntries(testResults),
+          pendingManual: acData.criteria
+            .filter((c) => c.layer === "manual")
+            .map((c) => c.id),
+          timestamp: new Date().toISOString(),
+        };
+        await writeFile(
+          join(outputDir, "framework-ac-results.json"),
+          JSON.stringify(frameworkResults, null, 2),
+        );
+
+        // Check for failures
+        const structuralFails = Object.entries(structuralResults)
+          .filter(([, v]) => !v.passed).map(([id]) => id);
+        const testFails = [...testResults.entries()]
+          .filter(([, v]) => !v.passed).map(([id]) => id);
+
+        if (structuralFails.length > 0 || testFails.length > 0) {
+          return textResult({
+            error: "AC_FRAMEWORK_FAIL",
+            message: [
+              structuralFails.length > 0 ? `Structural AC FAIL: ${structuralFails.join(", ")}` : "",
+              testFails.length > 0 ? `Test-bound AC FAIL: ${testFails.join(", ")}` : "",
+              "See framework-ac-results.json for details.",
+            ].filter(Boolean).join("\n"),
+            mandate: "[BLOCKED] Framework AC verification failed. Fix issues before resubmitting.",
+          });
+        }
+      }
+    }
+
     const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
     return { content: tribunalResult.content };
   },
