@@ -34,3 +34,5 @@ docs/auto-dev/_self-assess/
 .playwright-mcp/
 mcp/node_modules/.bin/
 mcp/node_modules/.vite/
+.serena/
+mcp/npm
