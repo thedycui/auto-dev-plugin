@@ -1,8 +1,8 @@
 # 端到端测试设计
 
-## Task
-
 为本次实现设计端到端测试用例。
+
+## Task
 
 **Topic**: {topic}
 **Language**: {language}
@@ -11,11 +11,11 @@
 **Design Doc**: {output_dir}/design.md
 **Code Review**: {output_dir}/code-review.md
 
-## 前端项目测试指引（仅前端项目适用）
+## 端项目测试指引（仅前端项目适用）
 
-如果项目是前端项目（React/Vue/HTML）且 Playwright MCP 可用：
+如果项目是前端项目且 Playwright MCP 可用：
 - 优先使用 Playwright MCP 进行真实浏览器交互测试
-- 可以用 `browser_navigate` + `browser_snapshot` + `browser_click` 验证 UI 行为
+- 使用 `browser_navigate` + `browser_snapshot` + `browser_click` 验证 UI 行为
 - 比 DOM 单元测试更能发现真实的用户交互问题
 
 判断方法：检查 package.json 是否包含 react/vue/svelte 等前端框架依赖。
@@ -23,7 +23,7 @@
 ## Requirements
 
 1. 读取 `{output_dir}/design.md` 理解功能需求和验收标准
-2. 读取 `{output_dir}/code-review.md` 关注 Dormant Path Analysis 中标记为"未验证"的路径
+2. 读取 `{output_dir}/code-review.md` 关注 Doormant Path Analysis 中标记为"未验证"的路径
 3. 探索实现代码，理解调用链和数据流
 4. 设计测试用例，写入 `{output_dir}/e2e-test-cases.md`
 
@@ -31,39 +31,40 @@
 
 在设计测试用例之前，必须先评估本地测试能力：
 
-1. **查询 episodic memory**：之前是否在本地启动过服务？用什么命令？
-2. **检查 CLAUDE.md**：有没有本地启动方式（mvn spring-boot:run、docker-compose 等）？
-3. **检查项目文件**：有没有 docker-compose.yml、Makefile、scripts/ 目录？
-4. **检查测试依赖**：pom.xml/package.json 中有没有 Mockito/jest/embedded-mongo 等测试工具？
+1. 查询 episodic memory：之前是否在本地启动过服务？用什么命令？
+2. 检查 CLAUDE.md：有没有本地启动方式（mvn spring-boot:run、docker-compose 等）？
+3. 检查项目文件：有没有 docker-compose.yml、Makefile、scripts/ 目录？
+4. 检查测试依赖：pom.xml/package.json 中有没有 Mockito/jest/embedded-mongo 等测试工具？
 
-**只有在确认本地无法启动服务后，才可以将集成测试标为 DEFERRED。**
+只有在确认本地无法启动服务后，才可以将集成测试标为 DEFERRED。
 
-## 测试分类（每个用例必须标注）
+## 测试分类（每个测试用例必须标注）
 
 对每个测试用例，必须标注类型：
 
 | 类型 | 定义 | 本地能跑吗 | 要求 |
-|---|---|---|---|
-| **UNIT** | 纯逻辑测试，mock 所有外部依赖 | ✅ 一定能 | **必须写代码** |
-| **INTEGRATION** | 需要真实服务，但本地可启动 | ✅ 通常能 | **优先写代码，其次 curl** |
-| **E2E** | 需要完整部署环境（多服务协调） | ❌ 通常不能 | 可以 DEFERRED |
+|---|---|------------|------|
+| **UNIT** | 纯逻辑测试，mock 所有外部依赖 | ✅ 一定能 | 必须写代码 |
+| **INTEGRATION** | 需要真实服务，但本地可启动 | ✅ 通常能 | 优先写代码，其次 curl |
+| **E2E** | 需要完整部署环境 | ❌ 通常不能 | 可 DEFERRED |
 
 ### 强制规则
 
-- **核心业务逻辑**（校验、计算、权限判断、状态转换）如果被标为 INTEGRATION 或 E2E，必须解释为什么不能用 UNIT 测试覆盖
-- **"项目没有测试基础设施"不是跳过 UNIT 测试的理由** — Mockito/jest.mock 不需要任何基础设施
+- 核心业务逻辑（校验、计算、权限判断、状态转换）如果被标为 INTEGRATION 或 E2E，必须解释为什么不能用 UNIT 测试覆盖
+- "项目没有测试基础设施"不是跳过 UNIT 测试的理由 — Mockito/jest.mock 不需要任何基础设施
 - UNIT 类型的测试用例占比不得低于 30%
 
 ## Test Design Techniques
 
-- 等价类划分（Equivalence Partitioning）
-- 边界值分析（Boundary Value Analysis）
-- 决策表（Decision Table）— 复杂条件组合
-- 状态转换（State Transition）— 如有状态机
+- 等价类划分
+- 边界值分析
+- 决策表
+- 状态转换
 
 ## Must-Execute Rule: Integration Entry Point Test
 
 测试设计必须包含至少一个从调用方入口发起的测试：
+
 1. 识别新代码的调用方入口（如 Handler.handle()、Controller 方法）
 2. 从入口发起测试，使用真实输入数据
 3. 验证新代码的输出在已有管线中被正确传递和处理
@@ -83,7 +84,7 @@
 - **测试步骤**:
   1. 具体步骤（不写"输入有效数据"）
   2. ...
-- **预期结果**: 具体可验证的结果（不写"系统正常工作"）
+- **预期结果**: 具体可验证的结果
 - **验证方式**: 断言 / 数据库查询 / 日志检查
 
 ## TC-2: ...
@@ -91,34 +92,35 @@
 
 ## AC 绑定规范
 
-5. 读取 `{output_dir}/acceptance-criteria.json`（如存在），对所有 `layer: "test-bound"` 的 AC：
-   - 为每条 AC 设计至少一个对应测试用例
-   - 在测试用例标题中标注 `[AC-N]` 前缀
+读取 `{output_dir}/acceptance-criteria.json`（如存在），对所有 `layer: "test-bound"` 的 AC：
+- 为每条 AC 设计至少一个对应测试用例
+- 在测试用例标题中标注 `[AC-N]` 前缀
 
-每个 `layer: "test-bound"` 的 AC 必须在测试代码中有对应标注：
-
-**Java**: `@DisplayName("[AC-1] 描述")` 或方法名 `AC1_methodName`
-**TypeScript**: `test("[AC-1] description", ...)` 或 `describe("AC-1: ...", ...)`
-**Python**: `def test_ac1_description():` 或 `@pytest.mark.ac("AC-1")`
+- **Java**: `@DisplayName("[AC-1] 描述")` 或方法名 `AC1_methodName`
+- **TypeScript**: `test("[AC-1] description", ...)` 或 `describe("AC-1: ...", ...)`
+- **Python**: `def test_ac1_description():` 或 `@pytest.mark.ac("AC-1")`
 
 验收阶段框架会自动扫描这些标注并运行对应测试，作为 AC 的自动验证。
-**未绑定测试的 test-bound AC 会导致验收阶段前置检查失败。**
+
+未绑定测试的 test-bound AC 会导致验收阶段前置检查失败。
 
 ## Anti-Laziness Rule
 
-**禁止偷工减料的测试覆盖**：
-- 从 design.md 中提取所有功能点，在输出末尾附一个覆盖矩阵：
+从 design.md 中提取所有功能点，在输出末尾附一个覆盖矩阵：
 
 ```markdown
 ## 覆盖矩阵
-| 功能点 | 正向测试 | 负向测试 | 边界测试 |
-|--------|---------|---------|---------|
-| 功能A  | TC-1    | TC-3    | TC-5    |
-| 功能B  | TC-2    | TC-4    | -       |
+
+| 功能点 | 正向测试 | 负向 / 边界测试 |
+|--------|-------------------|---------|
+| 功能A | TC-1 | TC-3 | TC-5 |
+| 功能B | TC-2 | TC-4 | -       |
+
 ```
 
-- 如果某功能点没有负向/边界测试，必须标注 `-` 并说明原因
-- **测试用例数 < 功能点数 x 2 时**，必须解释为什么覆盖充分
+如果某功能点没有负向/边界测试，必须标注 `-` 并说明原因。
+
+测试用例数 < 功能点数 x 2 时，必须解释为什么覆盖充分。
 
 ## AC 绑定矩阵
 
@@ -128,22 +130,11 @@
 ## AC 绑定矩阵
 
 | AC | 描述 | 绑定测试 | 测试文件 |
-|----|------|---------|---------|
+|----|------|---------|--------|
 | AC-1 | 传入空列表时返回 400 | TC-3: [AC-1] shouldReturn400... | UserServiceTest.java |
 | AC-2 | max-retry 默认值为 3 | (structural, 无需绑定) | — |
 | AC-3 | 代码风格一致 | (manual, 无需绑定) | — |
 ```
-
-## Review Checklist
-
-<!-- requires: e2e-test-review -->
-
-## Constraints
-
-- 每个测试用例必须可独立执行
-- 预期结果必须可客观验证
-- 包含正向和负向测试
-- 覆盖 code-review 中标记的未验证路径
 
 ---
 完成后不需要做其他操作。直接完成任务即可。
