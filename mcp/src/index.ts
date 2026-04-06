@@ -2275,3 +2275,4 @@ main().catch((err) => {
   console.error("auto-dev MCP Server failed to start:", err);
   process.exit(1);
 });
+// test change for pre-commit hook
