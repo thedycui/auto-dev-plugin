@@ -291,6 +291,9 @@ export const StateJsonSchema = z.object({
   worktreeBranch: z.string().nullable().optional(),
   sourceBranch: z.string().nullable().optional(),
 
+  // Process lock file (prevents concurrent instances)
+  lockFile: z.string().optional(),
+
   // Timestamps
   startedAt: z.string(),
   updatedAt: z.string(),
