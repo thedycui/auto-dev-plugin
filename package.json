@@ -4,7 +4,13 @@
   "main": "index.js",
   "scripts": {
     "build": "cd mcp && npm run build",
-    "test": "cd mcp && npm test"
+    "test": "cd mcp && npm test",
+    "lint": "eslint mcp/src --ext .ts",
+    "lint:fix": "eslint mcp/src --ext .ts --fix",
+    "format": "prettier --write \"mcp/src/**/*.ts\"",
+    "format:check": "prettier --check \"mcp/src/**/*.ts\"",
+    "type-check": "cd mcp && tsc --noEmit",
+    "prepare": "husky install"
   },
   "keywords": [],
   "author": "",
@@ -15,5 +21,14 @@
     "@types/node": "^25.5.0",
     "typescript": "^5.9.3",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-security": "^3.0.0",
+    "prettier": "^3.2.5",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.2.0"
   }
 }
