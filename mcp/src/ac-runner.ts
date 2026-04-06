@@ -5,10 +5,10 @@
  * No arbitrary shell commands — all assertions are framework-interpreted.
  */
 
-import { readFile, stat, readdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { join, relative } from "node:path";
-import type { AcceptanceCriterion, AssertionType } from "./ac-schema.js";
+import { readFile, stat, readdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { join, relative } from 'node:path';
+import type { AcceptanceCriterion, AssertionType } from './ac-schema.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,14 +35,17 @@ export interface AcRunResult {
  */
 function globToRegex(pattern: string): RegExp {
   const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*\*/g, "<<<GLOBSTAR>>>")
-    .replace(/\*/g, "[^/]*")
-    .replace(/<<<GLOBSTAR>>>/g, ".*");
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '<<<GLOBSTAR>>>')
+    .replace(/\*/g, '[^/]*')
+    .replace(/<<<GLOBSTAR>>>/g, '.*');
   return new RegExp(`^${escaped}$`);
 }
 
-async function findFilesByGlob(root: string, pattern: string): Promise<string[]> {
+async function findFilesByGlob(
+  root: string,
+  pattern: string
+): Promise<string[]> {
   const regex = globToRegex(pattern);
   const results: string[] = [];
 
@@ -75,17 +78,27 @@ async function findFilesByGlob(root: string, pattern: string): Promise<string[]>
 function execWithTimeout(
   cmd: string,
   args: string[],
-  options: { cwd: string; timeout: number },
+  options: { cwd: string; timeout: number }
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    execFile(cmd, args, { cwd: options.cwd, timeout: options.timeout }, (err, stdout, stderr) => {
-      const exitCode = err ? (err as NodeJS.ErrnoException & { code?: number }).code === undefined ? 1 : 1 : 0;
-      resolve({
-        exitCode: err ? 1 : 0,
-        stdout: typeof stdout === "string" ? stdout : "",
-        stderr: typeof stderr === "string" ? stderr : "",
-      });
-    });
+  return new Promise(resolve => {
+    execFile(
+      cmd,
+      args,
+      { cwd: options.cwd, timeout: options.timeout },
+      (err, stdout, stderr) => {
+        const exitCode = err
+          ? (err as NodeJS.ErrnoException & { code?: number }).code ===
+            undefined
+            ? 1
+            : 1
+          : 0;
+        resolve({
+          exitCode: err ? 1 : 0,
+          stdout: typeof stdout === 'string' ? stdout : '',
+          stderr: typeof stderr === 'string' ? stderr : '',
+        });
+      }
+    );
   });
 }
 
@@ -93,115 +106,209 @@ function execWithTimeout(
 // Individual Assertion Executors
 // ---------------------------------------------------------------------------
 
-async function assertFileExists(assertion: AssertionType & { type: "file_exists" }, codeRoot: string): Promise<AssertionResult> {
+async function assertFileExists(
+  assertion: AssertionType & { type: 'file_exists' },
+  codeRoot: string
+): Promise<AssertionResult> {
   const pattern = assertion.path;
 
   // If no glob chars, check directly
-  if (!pattern.includes("*")) {
+  if (!pattern.includes('*')) {
     const fullPath = join(codeRoot, pattern);
     try {
       await stat(fullPath);
-      return { type: "file_exists", passed: true, detail: `File exists: ${pattern}` };
+      return {
+        type: 'file_exists',
+        passed: true,
+        detail: `File exists: ${pattern}`,
+      };
     } catch {
-      return { type: "file_exists", passed: false, detail: `File not found: ${pattern}` };
+      return {
+        type: 'file_exists',
+        passed: false,
+        detail: `File not found: ${pattern}`,
+      };
     }
   }
 
   // Glob match
   const matches = await findFilesByGlob(codeRoot, pattern);
   if (matches.length > 0) {
-    return { type: "file_exists", passed: true, detail: `Glob matched ${matches.length} file(s): ${pattern}` };
+    return {
+      type: 'file_exists',
+      passed: true,
+      detail: `Glob matched ${matches.length} file(s): ${pattern}`,
+    };
   }
-  return { type: "file_exists", passed: false, detail: `No files match glob: ${pattern}` };
+  return {
+    type: 'file_exists',
+    passed: false,
+    detail: `No files match glob: ${pattern}`,
+  };
 }
 
-async function assertFileNotExists(assertion: AssertionType & { type: "file_not_exists" }, codeRoot: string): Promise<AssertionResult> {
+async function assertFileNotExists(
+  assertion: AssertionType & { type: 'file_not_exists' },
+  codeRoot: string
+): Promise<AssertionResult> {
   const fullPath = join(codeRoot, assertion.path);
   try {
     await stat(fullPath);
-    return { type: "file_not_exists", passed: false, detail: `File should not exist but found: ${assertion.path}` };
+    return {
+      type: 'file_not_exists',
+      passed: false,
+      detail: `File should not exist but found: ${assertion.path}`,
+    };
   } catch {
-    return { type: "file_not_exists", passed: true, detail: `File correctly absent: ${assertion.path}` };
+    return {
+      type: 'file_not_exists',
+      passed: true,
+      detail: `File correctly absent: ${assertion.path}`,
+    };
   }
 }
 
-async function assertFileContains(assertion: AssertionType & { type: "file_contains" }, codeRoot: string): Promise<AssertionResult> {
+async function assertFileContains(
+  assertion: AssertionType & { type: 'file_contains' },
+  codeRoot: string
+): Promise<AssertionResult> {
   const fullPath = join(codeRoot, assertion.path);
   try {
-    const content = await readFile(fullPath, "utf-8");
+    const content = await readFile(fullPath, 'utf-8');
     const regex = new RegExp(assertion.pattern);
     if (regex.test(content)) {
-      return { type: "file_contains", passed: true, detail: `Pattern /${assertion.pattern}/ found in ${assertion.path}` };
+      return {
+        type: 'file_contains',
+        passed: true,
+        detail: `Pattern /${assertion.pattern}/ found in ${assertion.path}`,
+      };
     }
-    return { type: "file_contains", passed: false, detail: `Pattern /${assertion.pattern}/ not found in ${assertion.path}` };
+    return {
+      type: 'file_contains',
+      passed: false,
+      detail: `Pattern /${assertion.pattern}/ not found in ${assertion.path}`,
+    };
   } catch {
-    return { type: "file_contains", passed: false, detail: `Cannot read file: ${assertion.path}` };
+    return {
+      type: 'file_contains',
+      passed: false,
+      detail: `Cannot read file: ${assertion.path}`,
+    };
   }
 }
 
-async function assertFileNotContains(assertion: AssertionType & { type: "file_not_contains" }, codeRoot: string): Promise<AssertionResult> {
+async function assertFileNotContains(
+  assertion: AssertionType & { type: 'file_not_contains' },
+  codeRoot: string
+): Promise<AssertionResult> {
   const fullPath = join(codeRoot, assertion.path);
   try {
-    const content = await readFile(fullPath, "utf-8");
+    const content = await readFile(fullPath, 'utf-8');
     const regex = new RegExp(assertion.pattern);
     if (regex.test(content)) {
-      return { type: "file_not_contains", passed: false, detail: `Pattern /${assertion.pattern}/ should not be in ${assertion.path} but was found` };
+      return {
+        type: 'file_not_contains',
+        passed: false,
+        detail: `Pattern /${assertion.pattern}/ should not be in ${assertion.path} but was found`,
+      };
     }
-    return { type: "file_not_contains", passed: true, detail: `Pattern /${assertion.pattern}/ correctly absent from ${assertion.path}` };
+    return {
+      type: 'file_not_contains',
+      passed: true,
+      detail: `Pattern /${assertion.pattern}/ correctly absent from ${assertion.path}`,
+    };
   } catch {
     // File not existing means pattern is not contained — pass
-    return { type: "file_not_contains", passed: true, detail: `File does not exist (pattern trivially absent): ${assertion.path}` };
+    return {
+      type: 'file_not_contains',
+      passed: true,
+      detail: `File does not exist (pattern trivially absent): ${assertion.path}`,
+    };
   }
 }
 
-async function assertConfigValue(assertion: AssertionType & { type: "config_value" }, codeRoot: string): Promise<AssertionResult> {
+async function assertConfigValue(
+  assertion: AssertionType & { type: 'config_value' },
+  codeRoot: string
+): Promise<AssertionResult> {
   const fullPath = join(codeRoot, assertion.path);
   try {
-    const content = await readFile(fullPath, "utf-8");
+    const content = await readFile(fullPath, 'utf-8');
     const parsed = JSON.parse(content);
 
     // Traverse dot-separated key path
-    const keys = assertion.key.split(".");
+    const keys = assertion.key.split('.');
     let current: unknown = parsed;
     for (const key of keys) {
-      if (current == null || typeof current !== "object") {
-        return { type: "config_value", passed: false, detail: `Key path "${assertion.key}" not found in ${assertion.path}: intermediate key "${key}" is not an object` };
+      if (current == null || typeof current !== 'object') {
+        return {
+          type: 'config_value',
+          passed: false,
+          detail: `Key path "${assertion.key}" not found in ${assertion.path}: intermediate key "${key}" is not an object`,
+        };
       }
       current = (current as Record<string, unknown>)[key];
     }
 
     const actualValue = String(current);
     if (actualValue === assertion.expectedValue) {
-      return { type: "config_value", passed: true, detail: `${assertion.key} = "${assertion.expectedValue}" in ${assertion.path}` };
+      return {
+        type: 'config_value',
+        passed: true,
+        detail: `${assertion.key} = "${assertion.expectedValue}" in ${assertion.path}`,
+      };
     }
-    return { type: "config_value", passed: false, detail: `${assertion.key} = "${actualValue}" (expected "${assertion.expectedValue}") in ${assertion.path}` };
+    return {
+      type: 'config_value',
+      passed: false,
+      detail: `${assertion.key} = "${actualValue}" (expected "${assertion.expectedValue}") in ${assertion.path}`,
+    };
   } catch (err) {
-    return { type: "config_value", passed: false, detail: `Cannot read/parse config file ${assertion.path}: ${(err as Error).message}` };
+    return {
+      type: 'config_value',
+      passed: false,
+      detail: `Cannot read/parse config file ${assertion.path}: ${(err as Error).message}`,
+    };
   }
 }
 
 async function assertBuildSucceeds(
-  _assertion: AssertionType & { type: "build_succeeds" },
+  _assertion: AssertionType & { type: 'build_succeeds' },
   codeRoot: string,
-  buildCmd?: string,
+  buildCmd?: string
 ): Promise<AssertionResult> {
   if (!buildCmd) {
-    return { type: "build_succeeds", passed: false, detail: "No build command configured" };
+    return {
+      type: 'build_succeeds',
+      passed: false,
+      detail: 'No build command configured',
+    };
   }
-  const result = await execWithTimeout("sh", ["-c", buildCmd], { cwd: codeRoot, timeout: 300_000 });
+  const result = await execWithTimeout('sh', ['-c', buildCmd], {
+    cwd: codeRoot,
+    timeout: 300_000,
+  });
   if (result.exitCode === 0) {
-    return { type: "build_succeeds", passed: true, detail: "Build succeeded" };
+    return { type: 'build_succeeds', passed: true, detail: 'Build succeeded' };
   }
-  return { type: "build_succeeds", passed: false, detail: `Build failed: ${result.stderr.slice(0, 300)}` };
+  return {
+    type: 'build_succeeds',
+    passed: false,
+    detail: `Build failed: ${result.stderr.slice(0, 300)}`,
+  };
 }
 
 async function assertTestPasses(
-  assertion: AssertionType & { type: "test_passes" },
+  assertion: AssertionType & { type: 'test_passes' },
   codeRoot: string,
-  testCmd?: string,
+  testCmd?: string
 ): Promise<AssertionResult> {
   if (!testCmd) {
-    return { type: "test_passes", passed: false, detail: "No test command configured" };
+    return {
+      type: 'test_passes',
+      passed: false,
+      detail: 'No test command configured',
+    };
   }
 
   let cmd = testCmd;
@@ -210,11 +317,22 @@ async function assertTestPasses(
     cmd = `${cmd} ${assertion.testFile}`;
   }
 
-  const result = await execWithTimeout("sh", ["-c", cmd], { cwd: codeRoot, timeout: 300_000 });
+  const result = await execWithTimeout('sh', ['-c', cmd], {
+    cwd: codeRoot,
+    timeout: 300_000,
+  });
   if (result.exitCode === 0) {
-    return { type: "test_passes", passed: true, detail: `Test passed${assertion.testFile ? `: ${assertion.testFile}` : ""}` };
+    return {
+      type: 'test_passes',
+      passed: true,
+      detail: `Test passed${assertion.testFile ? `: ${assertion.testFile}` : ''}`,
+    };
   }
-  return { type: "test_passes", passed: false, detail: `Test failed${assertion.testFile ? `: ${assertion.testFile}` : ""}: ${result.stderr.slice(0, 300)}` };
+  return {
+    type: 'test_passes',
+    passed: false,
+    detail: `Test failed${assertion.testFile ? `: ${assertion.testFile}` : ''}: ${result.stderr.slice(0, 300)}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,11 +346,11 @@ async function assertTestPasses(
 export async function runStructuralAssertions(
   criteria: AcceptanceCriterion[],
   codeRoot: string,
-  options?: { buildCmd?: string; testCmd?: string },
+  options?: { buildCmd?: string; testCmd?: string }
 ): Promise<Record<string, AcRunResult>> {
   const results: Record<string, AcRunResult> = {};
 
-  const structuralAcs = criteria.filter((c) => c.layer === "structural");
+  const structuralAcs = criteria.filter(c => c.layer === 'structural');
 
   for (const ac of structuralAcs) {
     const assertions = ac.structuralAssertions ?? [];
@@ -243,29 +361,41 @@ export async function runStructuralAssertions(
       let result: AssertionResult;
 
       switch (assertion.type) {
-        case "file_exists":
+        case 'file_exists':
           result = await assertFileExists(assertion, codeRoot);
           break;
-        case "file_not_exists":
+        case 'file_not_exists':
           result = await assertFileNotExists(assertion, codeRoot);
           break;
-        case "file_contains":
+        case 'file_contains':
           result = await assertFileContains(assertion, codeRoot);
           break;
-        case "file_not_contains":
+        case 'file_not_contains':
           result = await assertFileNotContains(assertion, codeRoot);
           break;
-        case "config_value":
+        case 'config_value':
           result = await assertConfigValue(assertion, codeRoot);
           break;
-        case "build_succeeds":
-          result = await assertBuildSucceeds(assertion, codeRoot, options?.buildCmd);
+        case 'build_succeeds':
+          result = await assertBuildSucceeds(
+            assertion,
+            codeRoot,
+            options?.buildCmd
+          );
           break;
-        case "test_passes":
-          result = await assertTestPasses(assertion, codeRoot, options?.testCmd);
+        case 'test_passes':
+          result = await assertTestPasses(
+            assertion,
+            codeRoot,
+            options?.testCmd
+          );
           break;
         default:
-          result = { type: "unknown", passed: false, detail: `Unknown assertion type` };
+          result = {
+            type: 'unknown',
+            passed: false,
+            detail: `Unknown assertion type`,
+          };
       }
 
       details.push(result);

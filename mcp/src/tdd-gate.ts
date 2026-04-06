@@ -24,7 +24,8 @@ const TEST_RESOURCE_DIR = /tests?\/|__tests__|spec\/|fixtures\//;
  */
 export function isTestFile(filePath: string): boolean {
   const isTestPattern = TEST_PATTERNS.some(p => p.test(filePath));
-  const isTestResource = TEST_RESOURCE_EXT.test(filePath) && TEST_RESOURCE_DIR.test(filePath);
+  const isTestResource =
+    TEST_RESOURCE_EXT.test(filePath) && TEST_RESOURCE_DIR.test(filePath);
   return isTestPattern || isTestResource;
 }
 
@@ -54,50 +55,56 @@ export function isImplFile(filePath: string): boolean {
  * Python: pytest。
  * 未知语言: 返回空字符串（调用方使用 full testCmd fallback）。
  */
-export function buildTestCommand(language: string, testFiles: string[], projectRoot: string): string {
-  if (testFiles.length === 0) return "";
+export function buildTestCommand(
+  language: string,
+  testFiles: string[],
+  projectRoot: string
+): string {
+  if (testFiles.length === 0) return '';
 
   switch (language) {
-    case "Java":
-    case "Java 8": {
-      const entries = testFiles.map(f => {
-        const classMatch = f.match(/([^/]+)\.java$/);
-        const moduleMatch = f.match(/^([^/]+?)\/src\//);
-        return {
-          className: classMatch ? classMatch[1]! : null,
-          module: moduleMatch ? moduleMatch[1]! : null,
-        };
-      }).filter(e => e.className);
+    case 'Java':
+    case 'Java 8': {
+      const entries = testFiles
+        .map(f => {
+          const classMatch = f.match(/([^/]+)\.java$/);
+          const moduleMatch = f.match(/^([^/]+?)\/src\//);
+          return {
+            className: classMatch ? classMatch[1]! : null,
+            module: moduleMatch ? moduleMatch[1]! : null,
+          };
+        })
+        .filter(e => e.className);
 
       // 按模块分组
       const byModule = new Map<string, string[]>();
       for (const e of entries) {
-        const key = e.module || "__root__";
+        const key = e.module || '__root__';
         if (!byModule.has(key)) byModule.set(key, []);
         byModule.get(key)!.push(e.className!);
       }
 
       const commands = [...byModule.entries()].map(([mod, classes]) => {
-        const plFlag = mod !== "__root__" ? ` -pl ${mod}` : "";
-        return `mvn test -Dtest="${classes.join(",")}"${plFlag} -DfailIfNoTests=false`;
+        const plFlag = mod !== '__root__' ? ` -pl ${mod}` : '';
+        return `mvn test -Dtest="${classes.join(',')}"${plFlag} -DfailIfNoTests=false`;
       });
-      return commands.join(" && ");
+      return commands.join(' && ');
     }
 
-    case "TypeScript/JavaScript":
-    case "TypeScript":
-    case "JavaScript": {
-      const files = testFiles.join(" ");
+    case 'TypeScript/JavaScript':
+    case 'TypeScript':
+    case 'JavaScript': {
+      const files = testFiles.join(' ');
       return `npx vitest run ${files} --reporter=verbose`;
     }
 
-    case "Python": {
-      const files = testFiles.join(" ");
+    case 'Python': {
+      const files = testFiles.join(' ');
       return `pytest ${files} -v`;
     }
 
     default:
-      return "";
+      return '';
   }
 }
 
@@ -112,14 +119,14 @@ export function buildTestCommand(language: string, testFiles: string[], projectR
  */
 export function validateRedPhase(
   changedFiles: string[],
-  testFiles: string[],
+  testFiles: string[]
 ): { valid: boolean; error?: string } {
   // 检查是否有实现文件被修改
   const implFiles = changedFiles.filter(f => isImplFile(f));
   if (implFiles.length > 0) {
     return {
       valid: false,
-      error: `RED 阶段禁止修改实现文件。检测到以下实现文件被修改：${implFiles.join(", ")}`,
+      error: `RED 阶段禁止修改实现文件。检测到以下实现文件被修改：${implFiles.join(', ')}`,
     };
   }
 
@@ -129,7 +136,8 @@ export function validateRedPhase(
   if (changedTestFiles.length === 0) {
     return {
       valid: false,
-      error: "RED 阶段要求至少修改一个测试文件，但 changedFiles 中没有找到 testFiles 中的文件。",
+      error:
+        'RED 阶段要求至少修改一个测试文件，但 changedFiles 中没有找到 testFiles 中的文件。',
     };
   }
 
@@ -142,6 +150,6 @@ export function validateRedPhase(
 
 /** TDD 测试执行超时（毫秒） */
 export const TDD_TIMEOUTS = {
-  red: 60_000,    // RED: 60 秒（单文件编译+运行）
+  red: 60_000, // RED: 60 秒（单文件编译+运行）
   green: 120_000, // GREEN: 120 秒（全量测试）
 };

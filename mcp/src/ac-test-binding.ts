@@ -7,10 +7,10 @@
  * 3. runAcBoundTests() — executes bound tests and collects results
  */
 
-import { readFile, readdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { join, relative } from "node:path";
-import type { AcceptanceCriterion } from "./ac-schema.js";
+import { readFile, readdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { join, relative } from 'node:path';
+import type { AcceptanceCriterion } from './ac-schema.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,14 +41,14 @@ export interface AcTestResult {
 const AC_PATTERNS: Record<string, RegExp[]> = {
   java: [
     /@DisplayName\s*\(\s*"\[AC-(\d+)\]([^"]*)"/, // @DisplayName("[AC-1] desc")
-    /void\s+AC(\d+)_(\w+)/,                       // void AC1_methodName
+    /void\s+AC(\d+)_(\w+)/, // void AC1_methodName
   ],
   node: [
     /(?:test|it)\s*\(\s*["'`]\[AC-(\d+)\]\s*([^"'`]*)["'`]/, // test("[AC-1] desc", ...)
-    /describe\s*\(\s*["'`]AC-(\d+):\s*([^"'`]*)["'`]/,        // describe("AC-1: desc", ...)
+    /describe\s*\(\s*["'`]AC-(\d+):\s*([^"'`]*)["'`]/, // describe("AC-1: desc", ...)
   ],
   python: [
-    /def\s+(test_ac(\d+)_\w+)/,                   // def test_ac1_description():
+    /def\s+(test_ac(\d+)_\w+)/, // def test_ac1_description():
     /@pytest\.mark\.ac\s*\(\s*["']AC-(\d+)["']\)/, // @pytest.mark.ac("AC-1")
   ],
 };
@@ -60,9 +60,9 @@ const TEST_FILE_PATTERNS: Record<string, RegExp> = {
 };
 
 const TEST_DIRS: Record<string, string[]> = {
-  java: ["src/test"],
-  node: ["__tests__", "src/__tests__", "test", "tests"],
-  python: ["tests", "test"],
+  java: ['src/test'],
+  node: ['__tests__', 'src/__tests__', 'test', 'tests'],
+  python: ['tests', 'test'],
 };
 
 // ---------------------------------------------------------------------------
@@ -71,11 +71,17 @@ const TEST_DIRS: Record<string, string[]> = {
 
 function normalizeLanguage(language: string): string {
   const lower = language.toLowerCase();
-  if (lower.includes("typescript") || lower.includes("javascript") || lower === "ts" || lower === "js" || lower === "node") {
-    return "node";
+  if (
+    lower.includes('typescript') ||
+    lower.includes('javascript') ||
+    lower === 'ts' ||
+    lower === 'js' ||
+    lower === 'node'
+  ) {
+    return 'node';
   }
-  if (lower.includes("java") && !lower.includes("script")) return "java";
-  if (lower.includes("python") || lower === "py") return "python";
+  if (lower.includes('java') && !lower.includes('script')) return 'java';
+  if (lower.includes('python') || lower === 'py') return 'python';
   return language;
 }
 
@@ -83,7 +89,10 @@ function normalizeLanguage(language: string): string {
 // File Discovery
 // ---------------------------------------------------------------------------
 
-async function findTestFiles(root: string, language: string): Promise<string[]> {
+async function findTestFiles(
+  root: string,
+  language: string
+): Promise<string[]> {
   const normalized = normalizeLanguage(language);
   const pattern = TEST_FILE_PATTERNS[normalized];
   if (!pattern) return [];
@@ -91,7 +100,7 @@ async function findTestFiles(root: string, language: string): Promise<string[]> 
   const dirs = TEST_DIRS[normalized] ?? [];
   const results: string[] = [];
 
-  const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git"]);
+  const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git']);
 
   async function walk(dir: string): Promise<void> {
     let entries;
@@ -102,7 +111,11 @@ async function findTestFiles(root: string, language: string): Promise<string[]> 
     }
     for (const entry of entries) {
       const fullPath = join(dir, entry.name);
-      if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith('.') &&
+        !SKIP_DIRS.has(entry.name)
+      ) {
         await walk(fullPath);
       } else if (entry.isFile() && pattern.test(entry.name)) {
         results.push(fullPath);
@@ -133,7 +146,7 @@ async function findTestFiles(root: string, language: string): Promise<string[]> 
  */
 export async function discoverAcBindings(
   projectRoot: string,
-  language: string,
+  language: string
 ): Promise<AcTestBinding[]> {
   const bindings: AcTestBinding[] = [];
   const normalized = normalizeLanguage(language);
@@ -145,13 +158,13 @@ export async function discoverAcBindings(
   for (const filePath of testFiles) {
     let content: string;
     try {
-      content = await readFile(filePath, "utf-8");
+      content = await readFile(filePath, 'utf-8');
     } catch {
       continue;
     }
 
     const relPath = relative(projectRoot, filePath);
-    const lines = content.split("\n");
+    const lines = content.split('\n');
 
     for (const line of lines) {
       for (const pattern of patterns) {
@@ -160,16 +173,16 @@ export async function discoverAcBindings(
           let acNum: string;
           let testName: string;
 
-          if (language === "java") {
-            if (match[0].includes("@DisplayName")) {
+          if (language === 'java') {
+            if (match[0].includes('@DisplayName')) {
               acNum = match[1]!;
               testName = match[2]?.trim() || `AC-${acNum}`;
             } else {
               acNum = match[1]!;
-              testName = `AC${acNum}_${match[2] ?? ""}`;
+              testName = `AC${acNum}_${match[2] ?? ''}`;
             }
-          } else if (language === "python") {
-            if (match[0].includes("def ")) {
+          } else if (language === 'python') {
+            if (match[0].includes('def ')) {
               acNum = match[2]!;
               testName = match[1]!;
             } else {
@@ -205,19 +218,19 @@ export async function discoverAcBindings(
  */
 export function validateAcBindingCoverage(
   criteria: AcceptanceCriterion[],
-  bindings: AcTestBinding[],
+  bindings: AcTestBinding[]
 ): AcBindingCoverage {
   const testBoundAcs = criteria
-    .filter((c) => c.layer === "test-bound")
-    .map((c) => c.id);
+    .filter(c => c.layer === 'test-bound')
+    .map(c => c.id);
 
-  const boundAcIds = new Set(bindings.map((b) => b.acId));
+  const boundAcIds = new Set(bindings.map(b => b.acId));
 
-  const covered = testBoundAcs.filter((id) => boundAcIds.has(id));
-  const missing = testBoundAcs.filter((id) => !boundAcIds.has(id));
+  const covered = testBoundAcs.filter(id => boundAcIds.has(id));
+  const missing = testBoundAcs.filter(id => !boundAcIds.has(id));
 
-  const allAcIds = new Set(criteria.map((c) => c.id));
-  const extraBindings = [...boundAcIds].filter((id) => !allAcIds.has(id));
+  const allAcIds = new Set(criteria.map(c => c.id));
+  const extraBindings = [...boundAcIds].filter(id => !allAcIds.has(id));
 
   return { covered, missing, extraBindings };
 }
@@ -227,7 +240,7 @@ export function validateAcBindingCoverage(
 // ---------------------------------------------------------------------------
 
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -237,20 +250,20 @@ export function buildTargetedTestCommand(
   language: string,
   testFile: string,
   bindings: AcTestBinding[],
-  projectRoot: string,
+  projectRoot: string
 ): string {
   switch (normalizeLanguage(language)) {
-    case "java": {
-      const className = testFile.replace(/.*\//, "").replace(".java", "");
-      const methods = bindings.map((b) => b.testName).join("+");
+    case 'java': {
+      const className = testFile.replace(/.*\//, '').replace('.java', '');
+      const methods = bindings.map(b => b.testName).join('+');
       return `cd ${projectRoot} && mvn test -Dtest=${className}#${methods} -pl . -q`;
     }
-    case "node": {
-      const namePattern = bindings.map((b) => escapeRegex(b.testName)).join("|");
+    case 'node': {
+      const namePattern = bindings.map(b => escapeRegex(b.testName)).join('|');
       return `cd ${projectRoot} && npx vitest run ${testFile} -t "${namePattern}"`;
     }
-    case "python": {
-      const kPattern = bindings.map((b) => b.testName).join(" or ");
+    case 'python': {
+      const kPattern = bindings.map(b => b.testName).join(' or ');
       return `cd ${projectRoot} && python -m pytest ${testFile} -k "${kPattern}" -v`;
     }
     default:
@@ -264,16 +277,21 @@ export function buildTargetedTestCommand(
 
 function execWithTimeout(
   cmd: string,
-  options: { cwd: string; timeout: number },
+  options: { cwd: string; timeout: number }
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    execFile("sh", ["-c", cmd], { cwd: options.cwd, timeout: options.timeout }, (err, stdout, stderr) => {
-      resolve({
-        exitCode: err ? 1 : 0,
-        stdout: typeof stdout === "string" ? stdout : "",
-        stderr: typeof stderr === "string" ? stderr : "",
-      });
-    });
+  return new Promise(resolve => {
+    execFile(
+      'sh',
+      ['-c', cmd],
+      { cwd: options.cwd, timeout: options.timeout },
+      (err, stdout, stderr) => {
+        resolve({
+          exitCode: err ? 1 : 0,
+          stdout: typeof stdout === 'string' ? stdout : '',
+          stderr: typeof stderr === 'string' ? stderr : '',
+        });
+      }
+    );
   });
 }
 
@@ -306,17 +324,22 @@ export async function runAcBoundTests(
   bindings: AcTestBinding[],
   projectRoot: string,
   language: string,
-  testCmd: string,
+  testCmd: string
 ): Promise<Map<string, AcTestResult>> {
   const results = new Map<string, AcTestResult>();
 
   // Group bindings by AC id
-  const grouped = groupBy(bindings, (b) => b.acId);
+  const grouped = groupBy(bindings, b => b.acId);
 
   for (const [acId, acBindings] of grouped) {
     // Use the first binding's test file (typically one file per AC)
     const testFile = acBindings[0]!.testFile;
-    const cmd = buildTargetedTestCommand(language, testFile, acBindings, projectRoot);
+    const cmd = buildTargetedTestCommand(
+      language,
+      testFile,
+      acBindings,
+      projectRoot
+    );
 
     const { exitCode, stdout, stderr } = await execWithTimeout(cmd, {
       cwd: projectRoot,

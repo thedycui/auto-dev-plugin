@@ -4,34 +4,66 @@
  * Registers all 11 MCP tools and starts the stdio transport.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod/v4";
-import { resolve, dirname, join } from "node:path";
-import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod/v4';
+import { resolve, dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { readFile, writeFile, stat } from 'node:fs/promises';
 
-import { StateManager, internalCheckpoint } from "./state-manager.js";
-import { TemplateRenderer } from "./template-renderer.js";
-import { GitManager } from "./git-manager.js";
-import type { StateJson } from "./types.js";
-import { LessonsManager } from "./lessons-manager.js";
-import { validateCompletion, validatePhase5Artifacts, validatePhase6Artifacts, validatePhase7Artifacts, countTestFiles, checkIterationLimit, validatePredecessor, parseInitMarker, validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, computeNextDirective, validateAcJson, validateAcIntegrity } from "./phase-enforcer.js";
-import { validateRedPhase, buildTestCommand, TDD_TIMEOUTS, isImplFile } from "./tdd-gate.js";
-import { extractDocSummary, extractTaskList } from "./state-manager.js";
-import { runRetrospective } from "./retrospective.js";
-import { TRIBUNAL_PHASES } from "./tribunal-schema.js";
-import { executeTribunal, crossValidate, buildTribunalLog } from "./tribunal.js";
-import type { ToolResult } from "./tribunal.js";
-import { generateRetrospectiveData } from "./retrospective-data.js";
-import { getClaudePath } from "./tribunal.js";
-import { computeNextTask, firstStepForPhase, validateResetRequest } from "./orchestrator.js";
-import { runStructuralAssertions } from "./ac-runner.js";
-import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
-import { AcceptanceCriteriaSchema } from "./ac-schema.js";
-import { cleanupManager } from "./cleanup-manager.js";
-import { processLockManager } from "./process-lock.js";
+import { StateManager, internalCheckpoint } from './state-manager.js';
+import { TemplateRenderer } from './template-renderer.js';
+import { GitManager } from './git-manager.js';
+import type { StateJson } from './types.js';
+import { LessonsManager } from './lessons-manager.js';
+import {
+  validateCompletion,
+  validatePhase5Artifacts,
+  validatePhase6Artifacts,
+  validatePhase7Artifacts,
+  countTestFiles,
+  checkIterationLimit,
+  validatePredecessor,
+  parseInitMarker,
+  validatePhase1ReviewArtifact,
+  validatePhase2ReviewArtifact,
+  isTddExemptTask,
+  computeNextDirective,
+  validateAcJson,
+  validateAcIntegrity,
+} from './phase-enforcer.js';
+import {
+  validateRedPhase,
+  buildTestCommand,
+  TDD_TIMEOUTS,
+  isImplFile,
+} from './tdd-gate.js';
+import { extractDocSummary, extractTaskList } from './state-manager.js';
+import { runRetrospective } from './retrospective.js';
+import { TRIBUNAL_PHASES } from './tribunal-schema.js';
+import {
+  executeTribunal,
+  crossValidate,
+  buildTribunalLog,
+} from './tribunal.js';
+import type { ToolResult } from './tribunal.js';
+import { generateRetrospectiveData } from './retrospective-data.js';
+import { getClaudePath } from './tribunal.js';
+import {
+  computeNextTask,
+  firstStepForPhase,
+  validateResetRequest,
+} from './orchestrator.js';
+import { runStructuralAssertions } from './ac-runner.js';
+import {
+  discoverAcBindings,
+  validateAcBindingCoverage,
+  runAcBoundTests,
+} from './ac-test-binding.js';
+import { AcceptanceCriteriaSchema } from './ac-schema.js';
+import { cleanupManager } from './cleanup-manager.js';
+import { processLockManager } from './process-lock.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,21 +71,31 @@ import { processLockManager } from "./process-lock.js";
 
 /** Resolve the plugin root directory (two levels up from mcp/src/). */
 function pluginRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
 /** Default skills directory inside the plugin. */
 function defaultSkillsDir(): string {
-  return resolve(pluginRoot(), "skills", "auto-dev");
+  return resolve(pluginRoot(), 'skills', 'auto-dev');
 }
 
-function textResult(data: unknown): { content: Array<{ type: "text"; text: string }> } {
+function textResult(data: unknown): {
+  content: Array<{ type: 'text'; text: string }>;
+} {
   return {
-    content: [{ type: "text" as const, text: typeof data === "string" ? data : JSON.stringify(data) }],
+    content: [
+      {
+        type: 'text' as const,
+        text: typeof data === 'string' ? data : JSON.stringify(data),
+      },
+    ],
   };
 }
 
-function buildVariablesFromState(state: StateJson, branch?: string): Record<string, string> {
+function buildVariablesFromState(
+  state: StateJson,
+  branch?: string
+): Record<string, string> {
   return {
     topic: state.topic,
     language: state.stack.language,
@@ -62,7 +104,7 @@ function buildVariablesFromState(state: StateJson, branch?: string): Record<stri
     lang_checklist: state.stack.langChecklist,
     output_dir: state.outputDir,
     project_root: state.projectRoot,
-    branch: branch ?? "unknown",
+    branch: branch ?? 'unknown',
   };
 }
 
@@ -79,19 +121,34 @@ function formatDuration(ms: number): string {
 // Topic → changeType inference
 // ---------------------------------------------------------------------------
 
-type ChangeType = "refactor" | "bugfix" | "feature" | "config" | "docs";
+type ChangeType = 'refactor' | 'bugfix' | 'feature' | 'config' | 'docs';
 
 const TOPIC_PATTERNS: Array<{ pattern: RegExp; type: ChangeType }> = [
   // Bugfix signals
-  { pattern: /\bfix\b|修复|bug|缺陷|问题|报错|异常|crash|error|故障|hotfix/i, type: "bugfix" },
+  {
+    pattern: /\bfix\b|修复|bug|缺陷|问题|报错|异常|crash|error|故障|hotfix/i,
+    type: 'bugfix',
+  },
   // Refactor / performance signals
-  { pattern: /refactor|重构|优化|性能|perf|cleanup|clean.?up|提升|降低耗时|减少内存/i, type: "refactor" },
+  {
+    pattern:
+      /refactor|重构|优化|性能|perf|cleanup|clean.?up|提升|降低耗时|减少内存/i,
+    type: 'refactor',
+  },
   // Docs signals
-  { pattern: /\bdoc[s]?\b|文档|注释|readme|changelog|wiki/i, type: "docs" },
+  { pattern: /\bdoc[s]?\b|文档|注释|readme|changelog|wiki/i, type: 'docs' },
   // Config signals
-  { pattern: /\bconfig\b|配置|环境变量|\.env|\.yml|\.yaml|\.properties|settings/i, type: "config" },
+  {
+    pattern:
+      /\bconfig\b|配置|环境变量|\.env|\.yml|\.yaml|\.properties|settings/i,
+    type: 'config',
+  },
   // Test-only signals (treat as refactor — skip full design)
-  { pattern: /补充测试|添加测试|单元测试|集成测试|测试覆盖|test.?coverage|add.?test|write.?test/i, type: "refactor" },
+  {
+    pattern:
+      /补充测试|添加测试|单元测试|集成测试|测试覆盖|test.?coverage|add.?test|write.?test/i,
+    type: 'refactor',
+  },
 ];
 
 function inferChangeTypeFromTopic(topic: string): ChangeType | undefined {
@@ -114,32 +171,83 @@ function inferChangeTypeFromContent(content: string): ChangeType | undefined {
   // Only scan the top portion — title + background + goals section
   const head = content.slice(0, 2000);
 
-  const SIGNALS: Array<{ pattern: RegExp; type: ChangeType; weight: number }> = [
-    // Bugfix — strong signals
-    { pattern: /修复|bug\s*fix|缺陷|故障|hotfix|问题修复|错误修复/gi, type: "bugfix", weight: 3 },
-    { pattern: /报错|异常|crash|error|失败|不生效|不正确|不一致/gi, type: "bugfix", weight: 2 },
-    { pattern: /回归|regression|排查|根因|root.?cause/gi, type: "bugfix", weight: 2 },
+  const SIGNALS: Array<{ pattern: RegExp; type: ChangeType; weight: number }> =
+    [
+      // Bugfix — strong signals
+      {
+        pattern: /修复|bug\s*fix|缺陷|故障|hotfix|问题修复|错误修复/gi,
+        type: 'bugfix',
+        weight: 3,
+      },
+      {
+        pattern: /报错|异常|crash|error|失败|不生效|不正确|不一致/gi,
+        type: 'bugfix',
+        weight: 2,
+      },
+      {
+        pattern: /回归|regression|排查|根因|root.?cause/gi,
+        type: 'bugfix',
+        weight: 2,
+      },
 
-    // Refactor / performance
-    { pattern: /重构|refactor|性能优化|performance/gi, type: "refactor", weight: 3 },
-    { pattern: /优化|提升性能|降低耗时|减少内存|瓶颈|慢查询/gi, type: "refactor", weight: 2 },
-    { pattern: /代码质量|tech.?debt|技术债|cleanup|clean.?up/gi, type: "refactor", weight: 2 },
+      // Refactor / performance
+      {
+        pattern: /重构|refactor|性能优化|performance/gi,
+        type: 'refactor',
+        weight: 3,
+      },
+      {
+        pattern: /优化|提升性能|降低耗时|减少内存|瓶颈|慢查询/gi,
+        type: 'refactor',
+        weight: 2,
+      },
+      {
+        pattern: /代码质量|tech.?debt|技术债|cleanup|clean.?up/gi,
+        type: 'refactor',
+        weight: 2,
+      },
 
-    // Test
-    { pattern: /测试计划|测试方案|测试覆盖|test.?plan|test.?strategy/gi, type: "refactor", weight: 3 },
-    { pattern: /补充测试|添加测试|单元测试|集成测试|e2e.?test/gi, type: "refactor", weight: 2 },
+      // Test
+      {
+        pattern: /测试计划|测试方案|测试覆盖|test.?plan|test.?strategy/gi,
+        type: 'refactor',
+        weight: 3,
+      },
+      {
+        pattern: /补充测试|添加测试|单元测试|集成测试|e2e.?test/gi,
+        type: 'refactor',
+        weight: 2,
+      },
 
-    // Docs
-    { pattern: /文档编写|文档更新|编写文档|API\s*文档|接口文档/gi, type: "docs", weight: 3 },
+      // Docs
+      {
+        pattern: /文档编写|文档更新|编写文档|API\s*文档|接口文档/gi,
+        type: 'docs',
+        weight: 3,
+      },
 
-    // Config
-    { pattern: /配置变更|环境配置|部署配置|迁移配置/gi, type: "config", weight: 3 },
+      // Config
+      {
+        pattern: /配置变更|环境配置|部署配置|迁移配置/gi,
+        type: 'config',
+        weight: 3,
+      },
 
-    // Feature — weakest default, only match when explicitly stated
-    { pattern: /新增功能|新功能|feature|新增接口|新增模块/gi, type: "feature", weight: 2 },
-  ];
+      // Feature — weakest default, only match when explicitly stated
+      {
+        pattern: /新增功能|新功能|feature|新增接口|新增模块/gi,
+        type: 'feature',
+        weight: 2,
+      },
+    ];
 
-  const scores: Record<ChangeType, number> = { bugfix: 0, refactor: 0, feature: 0, config: 0, docs: 0 };
+  const scores: Record<ChangeType, number> = {
+    bugfix: 0,
+    refactor: 0,
+    feature: 0,
+    config: 0,
+    docs: 0,
+  };
 
   for (const { pattern, type, weight } of SIGNALS) {
     const matches = head.match(pattern);
@@ -151,7 +259,9 @@ function inferChangeTypeFromContent(content: string): ChangeType | undefined {
   // Find the highest score, require a minimum threshold to avoid guessing
   let best: ChangeType | undefined;
   let bestScore = 0;
-  for (const [type, score] of Object.entries(scores) as Array<[ChangeType, number]>) {
+  for (const [type, score] of Object.entries(scores) as Array<
+    [ChangeType, number]
+  >) {
     if (score > bestScore) {
       bestScore = score;
       best = type;
@@ -171,8 +281,8 @@ function inferChangeTypeFromContent(content: string): ChangeType | undefined {
 // ---------------------------------------------------------------------------
 
 const server = new McpServer({
-  name: "auto-dev",
-  version: "9.1.0",
+  name: 'auto-dev',
+  version: '9.1.0',
 });
 
 // ===========================================================================
@@ -180,40 +290,68 @@ const server = new McpServer({
 // ===========================================================================
 
 server.tool(
-  "auto_dev_init",
-  "Initialize auto-dev session: create work dir, detect tech stack, init state. If directory exists, onConflict controls behavior (resume/overwrite).",
+  'auto_dev_init',
+  'Initialize auto-dev session: create work dir, detect tech stack, init state. If directory exists, onConflict controls behavior (resume/overwrite).',
   {
     projectRoot: z.string(),
     topic: z.string(),
-    mode: z.enum(["full", "quick", "turbo"]).optional(),
+    mode: z.enum(['full', 'quick', 'turbo']).optional(),
     estimatedLines: z.number().optional(),
     estimatedFiles: z.number().optional(),
-    changeType: z.enum(["refactor", "bugfix", "feature", "config", "docs"]).optional(),
+    changeType: z
+      .enum(['refactor', 'bugfix', 'feature', 'config', 'docs'])
+      .optional(),
     startPhase: z.number().optional(),
     interactive: z.boolean().optional(),
     dryRun: z.boolean().optional(),
     skipE2e: z.boolean().optional(),
     tdd: z.boolean().optional(),
     brainstorm: z.boolean().optional(),
-    costMode: z.enum(["economy", "beast"]).optional(),
-    onConflict: z.enum(["resume", "overwrite"]).optional(),
+    costMode: z.enum(['economy', 'beast']).optional(),
+    onConflict: z.enum(['resume', 'overwrite']).optional(),
     designDoc: z.string().optional(),
     ship: z.boolean().optional(),
     deployTarget: z.string().optional(),
     deployBranch: z.string().optional(),
     deployEnv: z.string().optional(),
-    verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
-    verifyConfig: z.object({
-      endpoint: z.string().optional(),
-      expectedPattern: z.string().optional(),
-      logPath: z.string().optional(),
-      logKeyword: z.string().optional(),
-      sshHost: z.string().optional(),
-    }).optional(),
+    verifyMethod: z.enum(['api', 'log', 'test', 'combined']).optional(),
+    verifyConfig: z
+      .object({
+        endpoint: z.string().optional(),
+        expectedPattern: z.string().optional(),
+        logPath: z.string().optional(),
+        logKeyword: z.string().optional(),
+        sshHost: z.string().optional(),
+      })
+      .optional(),
     shipMaxRounds: z.number().int().optional(),
     codeRoot: z.string().optional(),
   },
-  async ({ projectRoot, topic, mode: explicitMode, estimatedLines, estimatedFiles, changeType, startPhase, interactive, dryRun, skipE2e, tdd, brainstorm, costMode, onConflict, designDoc, ship, deployTarget, deployBranch, deployEnv, verifyMethod, verifyConfig, shipMaxRounds, codeRoot }) => {
+  async ({
+    projectRoot,
+    topic,
+    mode: explicitMode,
+    estimatedLines,
+    estimatedFiles,
+    changeType,
+    startPhase,
+    interactive,
+    dryRun,
+    skipE2e,
+    tdd,
+    brainstorm,
+    costMode,
+    onConflict,
+    designDoc,
+    ship,
+    deployTarget,
+    deployBranch,
+    deployEnv,
+    verifyMethod,
+    verifyConfig,
+    shipMaxRounds,
+    codeRoot,
+  }) => {
     const sm = await StateManager.create(projectRoot, topic);
 
     // 注册信号处理器（在函数开始）
@@ -227,8 +365,9 @@ server.tool(
     if (!lockResult.acquired) {
       if (lockResult.existingLock) {
         return textResult({
-          error: "LOCK_HELD",
-          message: `Another auto-dev instance is already running for this topic.\n` +
+          error: 'LOCK_HELD',
+          message:
+            `Another auto-dev instance is already running for this topic.\n` +
             `  PID: ${lockResult.existingLock.pid}\n` +
             `  Started: ${new Date(lockResult.existingLock.startTime).toISOString()}\n` +
             `  Project: ${lockResult.existingLock.projectRoot}\n` +
@@ -236,7 +375,7 @@ server.tool(
         });
       }
       return textResult({
-        error: "LOCK_ACQUIRE_FAILED",
+        error: 'LOCK_ACQUIRE_FAILED',
         message: `Failed to acquire lock: ${lockResult.lockFile}`,
       });
     }
@@ -245,23 +384,26 @@ server.tool(
     if (await sm.outputDirExists()) {
       if (!onConflict) {
         return textResult({
-          error: "OUTPUT_DIR_EXISTS",
+          error: 'OUTPUT_DIR_EXISTS',
           message: `${sm.outputDir} exists. Use onConflict='resume' or 'overwrite'.`,
         });
       }
-      if (onConflict === "resume") {
+      if (onConflict === 'resume') {
         let state: StateJson;
         try {
           state = await sm.loadAndValidate();
         } catch (err) {
           const errMsg = (err as Error).message;
-          if (errMsg.includes("dirty")) {
+          if (errMsg.includes('dirty')) {
             // Try clearing dirty flag then re-validate
             try {
-              const raw = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+              const raw = JSON.parse(await readFile(sm.stateFilePath, 'utf-8'));
               raw.dirty = false;
               raw.updatedAt = new Date().toISOString();
-              await sm.atomicWrite(sm.stateFilePath, JSON.stringify(raw, null, 2));
+              await sm.atomicWrite(
+                sm.stateFilePath,
+                JSON.stringify(raw, null, 2)
+              );
               state = await sm.loadAndValidate();
             } catch {
               // dirty fix also failed — degrade to rebuild
@@ -277,14 +419,16 @@ server.tool(
         let resumeTask: number | undefined;
         let resumeTaskStatus: string | undefined;
         try {
-          const log = await readFile(sm.progressLogPath, "utf-8");
+          const log = await readFile(sm.progressLogPath, 'utf-8');
           const taskRegex = /CHECKPOINT phase=3 task=(\d+) status=(\w+)/g;
           let match;
           while ((match = taskRegex.exec(log)) !== null) {
             resumeTask = parseInt(match[1]!, 10);
             resumeTaskStatus = match[2]!;
           }
-        } catch { /* no progress log yet */ }
+        } catch {
+          /* no progress log yet */
+        }
 
         return textResult({
           projectRoot: state.projectRoot,
@@ -302,26 +446,38 @@ server.tool(
           resumeTaskStatus,
         });
       }
-      if (onConflict === "overwrite") {
+      if (onConflict === 'overwrite') {
         // Bug 6 fix: if designDoc is inside outputDir, save it before backup deletes the dir
         let savedDesignDoc: string | undefined;
         if (designDoc) {
           const resolvedDoc = resolve(projectRoot, designDoc);
           if (resolvedDoc.startsWith(sm.outputDir)) {
-            const { mkdtemp } = await import("node:fs/promises");
-            const { copyFile: cpFile } = await import("node:fs/promises");
-            const tmpDir = await mkdtemp(join(projectRoot, ".auto-dev-tmp-"));
+            const { mkdtemp } = await import('node:fs/promises');
+            const { copyFile: cpFile } = await import('node:fs/promises');
+            const tmpDir = await mkdtemp(join(projectRoot, '.auto-dev-tmp-'));
             // 注册临时目录（在创建 tmpDir 后）
-            cleanupManager.register(tmpDir, `Temporary designDoc backup for ${topic}`);
-            savedDesignDoc = join(tmpDir, "design.md");
-            try { await cpFile(resolvedDoc, savedDesignDoc); } catch { savedDesignDoc = undefined; }
+            cleanupManager.register(
+              tmpDir,
+              `Temporary designDoc backup for ${topic}`
+            );
+            savedDesignDoc = join(tmpDir, 'design.md');
+            try {
+              await cpFile(resolvedDoc, savedDesignDoc);
+            } catch {
+              savedDesignDoc = undefined;
+            }
           }
         }
         // Bug 7 fix: preserve progress-log from previous session
         let savedProgressLog: string | undefined;
         try {
-          savedProgressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8");
-        } catch { /* no progress-log to preserve */ }
+          savedProgressLog = await readFile(
+            join(sm.outputDir, 'progress-log.md'),
+            'utf-8'
+          );
+        } catch {
+          /* no progress-log to preserve */
+        }
 
         await sm.backupExistingDir();
 
@@ -334,8 +490,8 @@ server.tool(
     // --- Ship parameter validation ---
     if (ship === true && !deployTarget) {
       return textResult({
-        error: "MISSING_DEPLOY_TARGET",
-        message: "ship=true requires deployTarget parameter.",
+        error: 'MISSING_DEPLOY_TARGET',
+        message: 'ship=true requires deployTarget parameter.',
       });
     }
 
@@ -348,56 +504,82 @@ server.tool(
         : undefined;
       if (candidatePath) {
         try {
-          designDocContent = await readFile(candidatePath, "utf-8");
-        } catch { /* will be caught again later in design doc binding */ }
+          designDocContent = await readFile(candidatePath, 'utf-8');
+        } catch {
+          /* will be caught again later in design doc binding */
+        }
       }
       if (!designDocContent) {
         // Auto-match attempt (same logic as binding below, but read-only)
         try {
-          const { readdir } = await import("node:fs/promises");
-          const docsDir = join(projectRoot, "docs");
+          const { readdir } = await import('node:fs/promises');
+          const docsDir = join(projectRoot, 'docs');
           const files = await readdir(docsDir);
           const topicLower = topic.toLowerCase();
-          const matches = files.filter(f =>
-            f.startsWith("design-") && f.endsWith(".md") &&
-            f.toLowerCase().includes(topicLower)
+          const matches = files.filter(
+            f =>
+              f.startsWith('design-') &&
+              f.endsWith('.md') &&
+              f.toLowerCase().includes(topicLower)
           );
           if (matches.length === 1) {
             try {
-              designDocContent = await readFile(join(docsDir, matches[0]!), "utf-8");
-            } catch { /* read failed, fall through */ }
+              designDocContent = await readFile(
+                join(docsDir, matches[0]!),
+                'utf-8'
+              );
+            } catch {
+              /* read failed, fall through */
+            }
           }
-        } catch { /* docs/ doesn't exist */ }
+        } catch {
+          /* docs/ doesn't exist */
+        }
       }
     }
-    const inferredChangeType = changeType
-      ?? (designDocContent ? inferChangeTypeFromContent(designDocContent) : undefined)
-      ?? inferChangeTypeFromTopic(topic);
+    const inferredChangeType =
+      changeType ??
+      (designDocContent
+        ? inferChangeTypeFromContent(designDocContent)
+        : undefined) ??
+      inferChangeTypeFromTopic(topic);
 
     // --- Mode decision: explicit override or framework auto-select ---
     // Inferred changeType is advisory only — it suggests a mode but never
     // overrides to a faster mode without explicit estimatedLines/Files evidence.
-    let mode: "full" | "quick" | "turbo";
+    let mode: 'full' | 'quick' | 'turbo';
     let suggestedMode: string | undefined;
     if (explicitMode) {
       mode = explicitMode;
     } else {
-      const hasExplicitEstimates = estimatedLines !== undefined || estimatedFiles !== undefined;
+      const hasExplicitEstimates =
+        estimatedLines !== undefined || estimatedFiles !== undefined;
       const lines = estimatedLines ?? 999;
       const files = estimatedFiles ?? 999;
-      const isLowRisk = inferredChangeType === "refactor" || inferredChangeType === "config" || inferredChangeType === "docs";
+      const isLowRisk =
+        inferredChangeType === 'refactor' ||
+        inferredChangeType === 'config' ||
+        inferredChangeType === 'docs';
       if (isLowRisk && lines <= 20 && files <= 2) {
-        mode = "turbo";
-      } else if (lines <= 50 && files <= 3 && inferredChangeType !== "feature") {
-        mode = "quick";
-      } else if (inferredChangeType === "bugfix" && !hasExplicitEstimates) {
+        mode = 'turbo';
+      } else if (
+        lines <= 50 &&
+        files <= 3 &&
+        inferredChangeType !== 'feature'
+      ) {
+        mode = 'quick';
+      } else if (inferredChangeType === 'bugfix' && !hasExplicitEstimates) {
         // Bugfix defaults to quick — skip design/plan phases, start from implementation
-        mode = "quick";
+        mode = 'quick';
       } else {
-        mode = "full";
+        mode = 'full';
         // Generate suggestion when we inferred a non-feature type but lack size evidence to auto-downgrade
-        if (inferredChangeType && inferredChangeType !== "feature" && !hasExplicitEstimates) {
-          suggestedMode = "quick";
+        if (
+          inferredChangeType &&
+          inferredChangeType !== 'feature' &&
+          !hasExplicitEstimates
+        ) {
+          suggestedMode = 'quick';
         }
       }
     }
@@ -410,100 +592,128 @@ server.tool(
 
     // Restore saved data from overwrite (Bug 6 + Bug 7)
     if ((sm as any)._savedDesignDoc) {
-      const { copyFile: cpFile2 } = await import("node:fs/promises");
+      const { copyFile: cpFile2 } = await import('node:fs/promises');
       try {
-        await cpFile2((sm as any)._savedDesignDoc, join(sm.outputDir, "design.md"));
-        designDoc = join(sm.outputDir, "design.md"); // point to restored copy
-      } catch { /* restore failed — will fall through to normal designDoc handling */ }
+        await cpFile2(
+          (sm as any)._savedDesignDoc,
+          join(sm.outputDir, 'design.md')
+        );
+        designDoc = join(sm.outputDir, 'design.md'); // point to restored copy
+      } catch {
+        /* restore failed — will fall through to normal designDoc handling */
+      }
     }
     if ((sm as any)._savedProgressLog) {
       // Append old progress-log checkpoints to new one for completion validation
       try {
-        const newLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8");
+        const newLog = await readFile(
+          join(sm.outputDir, 'progress-log.md'),
+          'utf-8'
+        );
         const oldCheckpoints = (sm as any)._savedProgressLog
-          .split("\n")
-          .filter((l: string) => l.includes("<!-- CHECKPOINT"))
-          .join("\n");
+          .split('\n')
+          .filter((l: string) => l.includes('<!-- CHECKPOINT'))
+          .join('\n');
         if (oldCheckpoints) {
           await writeFile(
-            join(sm.outputDir, "progress-log.md"),
-            newLog + "\n<!-- RESTORED FROM PREVIOUS SESSION -->\n" + oldCheckpoints + "\n",
-            "utf-8",
+            join(sm.outputDir, 'progress-log.md'),
+            newLog +
+              '\n<!-- RESTORED FROM PREVIOUS SESSION -->\n' +
+              oldCheckpoints +
+              '\n',
+            'utf-8'
           );
         }
-      } catch { /* restore failed — non-fatal */ }
+      } catch {
+        /* restore failed — non-fatal */
+      }
     }
 
     // Create a lightweight git tag as rollback anchor (best-effort, non-blocking)
     try {
-      const { execFile: execFileSync } = await import("node:child_process");
-      await new Promise<void>((resolve) => {
+      const { execFile: execFileSync } = await import('node:child_process');
+      await new Promise<void>(resolve => {
         const tagName = `auto-dev/${topic}/start`;
         // Force-create tag in case a previous session left one
-        execFileSync("git", ["tag", "-f", tagName], { cwd: projectRoot }, () => resolve());
+        execFileSync('git', ['tag', '-f', tagName], { cwd: projectRoot }, () =>
+          resolve()
+        );
       });
-    } catch { /* git tag failed — non-fatal, continue */ }
+    } catch {
+      /* git tag failed — non-fatal, continue */
+    }
 
     // Persist behavior flags and startCommit to state
     const behaviorUpdates: Record<string, unknown> = { startCommit };
-    if (codeRoot) behaviorUpdates["codeRoot"] = resolve(projectRoot, codeRoot);
-    if (interactive) behaviorUpdates["interactive"] = true;
-    if (dryRun) behaviorUpdates["dryRun"] = true;
-    if (skipE2e) behaviorUpdates["skipE2e"] = true;
-    behaviorUpdates["tdd"] = tdd === true;  // TDD off by default, --tdd to enable
-    if (brainstorm) behaviorUpdates["brainstorm"] = true;
-    behaviorUpdates["costMode"] = costMode ?? "economy"; // economy=按阶段选模型(默认), beast=全部最强
-    if (mode === "full" && (estimatedLines ?? 999) <= 50 && (estimatedFiles ?? 999) <= 3) {
-      behaviorUpdates["skipSteps"] = ["1b", "2b"];
+    if (codeRoot) behaviorUpdates['codeRoot'] = resolve(projectRoot, codeRoot);
+    if (interactive) behaviorUpdates['interactive'] = true;
+    if (dryRun) behaviorUpdates['dryRun'] = true;
+    if (skipE2e) behaviorUpdates['skipE2e'] = true;
+    behaviorUpdates['tdd'] = tdd === true; // TDD off by default, --tdd to enable
+    if (brainstorm) behaviorUpdates['brainstorm'] = true;
+    behaviorUpdates['costMode'] = costMode ?? 'economy'; // economy=按阶段选模型(默认), beast=全部最强
+    if (
+      mode === 'full' &&
+      (estimatedLines ?? 999) <= 50 &&
+      (estimatedFiles ?? 999) <= 3
+    ) {
+      behaviorUpdates['skipSteps'] = ['1b', '2b'];
     }
     if (ship === true) {
-      behaviorUpdates["ship"] = true;
-      behaviorUpdates["deployTarget"] = deployTarget;
-      if (deployBranch) behaviorUpdates["deployBranch"] = deployBranch;
-      if (deployEnv) behaviorUpdates["deployEnv"] = deployEnv;
-      if (verifyMethod) behaviorUpdates["verifyMethod"] = verifyMethod;
-      if (verifyConfig) behaviorUpdates["verifyConfig"] = verifyConfig;
-      behaviorUpdates["shipRound"] = 0;
-      behaviorUpdates["shipMaxRounds"] = shipMaxRounds ?? 5;
+      behaviorUpdates['ship'] = true;
+      behaviorUpdates['deployTarget'] = deployTarget;
+      if (deployBranch) behaviorUpdates['deployBranch'] = deployBranch;
+      if (deployEnv) behaviorUpdates['deployEnv'] = deployEnv;
+      if (verifyMethod) behaviorUpdates['verifyMethod'] = verifyMethod;
+      if (verifyConfig) behaviorUpdates['verifyConfig'] = verifyConfig;
+      behaviorUpdates['shipRound'] = 0;
+      behaviorUpdates['shipMaxRounds'] = shipMaxRounds ?? 5;
     }
-    behaviorUpdates["lockFile"] = lockResult.lockFile;
+    behaviorUpdates['lockFile'] = lockResult.lockFile;
     await sm.atomicUpdate(behaviorUpdates);
 
     // --- Design doc binding (Issue #7) ---
     let designDocSource: string | undefined;
-    const { copyFile: copyFileAsync } = await import("node:fs/promises");
+    const { copyFile: copyFileAsync } = await import('node:fs/promises');
 
     if (designDoc) {
       // Explicit designDoc parameter — copy to output dir
       const resolvedDesignDoc = resolve(projectRoot, designDoc);
       try {
-        await copyFileAsync(resolvedDesignDoc, join(sm.outputDir, "design.md"));
+        await copyFileAsync(resolvedDesignDoc, join(sm.outputDir, 'design.md'));
         designDocSource = designDoc;
       } catch (err) {
         return textResult({
-          error: "DESIGN_DOC_NOT_FOUND",
+          error: 'DESIGN_DOC_NOT_FOUND',
           message: `designDoc "${designDoc}" not found: ${(err as Error).message}`,
         });
       }
     } else {
       // Auto-match: look for design-*{topic}*.md in docs/
       try {
-        const { readdir } = await import("node:fs/promises");
-        const docsDir = join(projectRoot, "docs");
+        const { readdir } = await import('node:fs/promises');
+        const docsDir = join(projectRoot, 'docs');
         const files = await readdir(docsDir);
         const topicLower = topic.toLowerCase();
-        const matches = files.filter(f =>
-          f.startsWith("design-") && f.endsWith(".md") &&
-          f.toLowerCase().includes(topicLower)
+        const matches = files.filter(
+          f =>
+            f.startsWith('design-') &&
+            f.endsWith('.md') &&
+            f.toLowerCase().includes(topicLower)
         );
         if (matches.length === 1) {
-          await copyFileAsync(join(docsDir, matches[0]!), join(sm.outputDir, "design.md"));
+          await copyFileAsync(
+            join(docsDir, matches[0]!),
+            join(sm.outputDir, 'design.md')
+          );
           designDocSource = `docs/${matches[0]}`;
         } else if (matches.length > 1) {
           // Multiple matches — don't guess, let user specify
           designDocSource = undefined; // will start fresh design in Phase 1
         }
-      } catch { /* docs/ doesn't exist, start fresh */ }
+      } catch {
+        /* docs/ doesn't exist, start fresh */
+      }
     }
 
     // Write immutable INIT marker to progress-log with original commands and integrity hash.
@@ -516,34 +726,47 @@ server.tool(
       skipE2e: skipE2e === true,
       mode,
     };
-    const { createHash } = await import("node:crypto");
-    const integrityHash = createHash("sha256")
+    const { createHash } = await import('node:crypto');
+    const integrityHash = createHash('sha256')
       .update(JSON.stringify(initFields) + startCommit)
-      .digest("hex")
+      .digest('hex')
       .slice(0, 16);
 
     // Count @Disabled/@Ignore/skip tests at init time as baseline
     // Agent adding new @Disabled to pass tests will be detected at complete time
     let disabledTestCount = 0;
     try {
-      const { execFile: execFileCount } = await import("node:child_process");
-      const countOutput = await new Promise<string>((resolve) => {
-        execFileCount("grep", ["-r", "-c", "-E", "@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(", projectRoot + "/src"], { timeout: 15_000 }, (err, stdout) => {
-          resolve(err ? "" : (stdout || ""));
-        });
+      const { execFile: execFileCount } = await import('node:child_process');
+      const countOutput = await new Promise<string>(resolve => {
+        execFileCount(
+          'grep',
+          [
+            '-r',
+            '-c',
+            '-E',
+            '@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(',
+            projectRoot + '/src',
+          ],
+          { timeout: 15_000 },
+          (err, stdout) => {
+            resolve(err ? '' : stdout || '');
+          }
+        );
       });
       // grep -c returns "filename:count" per file, sum all counts
-      for (const line of countOutput.trim().split("\n")) {
+      for (const line of countOutput.trim().split('\n')) {
         const match = line.match(/:(\d+)$/);
         if (match) disabledTestCount += parseInt(match[1], 10);
       }
-    } catch { /* grep failed, count stays 0 */ }
+    } catch {
+      /* grep failed, count stays 0 */
+    }
 
     const initMarker =
       `<!-- INIT buildCmd="${stack.buildCmd}" testCmd="${stack.testCmd}"` +
       ` skipE2e=${skipE2e === true} mode=${mode}` +
       ` integrity=${integrityHash} disabledTests=${disabledTestCount} -->`;
-    await sm.appendToProgressLog("\n" + initMarker + "\n");
+    await sm.appendToProgressLog('\n' + initMarker + '\n');
 
     // Health check: verify claude CLI availability for tribunal phases
     let tribunalReady = false;
@@ -552,7 +775,8 @@ server.tool(
       await getClaudePath();
       tribunalReady = true;
     } catch {
-      tribunalWarning = "claude CLI not found — tribunal phases (independent judge) will not be available. Install @anthropic-ai/claude-code or set TRIBUNAL_CLAUDE_PATH.";
+      tribunalWarning =
+        'claude CLI not found — tribunal phases (independent judge) will not be available. Install @anthropic-ai/claude-code or set TRIBUNAL_CLAUDE_PATH.';
     }
 
     const state = sm.getFullState();
@@ -562,14 +786,21 @@ server.tool(
       resumed: false,
       topic: state.topic,
       mode: state.mode,
-      ...(!changeType && inferredChangeType && !explicitMode ? {
-        autoInferred: {
-          changeType: inferredChangeType,
-          source: designDocContent ? "design-doc" : "topic",
-          modeReason: `${designDocContent ? "design doc content" : `topic "${topic}"`} → detected ${inferredChangeType}`,
-          ...(suggestedMode ? { suggestedMode, suggestion: `检测到 ${inferredChangeType} 类型，建议使用 mode="${suggestedMode}"。如任务简单可重新 init 并指定 mode="${suggestedMode}"` } : {}),
-        },
-      } : {}),
+      ...(!changeType && inferredChangeType && !explicitMode
+        ? {
+            autoInferred: {
+              changeType: inferredChangeType,
+              source: designDocContent ? 'design-doc' : 'topic',
+              modeReason: `${designDocContent ? 'design doc content' : `topic "${topic}"`} → detected ${inferredChangeType}`,
+              ...(suggestedMode
+                ? {
+                    suggestedMode,
+                    suggestion: `检测到 ${inferredChangeType} 类型，建议使用 mode="${suggestedMode}"。如任务简单可重新 init 并指定 mode="${suggestedMode}"`,
+                  }
+                : {}),
+            },
+          }
+        : {}),
       language: stack.language,
       buildCmd: stack.buildCmd,
       testCmd: stack.testCmd,
@@ -580,7 +811,7 @@ server.tool(
       ...(tribunalWarning ? { tribunalWarning } : {}),
       ...(designDocSource ? { designDocSource, designDocBound: true } : {}),
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -588,8 +819,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_state_get",
-  "Read current auto-dev state with schema validation. Reports dirty/corrupted state clearly.",
+  'auto_dev_state_get',
+  'Read current auto-dev state with schema validation. Reports dirty/corrupted state clearly.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -598,7 +829,7 @@ server.tool(
     const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
     return textResult(state);
-  },
+  }
 );
 
 // ===========================================================================
@@ -606,8 +837,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_state_update",
-  "Update auxiliary state fields (task, iteration, flags). Phase/status changes MUST go through auto_dev_checkpoint.",
+  'auto_dev_state_update',
+  'Update auxiliary state fields (task, iteration, flags). Phase/status changes MUST go through auto_dev_checkpoint.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -623,7 +854,7 @@ server.tool(
     const sm = await StateManager.create(projectRoot, topic);
     await sm.atomicUpdate(updates);
     return textResult({ ok: true, updated: Object.keys(updates) });
-  },
+  }
 );
 
 // ===========================================================================
@@ -631,24 +862,42 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_checkpoint",
+  'auto_dev_checkpoint',
   "Write structured checkpoint to progress-log and update state.json. Idempotent: same params won't duplicate entries. Atomic: uses write-to-temp-then-rename.",
   {
     projectRoot: z.string(),
     topic: z.string(),
     phase: z.number(),
     task: z.number().optional(),
-    status: z.enum(["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"]),
+    status: z.enum([
+      'IN_PROGRESS',
+      'PASS',
+      'NEEDS_REVISION',
+      'BLOCKED',
+      'COMPLETED',
+      'REGRESS',
+    ]),
     summary: z.string().optional(),
     tokenEstimate: z.number().optional(),
     regressTo: z.number().int().min(1).max(5).optional(),
     force: z.boolean().optional(),
     reason: z.string().optional(),
   },
-  async ({ projectRoot, topic, phase, task, status: rawStatus, summary: rawSummary0, tokenEstimate, regressTo, force, reason }) => {
+  async ({
+    projectRoot,
+    topic,
+    phase,
+    task,
+    status: rawStatus,
+    summary: rawSummary0,
+    tokenEstimate,
+    regressTo,
+    force,
+    reason,
+  }) => {
     let rawSummary = rawSummary0;
-    let status: string = rawStatus;
-    let summary: string | undefined = rawSummary;
+    const status: string = rawStatus;
+    const summary: string | undefined = rawSummary;
     const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
 
@@ -658,45 +907,61 @@ server.tool(
     // inconsistency because internalCheckpoint does not update the step field.
     if (state.step != null) {
       // Block PASS for tribunal phases (original guard)
-      if (status === "PASS" && (TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
+      if (
+        status === 'PASS' &&
+        (TRIBUNAL_PHASES as readonly number[]).includes(phase)
+      ) {
         return textResult({
-          error: "USE_AUTO_DEV_NEXT",
+          error: 'USE_AUTO_DEV_NEXT',
           message: `当前使用 orchestrator 模式，Phase ${phase} 的验证和推进由 auto_dev_next 自动处理。请调用 auto_dev_next(projectRoot, topic) 推进流程，不要手动调用 checkpoint 或 submit。`,
-          mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。",
+          mandate: '调用 auto_dev_next(projectRoot, topic) 推进流程。',
         });
       }
       // Block phase changes that don't match current state (prevents phase/step desync)
       if (phase !== state.phase) {
         return textResult({
-          error: "PHASE_STEP_DESYNC",
+          error: 'PHASE_STEP_DESYNC',
           message: `当前使用 orchestrator 模式（step=${state.step}），不允许通过 checkpoint 修改 phase（当前=${state.phase}，请求=${phase}）。phase 变更由 auto_dev_next 自动管理。`,
-          mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程，禁止手动修改 phase。",
+          mandate:
+            '调用 auto_dev_next(projectRoot, topic) 推进流程，禁止手动修改 phase。',
         });
       }
     }
 
     // Idempotency check
     if (await sm.isCheckpointDuplicate(phase, task, status, summary)) {
-      return textResult({ idempotent: true, message: "Checkpoint already exists with same params, skipped." });
+      return textResult({
+        idempotent: true,
+        message: 'Checkpoint already exists with same params, skipped.',
+      });
     }
 
     // Guard A: COMPLETED status is reserved for auto_dev_complete only
-    if (status === "COMPLETED") {
+    if (status === 'COMPLETED') {
       return textResult({
-        error: "INVALID_STATUS",
-        message: "COMPLETED 状态不能通过 checkpoint 设置。必须调用 auto_dev_complete() 完成。",
-        mandate: "[BLOCKED] 禁止通过 checkpoint 设置 COMPLETED。唯一的完成方式是调用 auto_dev_complete。",
+        error: 'INVALID_STATUS',
+        message:
+          'COMPLETED 状态不能通过 checkpoint 设置。必须调用 auto_dev_complete() 完成。',
+        mandate:
+          '[BLOCKED] 禁止通过 checkpoint 设置 COMPLETED。唯一的完成方式是调用 auto_dev_complete。',
       });
     }
 
     // Guard B: PASS requires predecessor phase to be PASS (prevent phase skipping)
-    if (status === "PASS") {
-      const progressLogPath = join(sm.outputDir, "progress-log.md");
-      const progressLogContent = await readFile(progressLogPath, "utf-8").catch(() => "");
-      const predCheck = validatePredecessor(phase, progressLogContent, state.mode, state.skipE2e === true);
+    if (status === 'PASS') {
+      const progressLogPath = join(sm.outputDir, 'progress-log.md');
+      const progressLogContent = await readFile(progressLogPath, 'utf-8').catch(
+        () => ''
+      );
+      const predCheck = validatePredecessor(
+        phase,
+        progressLogContent,
+        state.mode,
+        state.skipE2e === true
+      );
       if (!predCheck.valid) {
         return textResult({
-          error: "PREDECESSOR_NOT_PASSED",
+          error: 'PREDECESSOR_NOT_PASSED',
           message: predCheck.error,
           mandate: `[BLOCKED] ${predCheck.error}`,
         });
@@ -704,48 +969,60 @@ server.tool(
     }
 
     // Guard C: Tribunal phases (4/5/6) cannot be directly marked PASS via checkpoint
-    if ((TRIBUNAL_PHASES as readonly number[]).includes(phase) && status === "PASS") {
+    if (
+      (TRIBUNAL_PHASES as readonly number[]).includes(phase) &&
+      status === 'PASS'
+    ) {
       // Escape hatch: force=true allowed only after 2+ escalations
       const escCount = state.phaseEscalateCount?.[String(phase)] ?? 0;
       if (force === true && escCount >= 2) {
-        const overrideSummary = `[HUMAN_OVERRIDE] Phase ${phase} forced PASS after ${escCount} escalations. Reason: ${reason ?? "not provided"}`;
+        const overrideSummary = `[HUMAN_OVERRIDE] Phase ${phase} forced PASS after ${escCount} escalations. Reason: ${reason ?? 'not provided'}`;
         rawSummary = overrideSummary;
         // Fall through to normal checkpoint logic
       } else {
         return textResult({
-          error: "TRIBUNAL_REQUIRED",
+          error: 'TRIBUNAL_REQUIRED',
           message: `Phase ${phase} 需要通过独立裁决才能 PASS。请调用 auto_dev_submit(phase=${phase}) 提交审查。`,
-          mandate: "禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。",
-          ...(escCount >= 2 ? { hint: "可使用 force=true + reason 强制通过" } : {}),
+          mandate:
+            '禁止主 Agent 直接标记裁决 Phase 为 PASS。必须通过 auto_dev_submit。',
+          ...(escCount >= 2
+            ? { hint: '可使用 force=true + reason 强制通过' }
+            : {}),
         });
       }
     }
 
     // [P0-1 fix] REGRESS validation BEFORE any state mutation
-    if (status === "REGRESS") {
+    if (status === 'REGRESS') {
       if (!regressTo) {
-        return textResult({ error: "REGRESS requires regressTo parameter" });
+        return textResult({ error: 'REGRESS requires regressTo parameter' });
       }
       if (regressTo >= phase) {
-        return textResult({ error: `regressTo(${regressTo}) must be < current phase(${phase})` });
+        return textResult({
+          error: `regressTo(${regressTo}) must be < current phase(${phase})`,
+        });
       }
       // Regression limit check consolidated in computeNextDirective (phase-enforcer.ts)
       // Only pre-check regressTo validity here, not count
     }
 
     // Iteration limit check for NEEDS_REVISION
-    if (status === "NEEDS_REVISION") {
+    if (status === 'NEEDS_REVISION') {
       const newIteration = (state.iteration ?? 0) + 1;
-      const iterCheck = checkIterationLimit(phase, newIteration, state.interactive ?? false);
+      const iterCheck = checkIterationLimit(
+        phase,
+        newIteration,
+        state.interactive ?? false
+      );
 
-      if (iterCheck.action === "BLOCK") {
+      if (iterCheck.action === 'BLOCK') {
         // [P1-2 fix] Persist iteration even on BLOCK so it's sticky
         await sm.atomicUpdate({ iteration: newIteration });
         // Record lesson so future phases can learn from this
         const lessons = new LessonsManager(sm.outputDir);
-        await lessons.add(phase, "iteration-limit", iterCheck.message);
+        await lessons.add(phase, 'iteration-limit', iterCheck.message);
         return textResult({
-          status: "BLOCKED",
+          status: 'BLOCKED',
           message: iterCheck.message,
           mandate: `[BLOCKED] ${iterCheck.message} 请用户决定是否继续。`,
         });
@@ -759,34 +1036,44 @@ server.tool(
     // ===================================================================
 
     // Phase 1 review artifact pre-validation: design-review.md must exist
-    if (phase === 1 && status === "PASS") {
+    if (phase === 1 && status === 'PASS') {
       let reviewContent: string | null = null;
       try {
-        reviewContent = await readFile(join(sm.outputDir, "design-review.md"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        reviewContent = await readFile(
+          join(sm.outputDir, 'design-review.md'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
       const phase1Validation = validatePhase1ReviewArtifact(reviewContent);
       if (!phase1Validation.valid) {
         return textResult({
-          error: "PHASE1_REVIEW_MISSING",
+          error: 'PHASE1_REVIEW_MISSING',
           ...phase1Validation,
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
         });
       }
 
       // AC JSON validation (optional enhancement — backward compatible)
       let acContent: string | null = null;
       try {
-        acContent = await readFile(join(sm.outputDir, "acceptance-criteria.json"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        acContent = await readFile(
+          join(sm.outputDir, 'acceptance-criteria.json'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
 
       if (acContent) {
         const acValidation = validateAcJson(acContent);
         if (!acValidation.valid) {
           return textResult({
-            error: "AC_SCHEMA_INVALID",
+            error: 'AC_SCHEMA_INVALID',
             message: acValidation.error,
             mandate: `[BLOCKED] ${acValidation.error}`,
-            note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+            note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
           });
         }
 
@@ -794,44 +1081,56 @@ server.tool(
         const { hash, stats } = acValidation;
         await sm.appendToProgressLog(
           `<!-- AC_LOCK hash=${hash} total=${stats!.total} ` +
-          `structural=${stats!.structural} testBound=${stats!.testBound} manual=${stats!.manual} -->\n`,
+            `structural=${stats!.structural} testBound=${stats!.testBound} manual=${stats!.manual} -->\n`
         );
       } else {
         // Check if auto-dev generated design.md has AC table but no AC JSON
         try {
-          const designContent = await readFile(join(sm.outputDir, "design.md"), "utf-8");
+          const designContent = await readFile(
+            join(sm.outputDir, 'design.md'),
+            'utf-8'
+          );
           const hasAcTable = /\|\s*AC-\d+/.test(designContent);
           const isAutoDevGenerated = !state.designDocBound;
           if (hasAcTable && isAutoDevGenerated) {
             return textResult({
-              error: "AC_JSON_MISSING",
-              message: "design.md contains AC table but acceptance-criteria.json is missing. Please generate the structured AC file.",
-              mandate: "[BLOCKED] auto-dev generated design must include acceptance-criteria.json.",
-              note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+              error: 'AC_JSON_MISSING',
+              message:
+                'design.md contains AC table but acceptance-criteria.json is missing. Please generate the structured AC file.',
+              mandate:
+                '[BLOCKED] auto-dev generated design must include acceptance-criteria.json.',
+              note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
             });
           }
-        } catch { /* design.md doesn't exist, handled elsewhere */ }
+        } catch {
+          /* design.md doesn't exist, handled elsewhere */
+        }
       }
     }
 
     // Phase 2 review artifact pre-validation: plan-review.md must exist
-    if (phase === 2 && status === "PASS") {
+    if (phase === 2 && status === 'PASS') {
       let reviewContent: string | null = null;
       try {
-        reviewContent = await readFile(join(sm.outputDir, "plan-review.md"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        reviewContent = await readFile(
+          join(sm.outputDir, 'plan-review.md'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
       const phase2Validation = validatePhase2ReviewArtifact(reviewContent);
       if (!phase2Validation.valid) {
         return textResult({
-          error: "PHASE2_REVIEW_MISSING",
+          error: 'PHASE2_REVIEW_MISSING',
           ...phase2Validation,
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
         });
       }
     }
 
     // Phase 5 artifact pre-validation + ACTUAL test execution
-    if (phase === 5 && status === "PASS" && state.skipE2e !== true) {
+    if (phase === 5 && status === 'PASS' && state.skipE2e !== true) {
       // 5a. Check test files and implementation files exist
       let testFileCount = 0;
       let implFileCount = 0;
@@ -839,108 +1138,150 @@ server.tool(
         // IMP-003: Use unified GitManager.getChangedFiles
         const gm = new GitManager(projectRoot);
         const newFiles = await gm.getChangedFiles({
-          baseCommit: state.startCommit ?? "HEAD~20",
+          baseCommit: state.startCommit ?? 'HEAD~20',
           includeStaged: false, // Only committed + untracked for Phase 5
         });
         testFileCount = countTestFiles(newFiles);
         // Count new implementation files (non-test source files)
         implFileCount = newFiles.filter(f => isImplFile(f)).length;
-      } catch { /* ignore git errors */ }
+      } catch {
+        /* ignore git errors */
+      }
 
       let resultsContent: string | null = null;
       try {
-        resultsContent = await readFile(join(sm.outputDir, "e2e-test-results.md"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        resultsContent = await readFile(
+          join(sm.outputDir, 'e2e-test-results.md'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
 
-      const phase5Validation = await validatePhase5Artifacts(sm.outputDir, testFileCount, resultsContent, implFileCount);
+      const phase5Validation = await validatePhase5Artifacts(
+        sm.outputDir,
+        testFileCount,
+        resultsContent,
+        implFileCount
+      );
       if (!phase5Validation.valid) {
         return textResult({
-          error: "PHASE5_ARTIFACTS_MISSING",
+          error: 'PHASE5_ARTIFACTS_MISSING',
           ...phase5Validation,
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
         });
       }
 
       // 5b. ACTUALLY RUN testCmd — framework executes tests, not the agent
       // Read original testCmd from INIT marker (tamper-proof)
-      const progressLog = await readFile(join(sm.outputDir, "progress-log.md"), "utf-8").catch(() => "");
+      const progressLog = await readFile(
+        join(sm.outputDir, 'progress-log.md'),
+        'utf-8'
+      ).catch(() => '');
       const initData = parseInitMarker(progressLog);
       const testCmd = initData?.testCmd ?? state.stack?.testCmd;
       if (testCmd) {
         try {
-          const { execFile: execFileTest } = await import("node:child_process");
-          const testResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
-            execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: 300_000 }, (err, _stdout, stderr) => {
-              resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
-            });
+          const { execFile: execFileTest } = await import('node:child_process');
+          const testResult = await new Promise<{
+            success: boolean;
+            stderr: string;
+          }>(resolve => {
+            execFileTest(
+              'sh',
+              ['-c', testCmd],
+              { cwd: projectRoot, timeout: 300_000 },
+              (err, _stdout, stderr) => {
+                resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? '' });
+              }
+            );
           });
           if (!testResult.success) {
             return textResult({
-              error: "PHASE5_TESTS_FAILED",
-              message: `Phase 5 checkpoint 被拒绝：框架实际执行 testCmd 失败。` +
+              error: 'PHASE5_TESTS_FAILED',
+              message:
+                `Phase 5 checkpoint 被拒绝：框架实际执行 testCmd 失败。` +
                 `\n命令: ${testCmd}\n错误: ${testResult.stderr}`,
-              mandate: "[BLOCKED] 测试未通过。框架已自行执行 testCmd 验证。禁止伪造测试结果。",
-              note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+              mandate:
+                '[BLOCKED] 测试未通过。框架已自行执行 testCmd 验证。禁止伪造测试结果。',
+              note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
             });
           }
         } catch (err) {
           return textResult({
-            error: "PHASE5_TEST_EXECUTION_ERROR",
+            error: 'PHASE5_TEST_EXECUTION_ERROR',
             message: `框架执行 testCmd 时出错: ${(err as Error).message}`,
-            note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+            note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
           });
         }
       }
     }
 
     // Phase 6 artifact pre-validation
-    if (phase === 6 && status === "PASS") {
+    if (phase === 6 && status === 'PASS') {
       let reportContent: string | null = null;
       try {
-        reportContent = await readFile(join(sm.outputDir, "acceptance-report.md"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        reportContent = await readFile(
+          join(sm.outputDir, 'acceptance-report.md'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
 
       const phase6Validation = validatePhase6Artifacts(reportContent);
       if (!phase6Validation.valid) {
         return textResult({
-          error: "PHASE6_ARTIFACTS_MISSING",
+          error: 'PHASE6_ARTIFACTS_MISSING',
           ...phase6Validation,
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
         });
       }
     }
 
     // Phase 7 artifact pre-validation: retrospective.md must exist and be substantial
-    if (phase === 7 && status === "PASS") {
+    if (phase === 7 && status === 'PASS') {
       let retroContent: string | null = null;
       try {
-        retroContent = await readFile(join(sm.outputDir, "retrospective.md"), "utf-8");
-      } catch { /* file doesn't exist */ }
+        retroContent = await readFile(
+          join(sm.outputDir, 'retrospective.md'),
+          'utf-8'
+        );
+      } catch {
+        /* file doesn't exist */
+      }
 
       const retroValidation = validatePhase7Artifacts(retroContent);
       if (!retroValidation.valid) {
         return textResult({
-          error: "PHASE7_RETROSPECTIVE_MISSING",
+          error: 'PHASE7_RETROSPECTIVE_MISSING',
           ...retroValidation,
-          note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+          note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
         });
       }
     }
 
     // TDD Gate: verify RED+GREEN for each task (replaces old Iron Law)
-    if (phase === 3 && status === "PASS" && state.tdd === true && task != null) {
+    if (
+      phase === 3 &&
+      status === 'PASS' &&
+      state.tdd === true &&
+      task != null
+    ) {
       const isExempt = await isTddExemptTask(sm.outputDir, task);
       if (!isExempt) {
         const tddState = state.tddTaskStates?.[String(task)];
-        if (tddState?.status !== "GREEN_CONFIRMED") {
+        if (tddState?.status !== 'GREEN_CONFIRMED') {
           return textResult({
-            error: "TDD_GATE_INCOMPLETE",
-            message: `Task ${task} 未完成 TDD RED-GREEN 流程。` +
-              (tddState?.status === "RED_CONFIRMED"
-                ? "RED 已确认，但 GREEN 尚未完成。请先调用 auto_dev_task_green。"
-                : "RED 尚未完成。请先调用 auto_dev_task_red。"),
-            mandate: "[BLOCKED] TDD 模式下，checkpoint PASS 要求 RED+GREEN 均已确认。",
-            note: "Checkpoint rejected BEFORE writing state. No state pollution.",
+            error: 'TDD_GATE_INCOMPLETE',
+            message:
+              `Task ${task} 未完成 TDD RED-GREEN 流程。` +
+              (tddState?.status === 'RED_CONFIRMED'
+                ? 'RED 已确认，但 GREEN 尚未完成。请先调用 auto_dev_task_green。'
+                : 'RED 尚未完成。请先调用 auto_dev_task_red。'),
+            mandate:
+              '[BLOCKED] TDD 模式下，checkpoint PASS 要求 RED+GREEN 均已确认。',
+            note: 'Checkpoint rejected BEFORE writing state. No state pollution.',
           });
         }
       }
@@ -950,9 +1291,18 @@ server.tool(
     // COMMIT PHASE — all pre-validations passed, now persist state
     // ===================================================================
 
-    const result = await internalCheckpoint(sm, state, phase, status, summary, task, tokenEstimate, {
-      regressTo,
-    });
+    const result = await internalCheckpoint(
+      sm,
+      state,
+      phase,
+      status,
+      summary,
+      task,
+      tokenEstimate,
+      {
+        regressTo,
+      }
+    );
 
     if (!result.ok) {
       return textResult({
@@ -962,7 +1312,7 @@ server.tool(
     }
 
     return textResult({ ok: true, ...result.nextDirective });
-  },
+  }
 );
 
 // ===========================================================================
@@ -970,8 +1320,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_task_red",
-  "TDD RED phase: validate that only test files were changed and tests fail. Must be called before auto_dev_task_green.",
+  'auto_dev_task_red',
+  'TDD RED phase: validate that only test files were changed and tests fail. Must be called before auto_dev_task_green.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -983,25 +1333,28 @@ server.tool(
     const state = await sm.loadAndValidate();
 
     // Verify phase=3, status=IN_PROGRESS, tdd=true
-    if (state.phase !== 3 || state.status !== "IN_PROGRESS") {
+    if (state.phase !== 3 || state.status !== 'IN_PROGRESS') {
       return textResult({
-        error: "INVALID_PHASE",
+        error: 'INVALID_PHASE',
         message: `auto_dev_task_red 只能在 Phase 3 IN_PROGRESS 状态下调用。当前: phase=${state.phase}, status=${state.status}`,
       });
     }
     if (state.tdd !== true) {
       return textResult({
-        error: "TDD_NOT_ENABLED",
-        message: "TDD 模式未启用。请在 auto_dev_init 时设置 tdd=true。",
+        error: 'TDD_NOT_ENABLED',
+        message: 'TDD 模式未启用。请在 auto_dev_init 时设置 tdd=true。',
       });
     }
 
     // Check task not already RED_CONFIRMED or GREEN_CONFIRMED
     const taskKey = String(task);
     const existingState = state.tddTaskStates?.[taskKey];
-    if (existingState?.status === "RED_CONFIRMED" || existingState?.status === "GREEN_CONFIRMED") {
+    if (
+      existingState?.status === 'RED_CONFIRMED' ||
+      existingState?.status === 'GREEN_CONFIRMED'
+    ) {
       return textResult({
-        error: "TASK_ALREADY_CONFIRMED",
+        error: 'TASK_ALREADY_CONFIRMED',
         message: `Task ${task} 已处于 ${existingState.status} 状态，无需重复调用 auto_dev_task_red。`,
       });
     }
@@ -1009,62 +1362,97 @@ server.tool(
     // Get changed files via git
     let changedFiles: string[] = [];
     try {
-      const { execFile: execFileGit } = await import("node:child_process");
+      const { execFile: execFileGit } = await import('node:child_process');
       // Include unstaged, staged, AND untracked files (prevent bypass via git add)
-      const diffUnstaged = await new Promise<string>((resolve) => {
-        execFileGit("git", ["diff", "--name-only", "HEAD"], { cwd: projectRoot }, (err, stdout) => {
-          resolve(err ? "" : (stdout || ""));
-        });
+      const diffUnstaged = await new Promise<string>(resolve => {
+        execFileGit(
+          'git',
+          ['diff', '--name-only', 'HEAD'],
+          { cwd: projectRoot },
+          (err, stdout) => {
+            resolve(err ? '' : stdout || '');
+          }
+        );
       });
-      const diffStaged = await new Promise<string>((resolve) => {
-        execFileGit("git", ["diff", "--name-only", "--cached"], { cwd: projectRoot }, (err, stdout) => {
-          resolve(err ? "" : (stdout || ""));
-        });
+      const diffStaged = await new Promise<string>(resolve => {
+        execFileGit(
+          'git',
+          ['diff', '--name-only', '--cached'],
+          { cwd: projectRoot },
+          (err, stdout) => {
+            resolve(err ? '' : stdout || '');
+          }
+        );
       });
-      const untrackedOutput = await new Promise<string>((resolve) => {
-        execFileGit("git", ["ls-files", "--others", "--exclude-standard"], { cwd: projectRoot }, (err, stdout) => {
-          resolve(err ? "" : (stdout || ""));
-        });
+      const untrackedOutput = await new Promise<string>(resolve => {
+        execFileGit(
+          'git',
+          ['ls-files', '--others', '--exclude-standard'],
+          { cwd: projectRoot },
+          (err, stdout) => {
+            resolve(err ? '' : stdout || '');
+          }
+        );
       });
-      changedFiles = (diffUnstaged + "\n" + diffStaged + "\n" + untrackedOutput).trim().split("\n").filter(f => f.length > 0);
+      changedFiles = (diffUnstaged + '\n' + diffStaged + '\n' + untrackedOutput)
+        .trim()
+        .split('\n')
+        .filter(f => f.length > 0);
       // Deduplicate (a file can appear in both unstaged and staged)
       changedFiles = [...new Set(changedFiles)];
-    } catch { /* git command failed */ }
+    } catch {
+      /* git command failed */
+    }
 
     // Validate RED phase: no impl files, at least one test file changed
     const validation = validateRedPhase(changedFiles, testFiles);
     if (!validation.valid) {
       return textResult({
-        status: "REJECTED",
-        error: "RED_VALIDATION_FAILED",
+        status: 'REJECTED',
+        error: 'RED_VALIDATION_FAILED',
         message: validation.error,
       });
     }
 
     // Build and execute test command
-    const testCmd = buildTestCommand(state.stack.language, testFiles, projectRoot);
+    const testCmd = buildTestCommand(
+      state.stack.language,
+      testFiles,
+      projectRoot
+    );
     if (!testCmd) {
       return textResult({
-        error: "NO_TEST_COMMAND",
+        error: 'NO_TEST_COMMAND',
         message: `无法为语言 "${state.stack.language}" 生成测试命令。`,
       });
     }
 
     let exitCode = 0;
-    let stderr = "";
+    let stderr = '';
     try {
-      const { execFile: execFileTest } = await import("node:child_process");
-      const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
-        execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.red }, (err, _stdout, stderrOut) => {
-          const code = err ? (typeof (err as any).code === "number" ? (err as any).code : 1) : 0;
-          resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
-        });
-      });
+      const { execFile: execFileTest } = await import('node:child_process');
+      const result = await new Promise<{ code: number; stderr: string }>(
+        resolve => {
+          execFileTest(
+            'sh',
+            ['-c', testCmd],
+            { cwd: projectRoot, timeout: TDD_TIMEOUTS.red },
+            (err, _stdout, stderrOut) => {
+              const code = err
+                ? typeof (err as any).code === 'number'
+                  ? (err as any).code
+                  : 1
+                : 0;
+              resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? '' });
+            }
+          );
+        }
+      );
       exitCode = result.code;
       stderr = result.stderr;
     } catch (err) {
       return textResult({
-        error: "TEST_EXECUTION_ERROR",
+        error: 'TEST_EXECUTION_ERROR',
         message: `测试执行出错: ${(err as Error).message}`,
       });
     }
@@ -1072,23 +1460,26 @@ server.tool(
     if (exitCode === 0) {
       // Tests pass — not a valid RED
       return textResult({
-        status: "REJECTED",
-        error: "TESTS_PASS_NOT_RED",
-        message: "RED 阶段要求测试失败，但测试全部通过。请确保测试引用了尚未实现的代码。",
+        status: 'REJECTED',
+        error: 'TESTS_PASS_NOT_RED',
+        message:
+          'RED 阶段要求测试失败，但测试全部通过。请确保测试引用了尚未实现的代码。',
         testCmd,
       });
     }
 
     // Tests fail — RED_CONFIRMED
-    const redFailType: "compilation_error" | "test_failure" =
-      /cannot find symbol|compilation error|SyntaxError|ModuleNotFoundError|ImportError|Cannot find module|TS\d{4}/i.test(stderr)
-        ? "compilation_error"
-        : "test_failure";
+    const redFailType: 'compilation_error' | 'test_failure' =
+      /cannot find symbol|compilation error|SyntaxError|ModuleNotFoundError|ImportError|Cannot find module|TS\d{4}/i.test(
+        stderr
+      )
+        ? 'compilation_error'
+        : 'test_failure';
 
     // Write tddTaskStates
     const tddTaskStates = { ...(state.tddTaskStates ?? {}) };
     tddTaskStates[taskKey] = {
-      status: "RED_CONFIRMED" as const,
+      status: 'RED_CONFIRMED' as const,
       redTestFiles: testFiles,
       redExitCode: exitCode,
       redFailType,
@@ -1096,14 +1487,14 @@ server.tool(
     await sm.atomicUpdate({ tddTaskStates });
 
     return textResult({
-      status: "RED_CONFIRMED",
+      status: 'RED_CONFIRMED',
       task,
       testCmd,
       exitCode,
       failType: redFailType,
       message: `Task ${task} RED 确认：测试失败（${redFailType}）。请实现代码后调用 auto_dev_task_green。`,
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -1111,8 +1502,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_task_green",
-  "TDD GREEN phase: verify that tests now pass after implementation. Requires prior RED_CONFIRMED.",
+  'auto_dev_task_green',
+  'TDD GREEN phase: verify that tests now pass after implementation. Requires prior RED_CONFIRMED.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1123,27 +1514,27 @@ server.tool(
     const state = await sm.loadAndValidate();
 
     // Verify phase=3, status=IN_PROGRESS, tdd=true
-    if (state.phase !== 3 || state.status !== "IN_PROGRESS") {
+    if (state.phase !== 3 || state.status !== 'IN_PROGRESS') {
       return textResult({
-        error: "INVALID_PHASE",
+        error: 'INVALID_PHASE',
         message: `auto_dev_task_green 只能在 Phase 3 IN_PROGRESS 状态下调用。当前: phase=${state.phase}, status=${state.status}`,
       });
     }
     if (state.tdd !== true) {
       return textResult({
-        error: "TDD_NOT_ENABLED",
-        message: "TDD 模式未启用。",
+        error: 'TDD_NOT_ENABLED',
+        message: 'TDD 模式未启用。',
       });
     }
 
     // Verify task is RED_CONFIRMED
     const taskKey = String(task);
     const taskState = state.tddTaskStates?.[taskKey];
-    if (taskState?.status !== "RED_CONFIRMED") {
+    if (taskState?.status !== 'RED_CONFIRMED') {
       return textResult({
-        status: "REJECTED",
-        error: "NOT_RED_CONFIRMED",
-        message: `Task ${task} 尚未完成 RED 阶段（当前状态: ${taskState?.status ?? "无记录"}）。请先调用 auto_dev_task_red。`,
+        status: 'REJECTED',
+        error: 'NOT_RED_CONFIRMED',
+        message: `Task ${task} 尚未完成 RED 阶段（当前状态: ${taskState?.status ?? '无记录'}）。请先调用 auto_dev_task_red。`,
       });
     }
 
@@ -1151,35 +1542,50 @@ server.tool(
     const redTestFiles = taskState.redTestFiles ?? [];
     if (redTestFiles.length === 0) {
       return textResult({
-        error: "NO_TEST_FILES",
+        error: 'NO_TEST_FILES',
         message: `Task ${task} RED 阶段未记录测试文件。`,
       });
     }
 
     // Build and execute test command
-    const testCmd = buildTestCommand(state.stack.language, redTestFiles, projectRoot);
+    const testCmd = buildTestCommand(
+      state.stack.language,
+      redTestFiles,
+      projectRoot
+    );
     if (!testCmd) {
       return textResult({
-        error: "NO_TEST_COMMAND",
+        error: 'NO_TEST_COMMAND',
         message: `无法为语言 "${state.stack.language}" 生成测试命令。`,
       });
     }
 
     let exitCode = 0;
-    let stderr = "";
+    let stderr = '';
     try {
-      const { execFile: execFileTest } = await import("node:child_process");
-      const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
-        execFileTest("sh", ["-c", testCmd], { cwd: projectRoot, timeout: TDD_TIMEOUTS.green }, (err, _stdout, stderrOut) => {
-          const code = err ? (typeof (err as any).code === "number" ? (err as any).code : 1) : 0;
-          resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? "" });
-        });
-      });
+      const { execFile: execFileTest } = await import('node:child_process');
+      const result = await new Promise<{ code: number; stderr: string }>(
+        resolve => {
+          execFileTest(
+            'sh',
+            ['-c', testCmd],
+            { cwd: projectRoot, timeout: TDD_TIMEOUTS.green },
+            (err, _stdout, stderrOut) => {
+              const code = err
+                ? typeof (err as any).code === 'number'
+                  ? (err as any).code
+                  : 1
+                : 0;
+              resolve({ code, stderr: stderrOut?.slice(0, 1000) ?? '' });
+            }
+          );
+        }
+      );
       exitCode = result.code;
       stderr = result.stderr;
     } catch (err) {
       return textResult({
-        error: "TEST_EXECUTION_ERROR",
+        error: 'TEST_EXECUTION_ERROR',
         message: `测试执行出错: ${(err as Error).message}`,
       });
     }
@@ -1189,12 +1595,12 @@ server.tool(
       const tddTaskStates = { ...(state.tddTaskStates ?? {}) };
       tddTaskStates[taskKey] = {
         ...tddTaskStates[taskKey],
-        status: "GREEN_CONFIRMED" as const,
+        status: 'GREEN_CONFIRMED' as const,
       };
       await sm.atomicUpdate({ tddTaskStates });
 
       return textResult({
-        status: "GREEN_CONFIRMED",
+        status: 'GREEN_CONFIRMED',
         task,
         testCmd,
         message: `Task ${task} GREEN 确认：测试全部通过。可以继续 checkpoint。`,
@@ -1203,15 +1609,15 @@ server.tool(
 
     // Tests still fail — REJECTED
     return textResult({
-      status: "REJECTED",
-      error: "TESTS_STILL_FAILING",
+      status: 'REJECTED',
+      error: 'TESTS_STILL_FAILING',
       task,
       testCmd,
       exitCode,
       stderr: stderr.slice(0, 500),
       message: `Task ${task} GREEN 被拒绝：测试仍然失败。请修复实现后重试。`,
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -1219,8 +1625,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_render",
-  "Render a prompt template with variable substitution and checklist injection.",
+  'auto_dev_render',
+  'Render a prompt template with variable substitution and checklist injection.',
   {
     promptFile: z.string(),
     variables: z.record(z.string(), z.string()),
@@ -1231,7 +1637,7 @@ server.tool(
     const renderer = new TemplateRenderer(skillsDir ?? defaultSkillsDir());
     const result = await renderer.render(promptFile, variables, extraContext);
     return textResult(result);
-  },
+  }
 );
 
 // ===========================================================================
@@ -1239,8 +1645,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_preflight",
-  "Pre-flight check: verify prerequisites for a phase (required files exist, git is clean, etc.).",
+  'auto_dev_preflight',
+  'Pre-flight check: verify prerequisites for a phase (required files exist, git is clean, etc.).',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1249,22 +1655,33 @@ server.tool(
   async ({ projectRoot, topic, phase }) => {
     const sm = await StateManager.create(projectRoot, topic);
 
-    const checks: Array<{ name: string; passed: boolean; message?: string }> = [];
+    const checks: Array<{ name: string; passed: boolean; message?: string }> =
+      [];
 
     // Common checks
     const gitManager = new GitManager(projectRoot);
     try {
       const gitInfo = await gitManager.getStatus();
-      checks.push({ name: "git_status", passed: true, message: `Branch: ${gitInfo.currentBranch}` });
+      checks.push({
+        name: 'git_status',
+        passed: true,
+        message: `Branch: ${gitInfo.currentBranch}`,
+      });
     } catch {
-      checks.push({ name: "git_status", passed: false, message: "Not a git repository or git error" });
+      checks.push({
+        name: 'git_status',
+        passed: false,
+        message: 'Not a git repository or git error',
+      });
     }
 
     const outputExists = await sm.outputDirExists();
     checks.push({
-      name: "progress_log_writable",
+      name: 'progress_log_writable',
       passed: outputExists,
-      message: outputExists ? "Output dir exists" : "Output dir missing — run auto_dev_init first",
+      message: outputExists
+        ? 'Output dir exists'
+        : 'Output dir missing — run auto_dev_init first',
     });
 
     // Phase-specific checks
@@ -1274,28 +1691,52 @@ server.tool(
         await stat(filePath);
         checks.push({ name, passed: true });
       } catch {
-        checks.push({ name, passed: false, message: `Required file missing: ${filePath}` });
+        checks.push({
+          name,
+          passed: false,
+          message: `Required file missing: ${filePath}`,
+        });
       }
     };
 
-    if (phase >= 2) await fileCheck("design_md", join(outputDir, "design.md"));
+    if (phase >= 2) await fileCheck('design_md', join(outputDir, 'design.md'));
     if (phase >= 3) {
-      await fileCheck("plan_md", join(outputDir, "plan.md"));
+      await fileCheck('plan_md', join(outputDir, 'plan.md'));
       // Validate plan contains at least one task marker
       try {
-        const planContent = await readFile(join(outputDir, "plan.md"), "utf-8");
+        const planContent = await readFile(join(outputDir, 'plan.md'), 'utf-8');
         if (!/##\s*Task\s+\d|###\s*Task\s+\d|\d+\./m.test(planContent)) {
-          checks.push({ name: "plan_has_tasks", passed: false, message: "plan.md does not contain recognizable task markers (## Task N or numbered list)" });
+          checks.push({
+            name: 'plan_has_tasks',
+            passed: false,
+            message:
+              'plan.md does not contain recognizable task markers (## Task N or numbered list)',
+          });
         } else {
-          checks.push({ name: "plan_has_tasks", passed: true, message: "plan.md contains task markers" });
+          checks.push({
+            name: 'plan_has_tasks',
+            passed: true,
+            message: 'plan.md contains task markers',
+          });
         }
-      } catch { /* already checked file exists above */ }
+      } catch {
+        /* already checked file exists above */
+      }
     }
-    if (phase >= 5) await fileCheck("code_review_md", join(outputDir, "code-review.md"));
-    if (phase >= 6) await fileCheck("e2e_test_results_md", join(outputDir, "e2e-test-results.md"));
-    if (phase >= 7) await fileCheck("acceptance_report_md", join(outputDir, "acceptance-report.md"));
+    if (phase >= 5)
+      await fileCheck('code_review_md', join(outputDir, 'code-review.md'));
+    if (phase >= 6)
+      await fileCheck(
+        'e2e_test_results_md',
+        join(outputDir, 'e2e-test-results.md')
+      );
+    if (phase >= 7)
+      await fileCheck(
+        'acceptance_report_md',
+        join(outputDir, 'acceptance-report.md')
+      );
 
-    const ready = checks.every((c) => c.passed);
+    const ready = checks.every(c => c.passed);
     const result: Record<string, unknown> = { ready, checks };
 
     // Auto-render suggested prompt when ready
@@ -1303,27 +1744,69 @@ server.tool(
       // Model routing: economy mode uses sonnet for mechanical tasks, opus for critical thinking
       // beast mode uses opus for everything
       const state = await sm.loadAndValidate();
-      const isBeast = state.costMode === "beast";
+      const isBeast = state.costMode === 'beast';
 
-      const phasePromptMap: Record<number, { promptFile: string; agent: string; model: string }> = {
-        0: { promptFile: "phase0-brainstorm", agent: "auto-dev:auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
-        1: { promptFile: "phase1-architect", agent: "auto-dev:auto-dev-architect", model: "opus" },       // 设计始终用最强
-        2: { promptFile: "phase2-planner", agent: "auto-dev:auto-dev-architect", model: isBeast ? "opus" : "sonnet" },
-        3: { promptFile: "phase3-developer", agent: "auto-dev:auto-dev-developer", model: "opus" },       // 实现始终用最强
-        4: { promptFile: "phase4-full-reviewer", agent: "auto-dev:auto-dev-reviewer", model: "opus" },    // 代码审查始终用最强
-        5: { promptFile: "phase5-test-architect", agent: "auto-dev:auto-dev-test-architect", model: isBeast ? "opus" : "sonnet" },
-        6: { promptFile: "phase6-acceptance", agent: "auto-dev:auto-dev-acceptance-validator", model: isBeast ? "opus" : "sonnet" },
-        7: { promptFile: "phase7-retrospective", agent: "auto-dev:auto-dev-reviewer", model: isBeast ? "opus" : "sonnet" },
+      const phasePromptMap: Record<
+        number,
+        { promptFile: string; agent: string; model: string }
+      > = {
+        0: {
+          promptFile: 'phase0-brainstorm',
+          agent: 'auto-dev:auto-dev-architect',
+          model: isBeast ? 'opus' : 'sonnet',
+        },
+        1: {
+          promptFile: 'phase1-architect',
+          agent: 'auto-dev:auto-dev-architect',
+          model: 'opus',
+        }, // 设计始终用最强
+        2: {
+          promptFile: 'phase2-planner',
+          agent: 'auto-dev:auto-dev-architect',
+          model: isBeast ? 'opus' : 'sonnet',
+        },
+        3: {
+          promptFile: 'phase3-developer',
+          agent: 'auto-dev:auto-dev-developer',
+          model: 'opus',
+        }, // 实现始终用最强
+        4: {
+          promptFile: 'phase4-full-reviewer',
+          agent: 'auto-dev:auto-dev-reviewer',
+          model: 'opus',
+        }, // 代码审查始终用最强
+        5: {
+          promptFile: 'phase5-test-architect',
+          agent: 'auto-dev:auto-dev-test-architect',
+          model: isBeast ? 'opus' : 'sonnet',
+        },
+        6: {
+          promptFile: 'phase6-acceptance',
+          agent: 'auto-dev:auto-dev-acceptance-validator',
+          model: isBeast ? 'opus' : 'sonnet',
+        },
+        7: {
+          promptFile: 'phase7-retrospective',
+          agent: 'auto-dev:auto-dev-reviewer',
+          model: isBeast ? 'opus' : 'sonnet',
+        },
       };
 
       // Phase 1: if design.md already exists, skip architect → go directly to reviewer
       if (phase === 1) {
         try {
-          await stat(join(outputDir, "design.md"));
-          phasePromptMap[1] = { promptFile: "phase1-design-reviewer", agent: "auto-dev:auto-dev-reviewer", model: "opus" };
+          await stat(join(outputDir, 'design.md'));
+          phasePromptMap[1] = {
+            promptFile: 'phase1-design-reviewer',
+            agent: 'auto-dev:auto-dev-reviewer',
+            model: 'opus',
+          };
           result.designExists = true;
-          result.hint = "design.md already exists. Skipping architect, going directly to design review.";
-        } catch { /* design.md not found, use default architect flow */ }
+          result.hint =
+            'design.md already exists. Skipping architect, going directly to design review.';
+        } catch {
+          /* design.md not found, use default architect flow */
+        }
       }
 
       const mapping = phasePromptMap[phase];
@@ -1331,58 +1814,78 @@ server.tool(
         try {
           const state = await sm.loadAndValidate();
           const gitInfo = await new GitManager(projectRoot).getStatus();
-          const variables = buildVariablesFromState(state, gitInfo.currentBranch);
+          const variables = buildVariablesFromState(
+            state,
+            gitInfo.currentBranch
+          );
           const renderer = new TemplateRenderer(defaultSkillsDir());
 
           // Build extraContext: lessons + design summary + plan tasks
-          let extraContext = "";
+          let extraContext = '';
 
           // 1. Inject lessons learned (all phases — avoid repeating past mistakes)
           const localLessonIds: string[] = [];
           const globalLessonIds: string[] = [];
           try {
-            const lessonsManager = new LessonsManager(sm.outputDir, projectRoot);
+            const lessonsManager = new LessonsManager(
+              sm.outputDir,
+              projectRoot
+            );
             const lessons = await lessonsManager.get(phase);
             if (lessons.length > 0) {
               extraContext += `## 历史教训（自动注入，请在本次执行中避免重蹈覆辙）\n\n`;
               for (const l of lessons) {
-                const idTag = l.id ? `[id:${l.id}] ` : "";
-                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}\n`;
+                const idTag = l.id ? `[id:${l.id}] ` : '';
+                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ''}] ${l.lesson}\n`;
                 if (l.id) localLessonIds.push(l.id);
               }
-              extraContext += "\n";
+              extraContext += '\n';
             }
-          } catch { /* lessons file not found, skip */ }
+          } catch {
+            /* lessons file not found, skip */
+          }
 
           // 1b. Inject global lessons (cross-topic reusable experience)
           try {
-            const globalLessons = await new LessonsManager(sm.outputDir, projectRoot).getGlobalLessons(10);
+            const globalLessons = await new LessonsManager(
+              sm.outputDir,
+              projectRoot
+            ).getGlobalLessons(10);
             if (globalLessons.length > 0) {
               extraContext += `## 全局经验（跨项目积累，自动注入）\n\n`;
               for (const l of globalLessons) {
-                const idTag = l.id ? `[id:${l.id}] ` : "";
-                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ""}\n`;
+                const idTag = l.id ? `[id:${l.id}] ` : '';
+                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ''}] ${l.lesson}${l.topic ? ` (来自: ${l.topic})` : ''}\n`;
                 if (l.id) globalLessonIds.push(l.id);
               }
-              extraContext += "\n";
+              extraContext += '\n';
             }
-          } catch { /* global lessons not found, skip */ }
+          } catch {
+            /* global lessons not found, skip */
+          }
 
           // 1b2. Inject cross-project global lessons (self-evolution)
           const crossProjectLessonIds: string[] = [];
           try {
-            const crossProjectLessons = await new LessonsManager(sm.outputDir, projectRoot).injectGlobalLessons();
+            const crossProjectLessons = await new LessonsManager(
+              sm.outputDir,
+              projectRoot
+            ).injectGlobalLessons();
             if (crossProjectLessons.length > 0) {
               extraContext += `## 跨项目经验（全局积累，自动注入）\n\n`;
               for (const l of crossProjectLessons) {
-                const idTag = l.id ? `[id:${l.id}] ` : "";
-                const src = l.sourceProject ? ` (来自: ${l.sourceProject})` : "";
-                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ""}] ${l.lesson}${src}\n`;
+                const idTag = l.id ? `[id:${l.id}] ` : '';
+                const src = l.sourceProject
+                  ? ` (来自: ${l.sourceProject})`
+                  : '';
+                extraContext += `- ${idTag}[${l.category}${l.severity ? `/${l.severity}` : ''}] ${l.lesson}${src}\n`;
                 if (l.id) crossProjectLessonIds.push(l.id);
               }
-              extraContext += "\n";
+              extraContext += '\n';
             }
-          } catch { /* cross-project lessons not found, skip */ }
+          } catch {
+            /* cross-project lessons not found, skip */
+          }
 
           // 1-footer. Record injected lesson IDs and add feedback hint
           const injectedIds = [...localLessonIds, ...globalLessonIds];
@@ -1390,7 +1893,9 @@ server.tool(
             await sm.atomicUpdate({ injectedLessonIds: injectedIds });
           }
           if (crossProjectLessonIds.length > 0) {
-            await sm.atomicUpdate({ injectedGlobalLessonIds: crossProjectLessonIds });
+            await sm.atomicUpdate({
+              injectedGlobalLessonIds: crossProjectLessonIds,
+            });
           }
 
           // 1c. Inject Phase 3 task-level resume info
@@ -1402,9 +1907,14 @@ server.tool(
           // 1d. Inject brainstorm notes into Phase 1 (if Phase 0 was run)
           if (phase === 1) {
             try {
-              const brainstormNotes = await readFile(join(outputDir, "brainstorm-notes.md"), "utf-8");
+              const brainstormNotes = await readFile(
+                join(outputDir, 'brainstorm-notes.md'),
+                'utf-8'
+              );
               extraContext += `## Brainstorm 结论（Phase 0 产出，自动注入）\n\n${brainstormNotes.slice(0, 2000)}\n\n`;
-            } catch { /* no brainstorm notes, skip */ }
+            } catch {
+              /* no brainstorm notes, skip */
+            }
           }
 
           // 1d. Inject TDD flag into Phase 3
@@ -1415,31 +1925,47 @@ server.tool(
           // 2. Inject design summary and plan task list for Phase 3+
           if (phase >= 3) {
             try {
-              const designContent = await readFile(join(outputDir, "design.md"), "utf-8");
+              const designContent = await readFile(
+                join(outputDir, 'design.md'),
+                'utf-8'
+              );
               const designSummary = extractDocSummary(designContent, 80);
               extraContext += `## 设计摘要（自动注入）\n\n${designSummary}\n\n`;
-            } catch { /* design.md not found, skip */ }
+            } catch {
+              /* design.md not found, skip */
+            }
 
             if (phase === 3) {
               try {
-                const planContent = await readFile(join(outputDir, "plan.md"), "utf-8");
+                const planContent = await readFile(
+                  join(outputDir, 'plan.md'),
+                  'utf-8'
+                );
                 const taskList = extractTaskList(planContent);
                 extraContext += `## 任务列表（自动注入）\n\n${taskList}\n\n`;
-              } catch { /* plan.md not found, skip */ }
+              } catch {
+                /* plan.md not found, skip */
+              }
             }
           }
 
-          const rendered = await renderer.render(mapping.promptFile, variables, extraContext || undefined);
+          const rendered = await renderer.render(
+            mapping.promptFile,
+            variables,
+            extraContext || undefined
+          );
           result.suggestedPrompt = rendered.renderedPrompt;
           result.suggestedAgent = mapping.agent;
           result.suggestedModel = mapping.model;
-          result.costMode = state.costMode ?? "economy";
-        } catch { /* prompt file not found or render error, skip */ }
+          result.costMode = state.costMode ?? 'economy';
+        } catch {
+          /* prompt file not found or render error, skip */
+        }
       }
     }
 
     return textResult(result);
-  },
+  }
 );
 
 // ===========================================================================
@@ -1447,8 +1973,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_diff_check",
-  "Compare expected files from plan vs actual git changes, report discrepancies.",
+  'auto_dev_diff_check',
+  'Compare expected files from plan vs actual git changes, report discrepancies.',
   {
     projectRoot: z.string(),
     expectedFiles: z.array(z.string()),
@@ -1458,7 +1984,7 @@ server.tool(
     const git = new GitManager(projectRoot);
     const result = await git.diffCheck(expectedFiles, baseCommit);
     return textResult(result);
-  },
+  }
 );
 
 // ===========================================================================
@@ -1466,8 +1992,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_git_rollback",
-  "Rollback changes for a specific task using git diff --name-only for precise file-level rollback.",
+  'auto_dev_git_rollback',
+  'Rollback changes for a specific task using git diff --name-only for precise file-level rollback.',
   {
     projectRoot: z.string(),
     baseCommit: z.string(),
@@ -1477,7 +2003,7 @@ server.tool(
     const git = new GitManager(projectRoot);
     const result = await git.rollback(baseCommit, files);
     return textResult(result);
-  },
+  }
 );
 
 // ===========================================================================
@@ -1485,8 +2011,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_lessons_add",
-  "Record a lesson learned from the current auto-dev session.",
+  'auto_dev_lessons_add',
+  'Record a lesson learned from the current auto-dev session.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1497,12 +2023,25 @@ server.tool(
     severity: z.string().optional(),
     reusable: z.boolean().optional(),
   },
-  async ({ projectRoot, topic, phase, category, lesson, context, severity, reusable }) => {
+  async ({
+    projectRoot,
+    topic,
+    phase,
+    category,
+    lesson,
+    context,
+    severity,
+    reusable,
+  }) => {
     const sm = await StateManager.create(projectRoot, topic);
     const lessons = new LessonsManager(sm.outputDir);
-    await lessons.add(phase, category, lesson, context, { severity, topic, reusable });
-    return textResult({ success: true, message: "Lesson recorded." });
-  },
+    await lessons.add(phase, category, lesson, context, {
+      severity,
+      topic,
+      reusable,
+    });
+    return textResult({ success: true, message: 'Lesson recorded.' });
+  }
 );
 
 // ===========================================================================
@@ -1510,8 +2049,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_lessons_get",
-  "Get historical lessons for a specific phase to inject into prompts.",
+  'auto_dev_lessons_get',
+  'Get historical lessons for a specific phase to inject into prompts.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1523,30 +2062,34 @@ server.tool(
     const lessons = new LessonsManager(sm.outputDir);
     const entries = await lessons.get(phase, category);
     return textResult(entries);
-  },
+  }
 );
-
 
 // ===========================================================================
 // 12. auto_dev_lessons_feedback (Lesson Feedback)
 // ===========================================================================
 
 server.tool(
-  "auto_dev_lessons_feedback",
-  "Optional: submit feedback verdicts for lessons that were injected during preflight. Improves future lesson quality but is not required for checkpoint PASS.",
+  'auto_dev_lessons_feedback',
+  'Optional: submit feedback verdicts for lessons that were injected during preflight. Improves future lesson quality but is not required for checkpoint PASS.',
   {
     projectRoot: z.string(),
     topic: z.string(),
-    feedbacks: z.array(z.object({
-      id: z.string(),
-      verdict: z.enum(["helpful", "not_applicable", "incorrect"]),
-    })),
+    feedbacks: z.array(
+      z.object({
+        id: z.string(),
+        verdict: z.enum(['helpful', 'not_applicable', 'incorrect']),
+      })
+    ),
   },
   async ({ projectRoot, topic, feedbacks }) => {
     const sm = await StateManager.create(projectRoot, topic);
     const state = await sm.loadAndValidate();
     const lessons = new LessonsManager(sm.outputDir, projectRoot);
-    const result = await lessons.feedback(feedbacks, { phase: state.phase, topic: state.topic });
+    const result = await lessons.feedback(feedbacks, {
+      phase: state.phase,
+      topic: state.topic,
+    });
 
     // Clear injectedLessonIds after feedback is submitted
     await sm.atomicUpdate({ injectedLessonIds: [] });
@@ -1558,7 +2101,7 @@ server.tool(
       localIds: result.localUpdated,
       globalIds: result.globalUpdated,
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -1566,8 +2109,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_complete",
-  "Completion gate: validates ALL required phases have PASS status before allowing the session to be declared complete. MUST be called before telling the user that auto-dev is finished. Will REJECT if any phase was skipped.",
+  'auto_dev_complete',
+  'Completion gate: validates ALL required phases have PASS status before allowing the session to be declared complete. MUST be called before telling the user that auto-dev is finished. Will REJECT if any phase was skipped.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1577,14 +2120,14 @@ server.tool(
     const state = await sm.loadAndValidate();
 
     // Read progress-log to find all passed phases
-    const progressLogPath = join(sm.outputDir, "progress-log.md");
-    let progressLogContent = "";
+    const progressLogPath = join(sm.outputDir, 'progress-log.md');
+    let progressLogContent = '';
     try {
-      progressLogContent = await readFile(progressLogPath, "utf-8");
+      progressLogContent = await readFile(progressLogPath, 'utf-8');
     } catch {
       return textResult({
-        error: "PROGRESS_LOG_MISSING",
-        message: "progress-log.md not found. Cannot validate completion.",
+        error: 'PROGRESS_LOG_MISSING',
+        message: 'progress-log.md not found. Cannot validate completion.',
         canComplete: false,
       });
     }
@@ -1594,7 +2137,7 @@ server.tool(
       state.mode,
       state.dryRun === true,
       state.skipE2e === true,
-      state.ship === true,
+      state.ship === true
     );
 
     // State consistency check: state.phase must match max passed phase in progress-log
@@ -1602,25 +2145,27 @@ server.tool(
       const maxPassedPhase = Math.max(...validation.passedPhases);
       if (state.phase < maxPassedPhase) {
         return textResult({
-          error: "STATE_PHASE_INCONSISTENCY",
+          error: 'STATE_PHASE_INCONSISTENCY',
           canComplete: false,
           statePhase: state.phase,
           maxPassedPhase,
           passedPhases: validation.passedPhases,
           message: `state.phase (${state.phase}) 落后于 progress-log 中的最高已通过 Phase (${maxPassedPhase})。状态可能被篡改或回退。`,
-          mandate: "[BLOCKED] state.json 与 progress-log 不一致。禁止宣称完成。",
+          mandate:
+            '[BLOCKED] state.json 与 progress-log 不一致。禁止宣称完成。',
         });
       }
     }
 
     if (!validation.canComplete) {
       return textResult({
-        error: "INCOMPLETE",
+        error: 'INCOMPLETE',
         canComplete: false,
         passedPhases: validation.passedPhases,
         missingPhases: validation.missingPhases,
         message: validation.message,
-        mandate: "[BLOCKED] " + validation.message + " 禁止向用户宣称任务完成。",
+        mandate:
+          '[BLOCKED] ' + validation.message + ' 禁止向用户宣称任务完成。',
       });
     }
 
@@ -1636,29 +2181,35 @@ server.tool(
     if (initMarker && state.stack) {
       if (initMarker.testCmd !== state.stack.testCmd) {
         return textResult({
-          error: "TESTCMD_TAMPERED",
+          error: 'TESTCMD_TAMPERED',
           canComplete: false,
-          message: `testCmd 被篡改！原始值(INIT marker): "${initMarker.testCmd}", ` +
+          message:
+            `testCmd 被篡改！原始值(INIT marker): "${initMarker.testCmd}", ` +
             `当前 state.json 值: "${state.stack.testCmd}". 禁止绕过测试门禁。`,
-          mandate: "[BLOCKED] 检测到 testCmd 被篡改。必须恢复原始测试命令后重试。",
+          mandate:
+            '[BLOCKED] 检测到 testCmd 被篡改。必须恢复原始测试命令后重试。',
         });
       }
       if (initMarker.buildCmd !== state.stack.buildCmd) {
         return textResult({
-          error: "BUILDCMD_TAMPERED",
+          error: 'BUILDCMD_TAMPERED',
           canComplete: false,
-          message: `buildCmd 被篡改！原始值(INIT marker): "${initMarker.buildCmd}", ` +
+          message:
+            `buildCmd 被篡改！原始值(INIT marker): "${initMarker.buildCmd}", ` +
             `当前 state.json 值: "${state.stack.buildCmd}". `,
-          mandate: "[BLOCKED] 检测到 buildCmd 被篡改。必须恢复原始构建命令后重试。",
+          mandate:
+            '[BLOCKED] 检测到 buildCmd 被篡改。必须恢复原始构建命令后重试。',
         });
       }
       if (initMarker.skipE2e !== (state.skipE2e === true)) {
         return textResult({
-          error: "SKIPE2E_TAMPERED",
+          error: 'SKIPE2E_TAMPERED',
           canComplete: false,
-          message: `skipE2e 被篡改！原始值(INIT marker): ${initMarker.skipE2e}, ` +
+          message:
+            `skipE2e 被篡改！原始值(INIT marker): ${initMarker.skipE2e}, ` +
             `当前 state.json 值: ${state.skipE2e}. `,
-          mandate: "[BLOCKED] 检测到 skipE2e 标志被篡改。禁止事后修改跳过策略。",
+          mandate:
+            '[BLOCKED] 检测到 skipE2e 标志被篡改。禁止事后修改跳过策略。',
         });
       }
     }
@@ -1667,76 +2218,108 @@ server.tool(
     if (initMarker?.disabledTestCount !== undefined) {
       let currentDisabledCount = 0;
       try {
-        const { execFile: execFileGrep } = await import("node:child_process");
-        const grepOutput = await new Promise<string>((resolve) => {
-          execFileGrep("grep", ["-r", "-c", "-E", "@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(", projectRoot + "/src"], { timeout: 15_000 }, (err, stdout) => {
-            resolve(err ? "" : (stdout || ""));
-          });
+        const { execFile: execFileGrep } = await import('node:child_process');
+        const grepOutput = await new Promise<string>(resolve => {
+          execFileGrep(
+            'grep',
+            [
+              '-r',
+              '-c',
+              '-E',
+              '@Disabled|@Ignore|@pytest.mark.skip|it\\.skip\\(|xit\\(|xdescribe\\(',
+              projectRoot + '/src',
+            ],
+            { timeout: 15_000 },
+            (err, stdout) => {
+              resolve(err ? '' : stdout || '');
+            }
+          );
         });
-        for (const line of grepOutput.trim().split("\n")) {
+        for (const line of grepOutput.trim().split('\n')) {
           const m = line.match(/:(\d+)$/);
           if (m) currentDisabledCount += parseInt(m[1], 10);
         }
-      } catch { /* grep failed */ }
+      } catch {
+        /* grep failed */
+      }
 
       const newlyDisabled = currentDisabledCount - initMarker.disabledTestCount;
       if (newlyDisabled > 0) {
         return textResult({
-          error: "TESTS_NEWLY_DISABLED",
+          error: 'TESTS_NEWLY_DISABLED',
           canComplete: false,
-          message: `检测到新增 ${newlyDisabled} 个 @Disabled/@Ignore 测试注解！` +
+          message:
+            `检测到新增 ${newlyDisabled} 个 @Disabled/@Ignore 测试注解！` +
             `\n初始值（INIT marker）: ${initMarker.disabledTestCount}, 当前: ${currentDisabledCount}。` +
             `\n禁止通过 @Disabled 跳过失败测试来绕过测试门禁。必须修复测试或移除 @Disabled 后重试。`,
-          mandate: "[BLOCKED] 新增了跳过测试的注解。必须修复测试而非禁用测试。",
+          mandate: '[BLOCKED] 新增了跳过测试的注解。必须修复测试而非禁用测试。',
         });
       }
     }
 
     if (buildCmd) {
       try {
-        const { exec } = await import("node:child_process");
-        const buildResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
-          exec(buildCmd, { cwd: projectRoot, timeout: 120_000 }, (err: any, _stdout: string, stderr: string) => {
-            if (err && err.code === "ENOENT") {
-              // Shell not available (Windows sandbox) — skip build verification
-              resolve({ success: true, stderr: "" });
-            } else {
-              resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+        const { exec } = await import('node:child_process');
+        const buildResult = await new Promise<{
+          success: boolean;
+          stderr: string;
+        }>(resolve => {
+          exec(
+            buildCmd,
+            { cwd: projectRoot, timeout: 120_000 },
+            (err: any, _stdout: string, stderr: string) => {
+              if (err && err.code === 'ENOENT') {
+                // Shell not available (Windows sandbox) — skip build verification
+                resolve({ success: true, stderr: '' });
+              } else {
+                resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? '' });
+              }
             }
-          });
+          );
         });
         if (!buildResult.success) {
           return textResult({
-            error: "BUILD_FAILED_AT_COMPLETION",
+            error: 'BUILD_FAILED_AT_COMPLETION',
             canComplete: false,
             message: `所有 Phase 已 PASS，但最终构建失败（使用 INIT 原始命令: ${buildCmd}）。\n${buildResult.stderr}`,
-            mandate: "[BLOCKED] 构建失败，禁止宣称完成。",
+            mandate: '[BLOCKED] 构建失败，禁止宣称完成。',
           });
         }
-      } catch { /* build command execution failed — non-fatal, continue */ }
+      } catch {
+        /* build command execution failed — non-fatal, continue */
+      }
     }
     if (testCmd) {
       try {
-        const { exec } = await import("node:child_process");
-        const testResult = await new Promise<{ success: boolean; stderr: string }>((resolve) => {
-          exec(testCmd, { cwd: projectRoot, timeout: 300_000 }, (err: any, _stdout: string, stderr: string) => {
-            if (err && err.code === "ENOENT") {
-              // Shell not available (Windows sandbox) — skip test verification
-              resolve({ success: true, stderr: "" });
-            } else {
-              resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? "" });
+        const { exec } = await import('node:child_process');
+        const testResult = await new Promise<{
+          success: boolean;
+          stderr: string;
+        }>(resolve => {
+          exec(
+            testCmd,
+            { cwd: projectRoot, timeout: 300_000 },
+            (err: any, _stdout: string, stderr: string) => {
+              if (err && err.code === 'ENOENT') {
+                // Shell not available (Windows sandbox) — skip test verification
+                resolve({ success: true, stderr: '' });
+              } else {
+                resolve({ success: !err, stderr: stderr?.slice(0, 500) ?? '' });
+              }
             }
-          });
+          );
         });
         if (!testResult.success) {
           return textResult({
-            error: "TESTS_FAILED_AT_COMPLETION",
+            error: 'TESTS_FAILED_AT_COMPLETION',
             canComplete: false,
             message: `所有 Phase 已 PASS，但最终测试失败（使用 INIT 原始命令: ${testCmd}）。\n${testResult.stderr}`,
-            mandate: "[BLOCKED] 测试失败，禁止宣称完成。",
+            mandate: '[BLOCKED] 测试失败，禁止宣称完成。',
           });
         }
-      } catch { /* test command execution failed — non-fatal, continue */ }
+      } catch {
+        /* test command execution failed — non-fatal, continue */
+      }
     }
 
     // 释放进程锁（在清理旧的备份之前）
@@ -1749,73 +2332,92 @@ server.tool(
 
     // All phases passed — mark as COMPLETED
     const completeLine = sm.getCheckpointLine(
-      state.phase, undefined, "COMPLETED",
-      "All required phases passed. Session complete."
+      state.phase,
+      undefined,
+      'COMPLETED',
+      'All required phases passed. Session complete.'
     );
-    await sm.appendToProgressLog("\n" + completeLine + "\n");
-    await sm.atomicUpdate({ status: "COMPLETED" });
+    await sm.appendToProgressLog('\n' + completeLine + '\n');
+    await sm.atomicUpdate({ status: 'COMPLETED' });
 
     // Timing summary
-    const timingSummary = Object.entries(state.phaseTimings ?? {}).map(([p, t]) => ({
-      phase: parseInt(p),
-      durationMs: t.durationMs,
-      durationStr: t.durationMs ? formatDuration(t.durationMs) : "unknown",
-    }));
+    const timingSummary = Object.entries(state.phaseTimings ?? {}).map(
+      ([p, t]) => ({
+        phase: parseInt(p),
+        durationMs: t.durationMs,
+        durationStr: t.durationMs ? formatDuration(t.durationMs) : 'unknown',
+      })
+    );
 
     const tokenUsage = state.tokenUsage ?? { total: 0, byPhase: {} };
 
     // Generate summary.md
     try {
       const PHASE_NAMES: Record<string, string> = {
-        "0": "BRAINSTORM", "1": "DESIGN", "2": "PLAN", "3": "EXECUTE", "4": "VERIFY", "5": "E2E_TEST", "6": "ACCEPTANCE", "7": "RETROSPECTIVE",
+        '0': 'BRAINSTORM',
+        '1': 'DESIGN',
+        '2': 'PLAN',
+        '3': 'EXECUTE',
+        '4': 'VERIFY',
+        '5': 'E2E_TEST',
+        '6': 'ACCEPTANCE',
+        '7': 'RETROSPECTIVE',
       };
       const timingRows = timingSummary
-        .map(t => `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? "?"}) | ${t.durationStr} |`)
-        .join("\n");
+        .map(
+          t =>
+            `| Phase ${t.phase} (${PHASE_NAMES[String(t.phase)] ?? '?'}) | ${t.durationStr} |`
+        )
+        .join('\n');
       const tokenRows = Object.entries(tokenUsage.byPhase)
         .map(([p, tok]) => `| Phase ${p} | ~${tok.toLocaleString()} |`)
-        .join("\n");
+        .join('\n');
 
       const summaryContent =
         `# auto-dev 完成摘要\n\n` +
         `**Topic**: ${state.topic}  \n` +
-        `**Mode**: ${state.mode}${state.skipE2e ? " (skip-e2e)" : ""}  \n` +
+        `**Mode**: ${state.mode}${state.skipE2e ? ' (skip-e2e)' : ''}  \n` +
         `**Started**: ${state.startedAt}  \n` +
         `**Completed**: ${new Date().toISOString()}  \n\n` +
         `## Phase 耗时\n\n` +
-        `| Phase | 耗时 |\n|-------|------|\n${timingRows || "| — | — |"}\n\n` +
+        `| Phase | 耗时 |\n|-------|------|\n${timingRows || '| — | — |'}\n\n` +
         `## Token 消耗（估算）\n\n` +
-        `| Phase | Token |\n|-------|-------|\n${tokenRows || "| — | — |"}\n` +
+        `| Phase | Token |\n|-------|-------|\n${tokenRows || '| — | — |'}\n` +
         `| **合计** | **~${tokenUsage.total.toLocaleString()}** |\n\n` +
         `## 关键产出文件\n\n` +
         `- \`design.md\` — 架构设计\n` +
         `- \`plan.md\` — 实施计划\n` +
         `- \`code-review.md\` — 代码审查报告\n` +
-        (state.skipE2e ? "" : `- \`e2e-test-results.md\` — E2E 测试结果\n`) +
+        (state.skipE2e ? '' : `- \`e2e-test-results.md\` — E2E 测试结果\n`) +
         `- \`acceptance-report.md\` — 验收报告\n` +
         `- \`retrospective.md\` — 回顾总结（Phase 7）\n` +
         `- \`progress-log.md\` — 完整执行日志\n\n` +
         `> 如需回滚至 init 状态：\`git reset --hard auto-dev/${state.topic}/start\`\n`;
 
-      await sm.atomicWrite(join(sm.outputDir, "summary.md"), summaryContent);
-    } catch { /* summary.md generation failed — non-fatal */ }
+      await sm.atomicWrite(join(sm.outputDir, 'summary.md'), summaryContent);
+    } catch {
+      /* summary.md generation failed — non-fatal */
+    }
 
     return textResult({
       canComplete: true,
       passedPhases: validation.passedPhases,
       message: validation.message,
-      status: "COMPLETED",
+      status: 'COMPLETED',
       timingSummary,
       tokenUsage,
     });
-  },
+  }
 );
 
 // ---------------------------------------------------------------------------
 // Helper: prompt Lessons feedback at Phase 7 completion
 // ---------------------------------------------------------------------------
 
-async function promptLessonsFeedbackSimplified(projectRoot: string, topic: string): Promise<void> {
+async function promptLessonsFeedbackSimplified(
+  projectRoot: string,
+  topic: string
+): Promise<void> {
   const sm = await StateManager.create(projectRoot, topic);
   const stateData = await sm.loadAndValidate();
   const localIds = stateData.injectedLessonIds ?? [];
@@ -1827,7 +2429,10 @@ async function promptLessonsFeedbackSimplified(projectRoot: string, topic: strin
   }
 
   const lessons = new LessonsManager(sm.outputDir, projectRoot);
-  const allLessons = [...(await lessons.getCrossProjectLessons(100)), ...(await lessons.readProjectEntries())];
+  const allLessons = [
+    ...(await lessons.getCrossProjectLessons(100)),
+    ...(await lessons.readProjectEntries()),
+  ];
 
   // 生成简化的反馈提示（仅 ID 列表）
   let md = `## Lessons 反馈（可选）
@@ -1859,8 +2464,12 @@ async function promptLessonsFeedbackSimplified(projectRoot: string, topic: strin
   console.log(md);
 
   // 写入 progress-log（追加）
-  const progressLogPath = join(sm.outputDir, "progress-log.md");
-  await writeFile(progressLogPath, `<!-- LESSONS_FEEDBACK -->\n` + md + `\n`, "utf-8");
+  const progressLogPath = join(sm.outputDir, 'progress-log.md');
+  await writeFile(
+    progressLogPath,
+    `<!-- LESSONS_FEEDBACK -->\n` + md + `\n`,
+    'utf-8'
+  );
 
   return;
 }
@@ -1869,15 +2478,20 @@ async function promptLessonsFeedbackSimplified(projectRoot: string, topic: strin
 // Helper: collect recent tribunal issues for ESCALATE_REGRESS feedback
 // ---------------------------------------------------------------------------
 
-async function collectRecentTribunalIssues(outputDir: string, phase: number): Promise<string> {
-  const { join } = await import("node:path");
+async function collectRecentTribunalIssues(
+  outputDir: string,
+  phase: number
+): Promise<string> {
+  const { join } = await import('node:path');
   const logPath = join(outputDir, `tribunal-phase${phase}.md`);
   try {
-    const content = await readFile(logPath, "utf-8");
-    const failSections = content.split(/\n---\n/).filter((s: string) => s.includes("FAIL"));
-    return failSections.slice(-1)[0]?.trim() ?? "（无详细反馈）";
+    const content = await readFile(logPath, 'utf-8');
+    const failSections = content
+      .split(/\n---\n/)
+      .filter((s: string) => s.includes('FAIL'));
+    return failSections.slice(-1)[0]?.trim() ?? '（无详细反馈）';
   } catch {
-    return "（无法读取 tribunal 日志）";
+    return '（无法读取 tribunal 日志）';
   }
 }
 
@@ -1886,8 +2500,8 @@ async function collectRecentTribunalIssues(outputDir: string, phase: number): Pr
 // ===========================================================================
 
 server.tool(
-  "auto_dev_submit",
-  "提交当前 Phase 产物进行独立裁决。Phase 4/5/6 需要独立裁决，Phase 7（复盘）直接通过。",
+  'auto_dev_submit',
+  '提交当前 Phase 产物进行独立裁决。Phase 4/5/6 需要独立裁决，Phase 7（复盘）直接通过。',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -1899,8 +2513,8 @@ server.tool(
     const SUBMIT_PHASES = [...TRIBUNAL_PHASES, 7] as const;
     if (!(SUBMIT_PHASES as readonly number[]).includes(phase)) {
       return textResult({
-        error: "INVALID_PHASE",
-        message: `Phase ${phase} 不是可提交 Phase。只有 Phase ${SUBMIT_PHASES.join("/")} 需要通过 auto_dev_submit 提交。`,
+        error: 'INVALID_PHASE',
+        message: `Phase ${phase} 不是可提交 Phase。只有 Phase ${SUBMIT_PHASES.join('/')} 需要通过 auto_dev_submit 提交。`,
       });
     }
 
@@ -1910,15 +2524,15 @@ server.tool(
     // Guard: Phase 5 is skipped when skipE2e=true
     if (phase === 5 && state.skipE2e === true) {
       return textResult({
-        error: "PHASE_SKIPPED",
-        message: "Phase 5 已被 skipE2e 跳过，无需提交。",
+        error: 'PHASE_SKIPPED',
+        message: 'Phase 5 已被 skipE2e 跳过，无需提交。',
       });
     }
 
     // Verify current phase matches
     if (state.phase !== phase) {
       return textResult({
-        error: "PHASE_MISMATCH",
+        error: 'PHASE_MISMATCH',
         message: `当前 Phase 为 ${state.phase}，但提交的是 Phase ${phase}。请确认 Phase 是否正确。`,
       });
     }
@@ -1929,7 +2543,10 @@ server.tool(
       await generateRetrospectiveData(outputDir);
 
       // 新增: 输出 Lessons 反馈提示
-      if ((state.injectedLessonIds ?? []).length > 0 || (state.injectedGlobalLessonIds ?? []).length > 0) {
+      if (
+        (state.injectedLessonIds ?? []).length > 0 ||
+        (state.injectedGlobalLessonIds ?? []).length > 0
+      ) {
         await promptLessonsFeedbackSimplified(projectRoot, topic);
       }
 
@@ -1939,23 +2556,25 @@ server.tool(
       }
 
       const ckptSummary = `[RETRO] 复盘完成，跳过 tribunal 直接通过。${summary}`;
-      await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
-      const nextDirective = computeNextDirective(phase, "PASS", state);
+      await internalCheckpoint(sm, state, phase, 'PASS', ckptSummary);
+      const nextDirective = computeNextDirective(phase, 'PASS', state);
       return textResult({
-        status: "TRIBUNAL_PASS",
+        status: 'TRIBUNAL_PASS',
         phase,
         nextPhase: nextDirective.nextPhase,
         mandate: nextDirective.mandate,
-        message: "Phase 7 复盘完成，无需独立裁决。",
+        message: 'Phase 7 复盘完成，无需独立裁决。',
       });
     }
 
     // Block if orchestrator is active — tribunal is handled by auto_dev_next
     if (state.step != null) {
       return textResult({
-        error: "USE_AUTO_DEV_NEXT",
-        message: "当前 session 使用 orchestrator 模式。所有阶段推进（包括 tribunal 裁决）都由 auto_dev_next 自动处理。请勿调用 auto_dev_submit 或 auto_dev_checkpoint，直接调用 auto_dev_next(projectRoot, topic) 即可。",
-        mandate: "调用 auto_dev_next(projectRoot, topic) 推进流程。禁止调用 auto_dev_submit 和 auto_dev_checkpoint。",
+        error: 'USE_AUTO_DEV_NEXT',
+        message:
+          '当前 session 使用 orchestrator 模式。所有阶段推进（包括 tribunal 裁决）都由 auto_dev_next 自动处理。请勿调用 auto_dev_submit 或 auto_dev_checkpoint，直接调用 auto_dev_next(projectRoot, topic) 即可。',
+        mandate:
+          '调用 auto_dev_next(projectRoot, topic) 推进流程。禁止调用 auto_dev_submit 和 auto_dev_checkpoint。',
       });
     }
 
@@ -1966,16 +2585,24 @@ server.tool(
     if (phase === 6) {
       let acContent: string | null = null;
       try {
-        acContent = await readFile(join(outputDir, "acceptance-criteria.json"), "utf-8");
-      } catch { /* no AC JSON → legacy flow */ }
+        acContent = await readFile(
+          join(outputDir, 'acceptance-criteria.json'),
+          'utf-8'
+        );
+      } catch {
+        /* no AC JSON → legacy flow */
+      }
 
       if (acContent) {
         // Hash integrity check
-        const progressLog = await readFile(join(outputDir, "progress-log.md"), "utf-8").catch(() => "");
+        const progressLog = await readFile(
+          join(outputDir, 'progress-log.md'),
+          'utf-8'
+        ).catch(() => '');
         const integrityResult = validateAcIntegrity(acContent, progressLog);
         if (!integrityResult.valid) {
           return textResult({
-            error: "AC_TAMPER_DETECTED",
+            error: 'AC_TAMPER_DETECTED',
             message: integrityResult.error,
             mandate: `[BLOCKED] ${integrityResult.error}`,
           });
@@ -1989,52 +2616,77 @@ server.tool(
         const structuralResults = await runStructuralAssertions(
           acData.criteria,
           effectiveCodeRoot,
-          { buildCmd: state.stack.buildCmd, testCmd: state.stack.testCmd },
+          { buildCmd: state.stack.buildCmd, testCmd: state.stack.testCmd }
         );
 
         // Test-bound bindings (Layer 2)
-        const allBindings = await discoverAcBindings(effectiveCodeRoot, state.stack.language);
-        const validAcIds = new Set(acData.criteria.map((c) => c.id));
-        const bindings = allBindings.filter((b) => validAcIds.has(b.acId));
-        const testResults = await runAcBoundTests(bindings, effectiveCodeRoot, state.stack.language, state.stack.testCmd);
+        const allBindings = await discoverAcBindings(
+          effectiveCodeRoot,
+          state.stack.language
+        );
+        const validAcIds = new Set(acData.criteria.map(c => c.id));
+        const bindings = allBindings.filter(b => validAcIds.has(b.acId));
+        const testResults = await runAcBoundTests(
+          bindings,
+          effectiveCodeRoot,
+          state.stack.language,
+          state.stack.testCmd
+        );
 
         // Write framework results
         const frameworkResults = {
           structural: structuralResults,
           testBound: Object.fromEntries(testResults),
           pendingManual: acData.criteria
-            .filter((c) => c.layer === "manual")
-            .map((c) => c.id),
+            .filter(c => c.layer === 'manual')
+            .map(c => c.id),
           timestamp: new Date().toISOString(),
         };
         await writeFile(
-          join(outputDir, "framework-ac-results.json"),
-          JSON.stringify(frameworkResults, null, 2),
+          join(outputDir, 'framework-ac-results.json'),
+          JSON.stringify(frameworkResults, null, 2)
         );
 
         // Check for failures
         const structuralFails = Object.entries(structuralResults)
-          .filter(([, v]) => !v.passed).map(([id]) => id);
+          .filter(([, v]) => !v.passed)
+          .map(([id]) => id);
         const testFails = [...testResults.entries()]
-          .filter(([, v]) => !v.passed).map(([id]) => id);
+          .filter(([, v]) => !v.passed)
+          .map(([id]) => id);
 
         if (structuralFails.length > 0 || testFails.length > 0) {
           return textResult({
-            error: "AC_FRAMEWORK_FAIL",
+            error: 'AC_FRAMEWORK_FAIL',
             message: [
-              structuralFails.length > 0 ? `Structural AC FAIL: ${structuralFails.join(", ")}` : "",
-              testFails.length > 0 ? `Test-bound AC FAIL: ${testFails.join(", ")}` : "",
-              "See framework-ac-results.json for details.",
-            ].filter(Boolean).join("\n"),
-            mandate: "[BLOCKED] Framework AC verification failed. Fix issues before resubmitting.",
+              structuralFails.length > 0
+                ? `Structural AC FAIL: ${structuralFails.join(', ')}`
+                : '',
+              testFails.length > 0
+                ? `Test-bound AC FAIL: ${testFails.join(', ')}`
+                : '',
+              'See framework-ac-results.json for details.',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            mandate:
+              '[BLOCKED] Framework AC verification failed. Fix issues before resubmitting.',
           });
         }
       }
     }
 
-    const tribunalResult = await executeTribunal(projectRoot, outputDir, phase, topic, summary, sm, state);
+    const tribunalResult = await executeTribunal(
+      projectRoot,
+      outputDir,
+      phase,
+      topic,
+      summary,
+      sm,
+      state
+    );
     return { content: tribunalResult.content };
-  },
+  }
 );
 
 // ===========================================================================
@@ -2042,28 +2694,39 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_tribunal_verdict",
-  "Submit tribunal verdict from fallback subagent review. Only valid after TRIBUNAL_PENDING.",
+  'auto_dev_tribunal_verdict',
+  'Submit tribunal verdict from fallback subagent review. Only valid after TRIBUNAL_PENDING.',
   {
     projectRoot: z.string(),
     topic: z.string(),
     phase: z.number(),
-    verdict: z.enum(["PASS", "FAIL"]),
-    issues: z.array(z.object({
-      severity: z.enum(["P0", "P1", "P2"]),
-      description: z.string(),
-      file: z.string().optional(),
-    })),
+    verdict: z.enum(['PASS', 'FAIL']),
+    issues: z.array(
+      z.object({
+        severity: z.enum(['P0', 'P1', 'P2']),
+        description: z.string(),
+        file: z.string().optional(),
+      })
+    ),
     passEvidence: z.array(z.string()).optional(),
     summary: z.string().optional(),
     digestHash: z.string(),
   },
-  async ({ projectRoot, topic, phase, verdict, issues, passEvidence, summary, digestHash }) => {
+  async ({
+    projectRoot,
+    topic,
+    phase,
+    verdict,
+    issues,
+    passEvidence,
+    summary,
+    digestHash,
+  }) => {
     // 1. Validate phase is a tribunal phase
     if (!(TRIBUNAL_PHASES as readonly number[]).includes(phase)) {
       return textResult({
-        error: "INVALID_PHASE",
-        message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join("/")} 需要裁决。`,
+        error: 'INVALID_PHASE',
+        message: `Phase ${phase} 不是裁决 Phase。只有 Phase ${TRIBUNAL_PHASES.join('/')} 需要裁决。`,
       });
     }
 
@@ -2073,28 +2736,31 @@ server.tool(
     const digestPath = join(outputDir, `tribunal-digest-phase${phase}.md`);
     let digestContent: string;
     try {
-      digestContent = await readFile(digestPath, "utf-8");
+      digestContent = await readFile(digestPath, 'utf-8');
     } catch {
       return textResult({
-        error: "DIGEST_NOT_FOUND",
+        error: 'DIGEST_NOT_FOUND',
         message: `tribunal-digest-phase${phase}.md 不存在。必须先通过 auto_dev_submit 触发 TRIBUNAL_PENDING。`,
       });
     }
 
-    const { createHash } = await import("node:crypto");
-    const expectedHash = createHash("sha256").update(digestContent).digest("hex").slice(0, 16);
+    const { createHash } = await import('node:crypto');
+    const expectedHash = createHash('sha256')
+      .update(digestContent)
+      .digest('hex')
+      .slice(0, 16);
     if (digestHash !== expectedHash) {
       return textResult({
-        error: "DIGEST_HASH_MISMATCH",
+        error: 'DIGEST_HASH_MISMATCH',
         message: `digestHash 不匹配。期望 ${expectedHash}，收到 ${digestHash}。禁止篡改 digest 内容。`,
       });
     }
 
     // 3. PASS requires passEvidence
-    if (verdict === "PASS" && (!passEvidence || passEvidence.length === 0)) {
+    if (verdict === 'PASS' && (!passEvidence || passEvidence.length === 0)) {
       return textResult({
-        error: "PASS_EVIDENCE_REQUIRED",
-        message: "裁决 PASS 必须提供 passEvidence（逐条举证），不能为空。",
+        error: 'PASS_EVIDENCE_REQUIRED',
+        message: '裁决 PASS 必须提供 passEvidence（逐条举证），不能为空。',
       });
     }
 
@@ -2103,72 +2769,104 @@ server.tool(
     const startCommit = state.startCommit;
 
     // 5. crossValidate (hard-data checks for Phase 4/5/6/7)
-    if (verdict === "PASS") {
-      const crossCheckFail = await crossValidate(phase, outputDir, projectRoot, startCommit);
+    if (verdict === 'PASS') {
+      const crossCheckFail = await crossValidate(
+        phase,
+        outputDir,
+        projectRoot,
+        startCommit
+      );
       if (crossCheckFail) {
         // Write tribunal log with OVERRIDDEN
         const overriddenVerdict = {
-          verdict: "FAIL" as const,
-          issues: [{ severity: "P0" as const, description: crossCheckFail }],
+          verdict: 'FAIL' as const,
+          issues: [{ severity: 'P0' as const, description: crossCheckFail }],
           passEvidence: passEvidence ?? [],
-          raw: summary ?? "",
+          raw: summary ?? '',
         };
-        const tribunalLog = buildTribunalLog(phase, overriddenVerdict, "fallback-subagent");
-        await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
+        const tribunalLog = buildTribunalLog(
+          phase,
+          overriddenVerdict,
+          'fallback-subagent'
+        );
+        await writeFile(
+          join(outputDir, `tribunal-phase${phase}.md`),
+          tribunalLog,
+          'utf-8'
+        );
 
         return textResult({
-          status: "TRIBUNAL_OVERRIDDEN",
+          status: 'TRIBUNAL_OVERRIDDEN',
           phase,
           message: `Fallback 裁决判定 PASS，但框架交叉验证不通过：${crossCheckFail}`,
-          issues: [{ severity: "P0", description: crossCheckFail }],
-          mandate: "框架硬数据与裁决结果矛盾，请修复后重新 submit。",
+          issues: [{ severity: 'P0', description: crossCheckFail }],
+          mandate: '框架硬数据与裁决结果矛盾，请修复后重新 submit。',
         });
       }
     }
 
     // 6. Write tribunal log (source: fallback-subagent)
     const tribunalVerdict = {
-      verdict: verdict as "PASS" | "FAIL",
+      verdict: verdict as 'PASS' | 'FAIL',
       issues,
       passEvidence: passEvidence ?? [],
-      raw: summary ?? "",
+      raw: summary ?? '',
     };
-    const tribunalLog = buildTribunalLog(phase, tribunalVerdict, "fallback-subagent");
-    await writeFile(join(outputDir, `tribunal-phase${phase}.md`), tribunalLog, "utf-8");
+    const tribunalLog = buildTribunalLog(
+      phase,
+      tribunalVerdict,
+      'fallback-subagent'
+    );
+    await writeFile(
+      join(outputDir, `tribunal-phase${phase}.md`),
+      tribunalLog,
+      'utf-8'
+    );
 
     // 7. PASS: write checkpoint (legacy path — orchestrator handles step sync)
-    if (verdict === "PASS") {
+    if (verdict === 'PASS') {
       const ckptSummary = `[TRIBUNAL-FALLBACK] Fallback 裁决通过。${issues.length} 个建议项。`;
-      const ckptResult = await internalCheckpoint(sm, state, phase, "PASS", ckptSummary);
+      const ckptResult = await internalCheckpoint(
+        sm,
+        state,
+        phase,
+        'PASS',
+        ckptSummary
+      );
 
       // Clear step fields so orchestrator re-computes the next step on next auto_dev_next call
       if (ckptResult.ok) {
-        await sm.atomicUpdate({ step: null, stepIteration: 0, lastValidation: null, approachState: null });
+        await sm.atomicUpdate({
+          step: null,
+          stepIteration: 0,
+          lastValidation: null,
+          approachState: null,
+        });
       }
 
       const nextDirective = ckptResult.ok
         ? ckptResult.nextDirective
-        : computeNextDirective(phase, "PASS", state);
+        : computeNextDirective(phase, 'PASS', state);
 
       return textResult({
-        status: "TRIBUNAL_PASS",
+        status: 'TRIBUNAL_PASS',
         phase,
         nextPhase: nextDirective.nextPhase,
         mandate: nextDirective.mandate,
-        message: "Fallback 裁决通过，checkpoint 已自动写入。",
+        message: 'Fallback 裁决通过，checkpoint 已自动写入。',
         suggestions: issues,
       });
     }
 
     // 8. FAIL: return issues
     return textResult({
-      status: "TRIBUNAL_FAIL",
+      status: 'TRIBUNAL_FAIL',
       phase,
       message: `Fallback 裁决未通过。发现 ${issues.length} 个问题，请修复后重新 submit。`,
       issues,
-      mandate: "请根据以上问题逐一修复，修复完成后再次调用 auto_dev_submit。",
+      mandate: '请根据以上问题逐一修复，修复完成后再次调用 auto_dev_submit。',
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -2176,8 +2874,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_reset",
-  "Reset the auto-dev state to a target phase. Useful to manually re-run a phase. Safety guards: cannot reset a COMPLETED project, cannot jump forward, requires a non-empty reason.",
+  'auto_dev_reset',
+  'Reset the auto-dev state to a target phase. Useful to manually re-run a phase. Safety guards: cannot reset a COMPLETED project, cannot jump forward, requires a non-empty reason.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -2210,13 +2908,13 @@ server.tool(
     // Append audit line to progress-log
     const timestamp = new Date().toISOString();
     await sm.appendToProgressLog(
-      `\n<!-- RESET phase=${targetPhase} reason="${reason}" timestamp=${timestamp} -->\n`,
+      `\n<!-- RESET phase=${targetPhase} reason="${reason}" timestamp=${timestamp} -->\n`
     );
 
     // Apply state reset
     await sm.atomicUpdate({
       phase: targetPhase,
-      status: "IN_PROGRESS",
+      status: 'IN_PROGRESS',
       step: resetStep,
       stepIteration: 0,
       lastValidation: null,
@@ -2227,14 +2925,14 @@ server.tool(
     });
 
     return textResult({
-      status: "RESET",
+      status: 'RESET',
       phase: targetPhase,
       step: resetStep,
       reason,
       timestamp,
       message: `State reset to phase ${targetPhase} (step="${resetStep}"). Previous tribunal/escalation counters for phases >= ${targetPhase} cleared.`,
     });
-  },
+  }
 );
 
 // ===========================================================================
@@ -2242,8 +2940,8 @@ server.tool(
 // ===========================================================================
 
 server.tool(
-  "auto_dev_next",
-  "Get the next task in the autonomous development loop. Returns a task prompt for a subagent, or done=true when complete. Call in a loop: dispatch Agent(task) then call next again.",
+  'auto_dev_next',
+  'Get the next task in the autonomous development loop. Returns a task prompt for a subagent, or done=true when complete. Call in a loop: dispatch Agent(task) then call next again.',
   {
     projectRoot: z.string(),
     topic: z.string(),
@@ -2259,7 +2957,7 @@ server.tool(
         `子 agent 完成后，立即调用 auto_dev_next(projectRoot, topic) 获取下一步。`;
     }
     return textResult(result);
-  },
+  }
 );
 
 // ===========================================================================
@@ -2271,8 +2969,8 @@ async function main(): Promise<void> {
   await server.connect(transport);
 }
 
-main().catch((err) => {
-  console.error("auto-dev MCP Server failed to start:", err);
+main().catch(err => {
+  console.error('auto-dev MCP Server failed to start:', err);
   process.exit(1);
 });
 // test change for pre-commit hook

@@ -1,12 +1,24 @@
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { join, dirname, basename } from "node:path";
-import { homedir } from "node:os";
-import { randomUUID } from "node:crypto";
-import type { LessonEntry } from "./types.js";
-import { MAX_GLOBAL_INJECT, MAX_GLOBAL_POOL, MIN_DISPLACEMENT_MARGIN, DECAY_PERIOD_DAYS, SCORE_DELTA, MAX_FEEDBACK_HISTORY, MAX_CROSS_PROJECT_POOL, MAX_CROSS_PROJECT_INJECT, GLOBAL_PROMOTE_MIN_SCORE, initialScore, ensureDefaults } from "./lessons-constants.js";
+import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { join, dirname, basename } from 'node:path';
+import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import type { LessonEntry } from './types.js';
+import {
+  MAX_GLOBAL_INJECT,
+  MAX_GLOBAL_POOL,
+  MIN_DISPLACEMENT_MARGIN,
+  DECAY_PERIOD_DAYS,
+  SCORE_DELTA,
+  MAX_FEEDBACK_HISTORY,
+  MAX_CROSS_PROJECT_POOL,
+  MAX_CROSS_PROJECT_INJECT,
+  GLOBAL_PROMOTE_MIN_SCORE,
+  initialScore,
+  ensureDefaults,
+} from './lessons-constants.js';
 
-const GLOBAL_DIR = "docs/auto-dev/_global";
-const GLOBAL_FILE = "lessons-global.json";
+const GLOBAL_DIR = 'docs/auto-dev/_global';
+const GLOBAL_FILE = 'lessons-global.json';
 
 // ---------------------------------------------------------------------------
 // Scoring: time-based decay
@@ -17,7 +29,10 @@ export function applyDecay(entry: LessonEntry, now: Date = new Date()): number {
   const refDate = new Date(refDateStr);
   const daysSince = (now.getTime() - refDate.getTime()) / (1000 * 60 * 60 * 24);
   const decayPenalty = Math.floor(daysSince / DECAY_PERIOD_DAYS);
-  return Math.max(0, (entry.score ?? initialScore(entry.severity)) - decayPenalty);
+  return Math.max(
+    0,
+    (entry.score ?? initialScore(entry.severity)) - decayPenalty
+  );
 }
 
 export class LessonsManager {
@@ -27,7 +42,7 @@ export class LessonsManager {
 
   constructor(outputDir: string, projectRoot?: string) {
     this.outputDir = outputDir;
-    this.filePath = join(outputDir, "lessons-learned.json");
+    this.filePath = join(outputDir, 'lessons-learned.json');
     this.projectRoot = projectRoot ?? dirname(dirname(outputDir));
   }
 
@@ -36,14 +51,14 @@ export class LessonsManager {
     category: string,
     lesson: string,
     context?: string,
-    options?: { severity?: string; reusable?: boolean; topic?: string },
+    options?: { severity?: string; reusable?: boolean; topic?: string }
   ): Promise<void> {
     const entries = await this.readEntries();
-    const severity = (options?.severity as LessonEntry["severity"]) ?? "minor";
+    const severity = (options?.severity as LessonEntry['severity']) ?? 'minor';
     const entry: LessonEntry = {
       id: randomUUID().slice(0, 12),
       phase,
-      category: category as LessonEntry["category"],
+      category: category as LessonEntry['category'],
       severity,
       lesson,
       ...(context !== undefined ? { context } : {}),
@@ -58,13 +73,13 @@ export class LessonsManager {
     await this.writeAtomic(entries, this.filePath);
 
     if (entry.reusable) {
-      await this.addToProject(entry);  // result intentionally ignored for add() caller
+      await this.addToProject(entry); // result intentionally ignored for add() caller
     }
   }
 
   async get(phase?: number, category?: string): Promise<LessonEntry[]> {
     const entries = await this.readEntries();
-    return entries.filter((e) => {
+    return entries.filter(e => {
       if (phase !== undefined && e.phase !== phase) return false;
       if (category !== undefined && e.category !== category) return false;
       return true;
@@ -72,14 +87,17 @@ export class LessonsManager {
   }
 
   async feedback(
-    feedbacks: Array<{ id: string; verdict: "helpful" | "not_applicable" | "incorrect" }>,
-    meta: { phase: number; topic: string },
+    feedbacks: Array<{
+      id: string;
+      verdict: 'helpful' | 'not_applicable' | 'incorrect';
+    }>,
+    meta: { phase: number; topic: string }
   ): Promise<{ localUpdated: string[]; globalUpdated: string[] }> {
     const localEntries = await this.readEntries();
     const globalEntries = await this.readProjectEntries();
 
-    const localMap = new Map(localEntries.map((e) => [e.id, e]));
-    const globalMap = new Map(globalEntries.map((e) => [e.id, e]));
+    const localMap = new Map(localEntries.map(e => [e.id, e]));
+    const globalMap = new Map(globalEntries.map(e => [e.id, e]));
 
     const nowStr = new Date().toISOString();
     const localUpdated: string[] = [];
@@ -96,12 +114,15 @@ export class LessonsManager {
 
       const localEntry = localMap.get(fb.id);
       if (localEntry) {
-        localEntry.score = Math.max(0, (localEntry.score ?? initialScore(localEntry.severity)) + delta);
+        localEntry.score = Math.max(
+          0,
+          (localEntry.score ?? initialScore(localEntry.severity)) + delta
+        );
         localEntry.feedbackHistory = [
           ...(localEntry.feedbackHistory ?? []),
           historyItem,
         ].slice(-MAX_FEEDBACK_HISTORY);
-        if (fb.verdict === "helpful") {
+        if (fb.verdict === 'helpful') {
           localEntry.lastPositiveAt = nowStr;
         }
         localUpdated.push(fb.id);
@@ -109,12 +130,15 @@ export class LessonsManager {
 
       const globalEntry = globalMap.get(fb.id);
       if (globalEntry) {
-        globalEntry.score = Math.max(0, (globalEntry.score ?? initialScore(globalEntry.severity)) + delta);
+        globalEntry.score = Math.max(
+          0,
+          (globalEntry.score ?? initialScore(globalEntry.severity)) + delta
+        );
         globalEntry.feedbackHistory = [
           ...(globalEntry.feedbackHistory ?? []),
           historyItem,
         ].slice(-MAX_FEEDBACK_HISTORY);
-        if (fb.verdict === "helpful") {
+        if (fb.verdict === 'helpful') {
           globalEntry.lastPositiveAt = nowStr;
         }
         globalUpdated.push(fb.id);
@@ -123,20 +147,26 @@ export class LessonsManager {
 
     // Write local and global independently with error isolation
     if (localUpdated.length > 0) {
-      await this.writeAtomic(localEntries, this.filePath).catch((e) => {
-        console.error(`[lessons] writeAtomic local failed: ${(e as Error).message}`);
+      await this.writeAtomic(localEntries, this.filePath).catch(e => {
+        console.error(
+          `[lessons] writeAtomic local failed: ${(e as Error).message}`
+        );
       });
     }
     if (globalUpdated.length > 0) {
-      await this.writeAtomic(globalEntries, this.projectFilePath()).catch((e) => {
-        console.error(`[lessons] writeAtomic project failed: ${(e as Error).message}`);
+      await this.writeAtomic(globalEntries, this.projectFilePath()).catch(e => {
+        console.error(
+          `[lessons] writeAtomic project failed: ${(e as Error).message}`
+        );
       });
     }
 
     return { localUpdated, globalUpdated };
   }
 
-  async getProjectLessons(limit: number = MAX_GLOBAL_INJECT): Promise<LessonEntry[]> {
+  async getProjectLessons(
+    limit: number = MAX_GLOBAL_INJECT
+  ): Promise<LessonEntry[]> {
     return this.getLessonsFromPool(this.projectFilePath(), limit);
   }
 
@@ -156,13 +186,15 @@ export class LessonsManager {
     return join(this.projectRoot, GLOBAL_DIR, GLOBAL_FILE);
   }
 
-  async addToProject(entry: LessonEntry): Promise<{ added: boolean; displaced?: LessonEntry }> {
+  async addToProject(
+    entry: LessonEntry
+  ): Promise<{ added: boolean; displaced?: LessonEntry }> {
     return this.addToPool(this.projectFilePath(), entry, MAX_GLOBAL_POOL);
   }
 
   private async readEntries(): Promise<LessonEntry[]> {
     try {
-      const raw = await readFile(this.filePath, "utf-8");
+      const raw = await readFile(this.filePath, 'utf-8');
       return JSON.parse(raw) as LessonEntry[];
     } catch {
       return [];
@@ -182,7 +214,9 @@ export class LessonsManager {
     return this.getProjectLessons(limit);
   }
   /** @deprecated Use addToProject() */
-  async addToGlobal(entry: LessonEntry): Promise<{ added: boolean; displaced?: LessonEntry }> {
+  async addToGlobal(
+    entry: LessonEntry
+  ): Promise<{ added: boolean; displaced?: LessonEntry }> {
     return this.addToProject(entry);
   }
   /** @deprecated Use promoteToProject() */
@@ -199,14 +233,18 @@ export class LessonsManager {
   // -------------------------------------------------------------------------
 
   private crossProjectFilePath(): string {
-    return join(homedir(), ".auto-dev", "lessons-global.json");
+    return join(homedir(), '.auto-dev', 'lessons-global.json');
   }
 
-  async getCrossProjectLessons(limit: number = MAX_CROSS_PROJECT_INJECT): Promise<LessonEntry[]> {
+  async getCrossProjectLessons(
+    limit: number = MAX_CROSS_PROJECT_INJECT
+  ): Promise<LessonEntry[]> {
     return this.getLessonsFromPool(this.crossProjectFilePath(), limit);
   }
 
-  async promoteToGlobal(minScore: number = GLOBAL_PROMOTE_MIN_SCORE): Promise<number> {
+  async promoteToGlobal(
+    minScore: number = GLOBAL_PROMOTE_MIN_SCORE
+  ): Promise<number> {
     const projectEntries = await this.readProjectEntries();
     const now = new Date();
     const nowStr = now.toISOString();
@@ -221,7 +259,7 @@ export class LessonsManager {
         ...ensureDefaults(e),
         sourceProject: projectName,
         promotedAt: nowStr,
-        promotionPath: "project_to_global",
+        promotionPath: 'project_to_global',
       };
 
       const result = await this.addToCrossProject(globalEntry);
@@ -235,8 +273,14 @@ export class LessonsManager {
     return this.getCrossProjectLessons();
   }
 
-  private async addToCrossProject(entry: LessonEntry): Promise<{ added: boolean; displaced?: LessonEntry }> {
-    return this.addToPool(this.crossProjectFilePath(), entry, MAX_CROSS_PROJECT_POOL);
+  private async addToCrossProject(
+    entry: LessonEntry
+  ): Promise<{ added: boolean; displaced?: LessonEntry }> {
+    return this.addToPool(
+      this.crossProjectFilePath(),
+      entry,
+      MAX_CROSS_PROJECT_POOL
+    );
   }
 
   private async readCrossProjectEntries(): Promise<LessonEntry[]> {
@@ -249,7 +293,7 @@ export class LessonsManager {
 
   private async readEntriesFrom(filePath: string): Promise<LessonEntry[]> {
     try {
-      const raw = await readFile(filePath, "utf-8");
+      const raw = await readFile(filePath, 'utf-8');
       return JSON.parse(raw) as LessonEntry[];
     } catch {
       return [];
@@ -261,7 +305,10 @@ export class LessonsManager {
    * getCrossProjectLessons. Performs lazy retirement, scoring, selection,
    * appliedCount update, and write-back.
    */
-  private async getLessonsFromPool(filePath: string, limit: number): Promise<LessonEntry[]> {
+  private async getLessonsFromPool(
+    filePath: string,
+    limit: number
+  ): Promise<LessonEntry[]> {
     const allEntries = await this.readEntriesFrom(filePath);
     if (allEntries.length === 0) return [];
 
@@ -273,18 +320,18 @@ export class LessonsManager {
       if (!e.retired && applyDecay(e, now) <= 0) {
         e.retired = true;
         e.retiredAt = nowStr;
-        e.retiredReason = "score_decayed";
+        e.retiredReason = 'score_decayed';
       }
     }
 
     // Filter out retired, compute effective score, sort by score desc
     const active = allEntries
-      .filter((e) => !e.retired)
-      .map((e) => ({ ...e, score: applyDecay(e, now) }))
+      .filter(e => !e.retired)
+      .map(e => ({ ...e, score: applyDecay(e, now) }))
       .sort((a, b) => b.score - a.score);
 
     const selected = active.slice(0, limit);
-    const selectedIds = new Set(selected.map((e) => e.id));
+    const selectedIds = new Set(selected.map(e => e.id));
 
     // Update appliedCount and lastAppliedAt on the full array for persistence
     for (const e of allEntries) {
@@ -306,17 +353,19 @@ export class LessonsManager {
   private async addToPool(
     filePath: string,
     entry: LessonEntry,
-    poolMax: number,
+    poolMax: number
   ): Promise<{ added: boolean; displaced?: LessonEntry }> {
     const entries = await this.readEntriesFrom(filePath);
     const DEDUP_PREFIX_LEN = 60;
 
     // Dedup: exact match OR prefix match (first 60 chars of shorter text)
-    const isDuplicate = entries.some((e) => {
+    const isDuplicate = entries.some(e => {
       if (e.retired) return false;
       if (e.lesson === entry.lesson) return true;
-      const shorter = e.lesson.length <= entry.lesson.length ? e.lesson : entry.lesson;
-      const longer = e.lesson.length <= entry.lesson.length ? entry.lesson : e.lesson;
+      const shorter =
+        e.lesson.length <= entry.lesson.length ? e.lesson : entry.lesson;
+      const longer =
+        e.lesson.length <= entry.lesson.length ? entry.lesson : e.lesson;
       if (shorter.length >= DEDUP_PREFIX_LEN) {
         const prefix = shorter.slice(0, DEDUP_PREFIX_LEN);
         return longer.startsWith(prefix);
@@ -329,7 +378,7 @@ export class LessonsManager {
     }
 
     const now = new Date();
-    const active = entries.filter((e) => !e.retired);
+    const active = entries.filter(e => !e.retired);
 
     if (active.length < poolMax) {
       entries.push(entry);
@@ -363,18 +412,21 @@ export class LessonsManager {
       ...displaced,
       retired: true,
       retiredAt: now.toISOString(),
-      retiredReason: "displaced_by_new",
+      retiredReason: 'displaced_by_new',
     };
     entries.push(entry);
     await this.writeAtomic(entries, filePath);
     return { added: true, displaced };
   }
 
-  private async writeAtomic(entries: LessonEntry[], targetPath: string): Promise<void> {
+  private async writeAtomic(
+    entries: LessonEntry[],
+    targetPath: string
+  ): Promise<void> {
     const dir = dirname(targetPath);
     await mkdir(dir, { recursive: true });
     const tmpPath = join(dir, `.lessons.${randomUUID().slice(0, 8)}.tmp`);
-    await writeFile(tmpPath, JSON.stringify(entries, null, 2) + "\n", "utf-8");
+    await writeFile(tmpPath, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
     await rename(tmpPath, targetPath);
   }
 }

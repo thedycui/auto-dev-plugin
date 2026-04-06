@@ -12,8 +12,8 @@
  *  - spawnAgentWithRetry()      — retry wrapper with backoff
  */
 
-import { execFile, exec } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { execFile, exec } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,10 +21,10 @@ import { stat } from "node:fs/promises";
 
 export interface SpawnOptions {
   prompt: string;
-  model?: "opus" | "sonnet" | "haiku";
-  timeout?: number;       // default 300_000
-  maxBuffer?: number;     // default 4MB
-  jsonSchema?: object;    // if provided, adds --output-format json --json-schema
+  model?: 'opus' | 'sonnet' | 'haiku';
+  timeout?: number; // default 300_000
+  maxBuffer?: number; // default 4MB
+  jsonSchema?: object; // if provided, adds --output-format json --json-schema
   cwd?: string;
 }
 
@@ -32,7 +32,7 @@ export interface SpawnResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-  parsed?: unknown;       // only when jsonSchema provided
+  parsed?: unknown; // only when jsonSchema provided
   crashed: boolean;
 }
 
@@ -58,17 +58,19 @@ export async function resolveClaudePath(): Promise<string> {
   // Tier 2: command -v claude (POSIX, R2-4)
   try {
     const resolved = await new Promise<string>((resolve, reject) => {
-      exec("command -v claude", (err, stdout) => {
-        if (err || !stdout.trim()) reject(new Error("not found"));
+      exec('command -v claude', (err, stdout) => {
+        if (err || !stdout.trim()) reject(new Error('not found'));
         else resolve(stdout.trim());
       });
     });
     return resolved;
-  } catch { /* fall through */ }
+  } catch {
+    /* fall through */
+  }
 
   // Tier 3: hardcoded candidate paths
   const candidates = [
-    "/usr/local/bin/claude",
+    '/usr/local/bin/claude',
     `${process.env.HOME}/.npm-global/bin/claude`,
     `${process.env.HOME}/.claude/local/claude`,
   ];
@@ -76,11 +78,13 @@ export async function resolveClaudePath(): Promise<string> {
     try {
       await stat(p);
       return p;
-    } catch { /* try next */ }
+    } catch {
+      /* try next */
+    }
   }
 
   // Tier 4: npx fallback (shell: true required)
-  return "npx --yes @anthropic-ai/claude-code";
+  return 'npx --yes @anthropic-ai/claude-code';
 }
 
 /**
@@ -111,7 +115,7 @@ export function resetClaudePathCache(): void {
 export async function spawnAgent(options: SpawnOptions): Promise<SpawnResult> {
   const {
     prompt,
-    model = "sonnet",
+    model = 'sonnet',
     timeout = 300_000,
     maxBuffer = 4 * 1024 * 1024,
     jsonSchema,
@@ -119,21 +123,28 @@ export async function spawnAgent(options: SpawnOptions): Promise<SpawnResult> {
   } = options;
 
   const resolved = await getClaudePath();
-  const useShell = resolved.startsWith("npx");
+  const useShell = resolved.startsWith('npx');
 
   const args: string[] = [
-    "-p", prompt,
-    "--model", model,
-    "--dangerously-skip-permissions",
-    "--no-session-persistence",
+    '-p',
+    prompt,
+    '--model',
+    model,
+    '--dangerously-skip-permissions',
+    '--no-session-persistence',
   ];
 
   if (jsonSchema) {
-    args.push("--output-format", "json");
-    args.push("--json-schema", JSON.stringify(jsonSchema));
+    args.push('--output-format', 'json');
+    args.push('--json-schema', JSON.stringify(jsonSchema));
   }
 
-  const spawnOpts: { timeout: number; maxBuffer: number; cwd?: string; shell?: string } = {
+  const spawnOpts: {
+    timeout: number;
+    maxBuffer: number;
+    cwd?: string;
+    shell?: string;
+  } = {
     timeout,
     maxBuffer,
   };
@@ -141,7 +152,7 @@ export async function spawnAgent(options: SpawnOptions): Promise<SpawnResult> {
     spawnOpts.cwd = cwd;
   }
 
-  return new Promise<SpawnResult>((resolve) => {
+  return new Promise<SpawnResult>(resolve => {
     const callback = (err: Error | null, stdout: string, stderr: string) => {
       const exitCode = err ? ((err as any).code ?? 1) : 0;
 
@@ -160,19 +171,23 @@ export async function spawnAgent(options: SpawnOptions): Promise<SpawnResult> {
       }
 
       resolve({
-        stdout: stdout || "",
-        stderr: stderr || "",
-        exitCode: typeof exitCode === "number" ? exitCode : 1,
+        stdout: stdout || '',
+        stderr: stderr || '',
+        exitCode: typeof exitCode === 'number' ? exitCode : 1,
         parsed,
         crashed,
       });
     };
 
     if (useShell) {
-      const fullCmd = `${resolved} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
-      exec(fullCmd, { ...spawnOpts, shell: "/bin/sh" }, (err, stdout, stderr) => {
-        callback(err, stdout, stderr);
-      });
+      const fullCmd = `${resolved} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
+      exec(
+        fullCmd,
+        { ...spawnOpts, shell: '/bin/sh' },
+        (err, stdout, stderr) => {
+          callback(err, stdout, stderr);
+        }
+      );
     } else {
       execFile(resolved, args, spawnOpts, (err, stdout, stderr) => {
         callback(err, stdout, stderr);
@@ -193,7 +208,7 @@ export async function spawnAgent(options: SpawnOptions): Promise<SpawnResult> {
 export async function spawnAgentWithRetry(
   options: SpawnOptions,
   maxRetries: number = 1,
-  crashDetector?: (result: SpawnResult) => boolean,
+  crashDetector?: (result: SpawnResult) => boolean
 ): Promise<SpawnResult> {
   const detect = crashDetector ?? ((r: SpawnResult) => r.crashed);
 
@@ -205,7 +220,7 @@ export async function spawnAgentWithRetry(
     }
 
     if (attempt < maxRetries) {
-      await new Promise((r) => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 3000));
       continue;
     }
 
@@ -214,5 +229,5 @@ export async function spawnAgentWithRetry(
   }
 
   // Unreachable
-  throw new Error("unreachable");
+  throw new Error('unreachable');
 }

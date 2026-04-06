@@ -5,32 +5,38 @@
  * TypeScript interfaces are inferred from schemas via `z.infer<>`.
  */
 
-import { z } from "zod/v4";
+import { z } from 'zod/v4';
 
 // Re-export AC schema types for external consumers
 export type {
   AcceptanceCriterion,
   AcceptanceCriteria,
   AssertionType,
-} from "./ac-schema.js";
+} from './ac-schema.js';
 
 // ---------------------------------------------------------------------------
 // Enums / Shared Literals
 // ---------------------------------------------------------------------------
 
-export const ModeSchema = z.enum(["full", "quick", "turbo"]);
-export const ChangeTypeSchema = z.enum(["refactor", "bugfix", "feature", "config", "docs"]);
-
-export const PhaseStatusSchema = z.enum([
-  "IN_PROGRESS",
-  "PASS",
-  "NEEDS_REVISION",
-  "BLOCKED",
-  "COMPLETED",
-  "REGRESS",
+export const ModeSchema = z.enum(['full', 'quick', 'turbo']);
+export const ChangeTypeSchema = z.enum([
+  'refactor',
+  'bugfix',
+  'feature',
+  'config',
+  'docs',
 ]);
 
-export const OnConflictSchema = z.enum(["resume", "overwrite"]);
+export const PhaseStatusSchema = z.enum([
+  'IN_PROGRESS',
+  'PASS',
+  'NEEDS_REVISION',
+  'BLOCKED',
+  'COMPLETED',
+  'REGRESS',
+]);
+
+export const OnConflictSchema = z.enum(['resume', 'overwrite']);
 
 // ---------------------------------------------------------------------------
 // StackInfo
@@ -64,8 +70,16 @@ export type GitInfo = z.infer<typeof GitInfoSchema>;
 export const LessonEntrySchema = z.object({
   id: z.string().optional(),
   phase: z.number().int(),
-  category: z.enum(["pitfall", "highlight", "process", "technical", "pattern", "iteration-limit", "tribunal"]),
-  severity: z.enum(["critical", "important", "minor"]).optional(),
+  category: z.enum([
+    'pitfall',
+    'highlight',
+    'process',
+    'technical',
+    'pattern',
+    'iteration-limit',
+    'tribunal',
+  ]),
+  severity: z.enum(['critical', 'important', 'minor']).optional(),
   lesson: z.string(),
   context: z.string().optional(),
   topic: z.string().optional(),
@@ -77,20 +91,26 @@ export const LessonEntrySchema = z.object({
   // Cross-project promotion tracking (self-evolution)
   sourceProject: z.string().optional(),
   promotedAt: z.string().optional(),
-  promotionPath: z.enum(["local_to_project", "project_to_global"]).optional(),
+  promotionPath: z.enum(['local_to_project', 'project_to_global']).optional(),
 
   // Scoring & feedback fields (lessons-evolution)
   score: z.number().optional(),
   lastPositiveAt: z.string().optional(),
-  feedbackHistory: z.array(z.object({
-    verdict: z.enum(["helpful", "not_applicable", "incorrect"]),
-    phase: z.number(),
-    topic: z.string(),
-    timestamp: z.string(),
-  })).optional(),
+  feedbackHistory: z
+    .array(
+      z.object({
+        verdict: z.enum(['helpful', 'not_applicable', 'incorrect']),
+        phase: z.number(),
+        topic: z.string(),
+        timestamp: z.string(),
+      })
+    )
+    .optional(),
   retired: z.boolean().optional(),
   retiredAt: z.string().optional(),
-  retiredReason: z.enum(["displaced_by_new", "score_decayed", "manually_removed"]).optional(),
+  retiredReason: z
+    .enum(['displaced_by_new', 'score_decayed', 'manually_removed'])
+    .optional(),
 });
 
 export type LessonEntry = z.infer<typeof LessonEntrySchema>;
@@ -116,9 +136,9 @@ export const EFFORT_LIMITS = {
 
 /** Maps revision steps to their parent review step */
 export const REVISION_TO_REVIEW: Record<string, string> = {
-  "1c": "1b",
-  "2c": "2b",
-  "5c": "5b",
+  '1c': '1b',
+  '2c': '2b',
+  '5c': '5b',
 };
 
 // ---------------------------------------------------------------------------
@@ -168,29 +188,34 @@ export const StateJsonSchema = z.object({
   // Paths
   outputDir: z.string(),
   projectRoot: z.string(),
-  codeRoot: z.string().optional(),  // Actual code directory (defaults to projectRoot if not set)
+  codeRoot: z.string().optional(), // Actual code directory (defaults to projectRoot if not set)
 
   // Dirty flag — set when progress-log was written but state.json update failed
   dirty: z.boolean().optional(),
 
   // Behavior flags
-  interactive: z.boolean().optional(),  // --interactive mode (default: false = fully automatic)
-  dryRun: z.boolean().optional(),       // --dry-run mode (only Phase 1-2)
-  skipE2e: z.boolean().optional(),      // --skip-e2e mode (skip Phase 5)
-  skipSteps: z.array(z.string()).optional(),  // lightweight mode: skip specific steps (e.g. ["1b", "2b"])
-  tdd: z.boolean().optional(),          // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
-  tddTaskStates: z.record(z.string(), z.object({
-    status: z.enum(["PENDING", "RED_CONFIRMED", "GREEN_CONFIRMED"]),
-    redTestFiles: z.array(z.string()).optional(),
-    redExitCode: z.number().optional(),
-    redFailType: z.enum(["compilation_error", "test_failure"]).optional(),
-  })).optional(),
-  brainstorm: z.boolean().optional(),   // --brainstorm mode (Phase 0 enabled)
-  costMode: z.enum(["economy", "beast"]).optional(), // economy=按阶段选模型(默认), beast=全部最强模型
+  interactive: z.boolean().optional(), // --interactive mode (default: false = fully automatic)
+  dryRun: z.boolean().optional(), // --dry-run mode (only Phase 1-2)
+  skipE2e: z.boolean().optional(), // --skip-e2e mode (skip Phase 5)
+  skipSteps: z.array(z.string()).optional(), // lightweight mode: skip specific steps (e.g. ["1b", "2b"])
+  tdd: z.boolean().optional(), // --tdd mode (RED-GREEN-REFACTOR in Phase 3)
+  tddTaskStates: z
+    .record(
+      z.string(),
+      z.object({
+        status: z.enum(['PENDING', 'RED_CONFIRMED', 'GREEN_CONFIRMED']),
+        redTestFiles: z.array(z.string()).optional(),
+        redExitCode: z.number().optional(),
+        redFailType: z.enum(['compilation_error', 'test_failure']).optional(),
+      })
+    )
+    .optional(),
+  brainstorm: z.boolean().optional(), // --brainstorm mode (Phase 0 enabled)
+  costMode: z.enum(['economy', 'beast']).optional(), // economy=按阶段选模型(默认), beast=全部最强模型
 
   // Design doc binding — tracks whether an external design doc was provided
-  designDocSource: z.string().optional(),  // original path of the design doc
-  designDocBound: z.boolean().optional(),  // true if design.md was copied from external source
+  designDocSource: z.string().optional(), // original path of the design doc
+  designDocBound: z.boolean().optional(), // true if design.md was copied from external source
 
   // Git baseline for accurate Phase 5 diff
   startCommit: z.string().optional(),
@@ -199,20 +224,24 @@ export const StateJsonSchema = z.object({
   regressionCount: z.number().int().optional(),
 
   // Phase-level timing data
-  phaseTimings: z.record(
-    z.string(),
-    z.object({
-      startedAt: z.string(),
-      completedAt: z.string().optional(),
-      durationMs: z.number().optional(),
-    })
-  ).optional(),
+  phaseTimings: z
+    .record(
+      z.string(),
+      z.object({
+        startedAt: z.string(),
+        completedAt: z.string().optional(),
+        durationMs: z.number().optional(),
+      })
+    )
+    .optional(),
 
   // Token usage tracking
-  tokenUsage: z.object({
-    total: z.number(),
-    byPhase: z.record(z.string(), z.number()),
-  }).optional(),
+  tokenUsage: z
+    .object({
+      total: z.number(),
+      byPhase: z.record(z.string(), z.number()),
+    })
+    .optional(),
 
   // Injected lesson IDs for feedback tracking (lessons-evolution)
   injectedLessonIds: z.array(z.string()).optional(),
@@ -238,14 +267,16 @@ export const StateJsonSchema = z.object({
   deployTarget: z.string().optional(),
   deployBranch: z.string().optional(),
   deployEnv: z.string().optional(),
-  verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
-  verifyConfig: z.object({
-    endpoint: z.string().optional(),
-    expectedPattern: z.string().optional(),
-    logPath: z.string().optional(),
-    logKeyword: z.string().optional(),
-    sshHost: z.string().optional(),
-  }).optional(),
+  verifyMethod: z.enum(['api', 'log', 'test', 'combined']).optional(),
+  verifyConfig: z
+    .object({
+      endpoint: z.string().optional(),
+      expectedPattern: z.string().optional(),
+      logPath: z.string().optional(),
+      logKeyword: z.string().optional(),
+      sshHost: z.string().optional(),
+    })
+    .optional(),
   shipRound: z.number().int().optional(),
   shipMaxRounds: z.number().int().optional(),
 
@@ -269,10 +300,10 @@ export type StateJson = z.infer<typeof StateJsonSchema>;
 
 /** TDD task state for a single task */
 export interface TddTaskState {
-  status: "PENDING" | "RED_CONFIRMED" | "GREEN_CONFIRMED";
+  status: 'PENDING' | 'RED_CONFIRMED' | 'GREEN_CONFIRMED';
   redTestFiles?: string[];
   redExitCode?: number;
-  redFailType?: "compilation_error" | "test_failure";
+  redFailType?: 'compilation_error' | 'test_failure';
 }
 
 // ---------------------------------------------------------------------------
@@ -284,25 +315,27 @@ export const InitInputSchema = z.object({
   topic: z.string(),
   mode: ModeSchema,
   startPhase: z.number().int().optional(),
-  interactive: z.boolean().optional(),   // --interactive mode (replaces noConfirm)
-  dryRun: z.boolean().optional(),        // --dry-run: only Phase 1-2
-  skipE2e: z.boolean().optional(),      // --skip-e2e: skip Phase 5
-  tdd: z.boolean().optional(),          // --tdd: RED-GREEN-REFACTOR in Phase 3
-  brainstorm: z.boolean().optional(),   // --brainstorm: enable Phase 0
+  interactive: z.boolean().optional(), // --interactive mode (replaces noConfirm)
+  dryRun: z.boolean().optional(), // --dry-run: only Phase 1-2
+  skipE2e: z.boolean().optional(), // --skip-e2e: skip Phase 5
+  tdd: z.boolean().optional(), // --tdd: RED-GREEN-REFACTOR in Phase 3
+  brainstorm: z.boolean().optional(), // --brainstorm: enable Phase 0
   onConflict: OnConflictSchema.optional(),
   // Ship (Phase 8) parameters
   ship: z.boolean().optional(),
   deployTarget: z.string().optional(),
   deployBranch: z.string().optional(),
   deployEnv: z.string().optional(),
-  verifyMethod: z.enum(["api", "log", "test", "combined"]).optional(),
-  verifyConfig: z.object({
-    endpoint: z.string().optional(),
-    expectedPattern: z.string().optional(),
-    logPath: z.string().optional(),
-    logKeyword: z.string().optional(),
-    sshHost: z.string().optional(),
-  }).optional(),
+  verifyMethod: z.enum(['api', 'log', 'test', 'combined']).optional(),
+  verifyConfig: z
+    .object({
+      endpoint: z.string().optional(),
+      expectedPattern: z.string().optional(),
+      logPath: z.string().optional(),
+      logKeyword: z.string().optional(),
+      sshHost: z.string().optional(),
+    })
+    .optional(),
   shipMaxRounds: z.number().int().optional(),
 });
 
@@ -393,7 +426,7 @@ export const PreflightOutputSchema = z.object({
       name: z.string(),
       passed: z.boolean(),
       message: z.string().optional(),
-    }),
+    })
   ),
 });
 
@@ -405,9 +438,9 @@ export type PreflightOutput = z.infer<typeof PreflightOutputSchema>;
 
 /** Tribunal verdict returned by independent judge agent */
 export interface TribunalVerdict {
-  verdict: "PASS" | "FAIL";
+  verdict: 'PASS' | 'FAIL';
   issues: Array<{
-    severity: "P0" | "P1" | "P2";
+    severity: 'P0' | 'P1' | 'P2';
     description: string;
     file?: string;
     suggestion?: string;
@@ -419,7 +452,7 @@ export interface TribunalVerdict {
   }>;
   traces?: Array<{
     source: string;
-    status: "FIXED" | "NOT_FIXED" | "PARTIAL";
+    status: 'FIXED' | 'NOT_FIXED' | 'PARTIAL';
     evidence?: string;
   }>;
   passEvidence?: string[];
@@ -433,8 +466,15 @@ export interface TribunalVerdict {
 /** Auto-generated retrospective data (framework-generated, tamper-proof) */
 export interface RetrospectiveAutoData {
   rejectionCount: number;
-  phaseTimings: Record<number, { startedAt: string; completedAt?: string; durationMs?: number }>;
-  tribunalResults: Array<{ phase: number; verdict: string; issueCount: number }>;
+  phaseTimings: Record<
+    number,
+    { startedAt: string; completedAt?: string; durationMs?: number }
+  >;
+  tribunalResults: Array<{
+    phase: number;
+    verdict: string;
+    issueCount: number;
+  }>;
   tribunalCrashes: Array<{
     phase: number;
     category?: string;

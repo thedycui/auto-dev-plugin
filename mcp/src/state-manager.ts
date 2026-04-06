@@ -8,42 +8,54 @@
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
 
-import { readFile, writeFile, rename, mkdir, stat, readdir, open } from "node:fs/promises";
-import { join, dirname, resolve } from "node:path";
-import { lstatSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
-import { createHash } from "node:crypto";
-import { StateJsonSchema } from "./types.js";
-import { REVISION_TO_REVIEW } from "./types.js";
-import type { StateJson, StackInfo } from "./types.js";
-import { computeNextDirective } from "./phase-enforcer.js";
-import type { NextDirective } from "./phase-enforcer.js";
+import {
+  readFile,
+  writeFile,
+  rename,
+  mkdir,
+  stat,
+  readdir,
+  open,
+} from 'node:fs/promises';
+import { join, dirname, resolve } from 'node:path';
+import { lstatSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { StateJsonSchema } from './types.js';
+import { REVISION_TO_REVIEW } from './types.js';
+import type { StateJson, StackInfo } from './types.js';
+import { computeNextDirective } from './phase-enforcer.js';
+import type { NextDirective } from './phase-enforcer.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STATE_FILE = "state.json";
-const PROGRESS_LOG = "progress-log.md";
-const OUTPUT_BASE = "docs/auto-dev";
+const STATE_FILE = 'state.json';
+const PROGRESS_LOG = 'progress-log.md';
+const OUTPUT_BASE = 'docs/auto-dev';
 
 /** Build-file detection order (first match wins). */
 const STACK_DETECTION: Array<{ file: string; stackFile: string }> = [
-  { file: "pom.xml", stackFile: "java-maven.md" },
-  { file: "build.gradle", stackFile: "java-gradle.md" },
-  { file: "package.json", stackFile: "node-npm.md" },
-  { file: "pyproject.toml", stackFile: "python.md" },
-  { file: "requirements.txt", stackFile: "python.md" },
+  { file: 'pom.xml', stackFile: 'java-maven.md' },
+  { file: 'build.gradle', stackFile: 'java-gradle.md' },
+  { file: 'package.json', stackFile: 'node-npm.md' },
+  { file: 'pyproject.toml', stackFile: 'python.md' },
+  { file: 'requirements.txt', stackFile: 'python.md' },
 ];
 
 /** Directories to search for stacks/*.md (in priority order). */
 function stackSearchPaths(): string[] {
   // __dirname resolves to mcp/src at compile-time; the plugin root is two levels up.
-  const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const pluginRoot = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    '..'
+  );
   return [
-    join(pluginRoot, "skills", "auto-dev", "stacks"),
-    join(homedir(), ".claude", "skills", "auto-dev", "stacks"),
+    join(pluginRoot, 'skills', 'auto-dev', 'stacks'),
+    join(homedir(), '.claude', 'skills', 'auto-dev', 'stacks'),
   ];
 }
 
@@ -61,12 +73,14 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 function parseHeaderField(content: string, field: string): string | null {
-  const regex = new RegExp(`>\\s*${field}:\\s*(.+?)\\s*$`, "m");
+  const regex = new RegExp(`>\\s*${field}:\\s*(.+?)\\s*$`, 'm');
   const match = content.match(regex);
   return match?.[1] ? match[1].trim() : null;
 }
 
-function parseAllCheckpoints(content: string): Array<{ phase: number; status: string }> {
+function parseAllCheckpoints(
+  content: string
+): Array<{ phase: number; status: string }> {
   const results: Array<{ phase: number; status: string }> = [];
   const regex = /<!-- CHECKPOINT phase=(\d+).*?status=(\S+)/g;
   let match;
@@ -78,23 +92,26 @@ function parseAllCheckpoints(content: string): Array<{ phase: number; status: st
 
 export function extractDocSummary(content: string, maxLines: number): string {
   // 优先查找 ## 概述 或 ## Summary 段落
-  const sectionMatch = content.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/);
+  const sectionMatch = content.match(
+    /## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/
+  );
   if (sectionMatch) {
     return sectionMatch[1]!.trim();
   }
   // 找不到概述段落，取前 maxLines 行
-  const lines = content.split("\n");
-  return lines.slice(0, maxLines).join("\n").trim();
+  const lines = content.split('\n');
+  return lines.slice(0, maxLines).join('\n').trim();
 }
 
 export function extractTaskList(content: string): string {
-  const lines = content.split("\n");
-  const taskLines = lines.filter((line) =>
-    /^###\s+Task\s+\d+/.test(line) ||
-    /^-\s+\[[ x]\]\s+Task\s+\d+/i.test(line) ||
-    /^##\s+Task\s+\d+/.test(line)
+  const lines = content.split('\n');
+  const taskLines = lines.filter(
+    line =>
+      /^###\s+Task\s+\d+/.test(line) ||
+      /^-\s+\[[ x]\]\s+Task\s+\d+/i.test(line) ||
+      /^##\s+Task\s+\d+/.test(line)
   );
-  return taskLines.join("\n").trim();
+  return taskLines.join('\n').trim();
 }
 
 /**
@@ -109,10 +126,12 @@ export function extractTaskList(content: string): string {
  */
 function parseStackVariables(content: string): Record<string, string> {
   const vars: Record<string, string> = {};
-  const sectionMatch = content.match(/## Variables\s*\n([\s\S]*?)(?=\n## |\n$|$)/);
+  const sectionMatch = content.match(
+    /## Variables\s*\n([\s\S]*?)(?=\n## |\n$|$)/
+  );
   if (!sectionMatch) return vars;
 
-  const lines = sectionMatch[1]!.split("\n");
+  const lines = sectionMatch[1]!.split('\n');
   for (const line of lines) {
     const m = line.match(/^-\s+(\w+):\s*(.+)$/);
     if (m && m[1] && m[2]) {
@@ -140,8 +159,8 @@ export function effortKeyForStep(step: string): string {
  * Returns "" for null input.
  */
 export function hashContent(content: string | null): string {
-  if (content === null) return "";
-  return createHash("sha256").update(content).digest("hex").slice(0, 16);
+  if (content === null) return '';
+  return createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +175,14 @@ export function hashContent(content: string | null): string {
  */
 function sanitizePathSegment(s: string): string {
   return s
-    .replace(/[:*?"<>|\\\/]/g, "-")
-    .replace(/\s+/g, " ")
+    .replace(/[:*?"<>|\\\/]/g, '-')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 function formatTimestampPrefix(): string {
   const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
 }
 
@@ -183,10 +202,14 @@ export class StateManager {
    * - If found → reuse (resume scenario)
    * - If not found → generate `YYYYMMDD-HHMM-{topic}` (new task)
    */
-  static async create(projectRoot: string, topic: string): Promise<StateManager> {
+  static async create(
+    projectRoot: string,
+    topic: string
+  ): Promise<StateManager> {
     const base = join(resolve(projectRoot), OUTPUT_BASE);
     const existingDir = await StateManager.findExistingTopicDir(base, topic);
-    const dirName = existingDir ?? `${formatTimestampPrefix()}-${sanitizePathSegment(topic)}`;
+    const dirName =
+      existingDir ?? `${formatTimestampPrefix()}-${sanitizePathSegment(topic)}`;
     return new StateManager(projectRoot, topic, join(base, dirName));
   }
 
@@ -194,7 +217,10 @@ export class StateManager {
    * Scan `base` directory for a subdirectory matching the given topic.
    * Checks exact match (backward compat) then `*-{topic}` pattern.
    */
-  private static async findExistingTopicDir(base: string, topic: string): Promise<string | undefined> {
+  private static async findExistingTopicDir(
+    base: string,
+    topic: string
+  ): Promise<string | undefined> {
     const safeTopic = sanitizePathSegment(topic);
     // 1. Exact match with sanitized topic (old-style dirs without timestamp)
     const exact = join(base, safeTopic);
@@ -211,11 +237,16 @@ export class StateManager {
       // Look for dirs ending with `-{safeTopic}` or `-{topic}` (raw), preferring the latest
       const matches = entries
         .filter(e => {
-          if (!e.endsWith(`-${safeTopic}`) && !e.endsWith(`-${topic}`)) return false;
+          if (!e.endsWith(`-${safeTopic}`) && !e.endsWith(`-${topic}`))
+            return false;
           // Skip .bak directories
-          if (e.includes(".bak")) return false;
+          if (e.includes('.bak')) return false;
           // Must be a directory
-          try { return lstatSync(join(base, e)).isDirectory(); } catch { return false; }
+          try {
+            return lstatSync(join(base, e)).isDirectory();
+          } catch {
+            return false;
+          }
         })
         .sort()
         .reverse(); // latest first
@@ -228,7 +259,9 @@ export class StateManager {
   constructor(projectRoot: string, topic: string, outputDirOverride?: string) {
     this.projectRoot = resolve(projectRoot);
     this.topic = topic;
-    this.outputDir = outputDirOverride ?? join(this.projectRoot, OUTPUT_BASE, sanitizePathSegment(topic));
+    this.outputDir =
+      outputDirOverride ??
+      join(this.projectRoot, OUTPUT_BASE, sanitizePathSegment(topic));
     this.stateFilePath = join(this.outputDir, STATE_FILE);
     this.progressLogPath = join(this.outputDir, PROGRESS_LOG);
   }
@@ -245,14 +278,16 @@ export class StateManager {
   /** Try to read and parse state.json. Returns null on any failure or validation error. */
   async tryReadState(): Promise<StateJson | null> {
     try {
-      const raw = await readFile(this.stateFilePath, "utf-8");
+      const raw = await readFile(this.stateFilePath, 'utf-8');
       const parsed = JSON.parse(raw);
       const result = StateJsonSchema.safeParse(parsed);
       return result.success ? result.data : null;
     } catch (e: unknown) {
       const err = e as NodeJS.ErrnoException;
-      if (err.code !== "ENOENT") {
-        console.error(`[state] tryReadState unexpected error (${err.code ?? "unknown"}): ${err.message}`);
+      if (err.code !== 'ENOENT') {
+        console.error(
+          `[state] tryReadState unexpected error (${err.code ?? 'unknown'}): ${err.message}`
+        );
       }
       return null;
     }
@@ -265,11 +300,11 @@ export class StateManager {
   async loadAndValidate(): Promise<StateJson> {
     let raw: string;
     try {
-      raw = await readFile(this.stateFilePath, "utf-8");
+      raw = await readFile(this.stateFilePath, 'utf-8');
     } catch (err) {
       throw new Error(
         `Failed to read state file at ${this.stateFilePath}: ${(err as Error).message}. ` +
-          "You may need to re-run auto_dev_init to create a fresh state.",
+          'You may need to re-run auto_dev_init to create a fresh state.'
       );
     }
 
@@ -279,7 +314,7 @@ export class StateManager {
     } catch (err) {
       throw new Error(
         `state.json at ${this.stateFilePath} contains invalid JSON: ${(err as Error).message}. ` +
-          "Delete the file and re-run auto_dev_init.",
+          'Delete the file and re-run auto_dev_init.'
       );
     }
 
@@ -287,7 +322,7 @@ export class StateManager {
     if (!result.success) {
       throw new Error(
         `state.json at ${this.stateFilePath} failed schema validation: ${result.error.message}. ` +
-          "Delete the file and re-run auto_dev_init.",
+          'Delete the file and re-run auto_dev_init.'
       );
     }
 
@@ -296,8 +331,8 @@ export class StateManager {
     if (validated.dirty) {
       throw new Error(
         `state.json at ${this.stateFilePath} is marked dirty — a previous write to progress-log ` +
-          "succeeded but the state.json update failed. Review state.json.tmp (if present) and " +
-          "progress-log.md, fix the state manually, then remove the dirty flag.",
+          'succeeded but the state.json update failed. Review state.json.tmp (if present) and ' +
+          'progress-log.md, fix the state manually, then remove the dirty flag.'
       );
     }
 
@@ -309,21 +344,31 @@ export class StateManager {
    * Rebuild state.json from progress-log.md when state.json is corrupted or missing.
    */
   async rebuildStateFromProgressLog(): Promise<StateJson> {
-    const content = await readFile(this.progressLogPath, "utf-8");
+    const content = await readFile(this.progressLogPath, 'utf-8');
 
     // 1. Parse header
-    const startedAt = parseHeaderField(content, "Started") ?? new Date().toISOString();
-    const modeStr = parseHeaderField(content, "Mode") ?? "full";
-    const mode = (modeStr === "quick" ? "quick" : "full") as "full" | "quick";
+    const startedAt =
+      parseHeaderField(content, 'Started') ?? new Date().toISOString();
+    const modeStr = parseHeaderField(content, 'Mode') ?? 'full';
+    const mode = (modeStr === 'quick' ? 'quick' : 'full') as 'full' | 'quick';
 
     // 2. Parse all CHECKPOINTs to get last phase/status
     const checkpoints = parseAllCheckpoints(content);
     const last = checkpoints[checkpoints.length - 1];
     const phase = last?.phase ?? 1;
-    const rawStatus = last?.status ?? "IN_PROGRESS";
+    const rawStatus = last?.status ?? 'IN_PROGRESS';
     // [P1-5 fix] Validate status against PhaseStatusSchema, fallback to IN_PROGRESS
-    const validStatuses = ["IN_PROGRESS", "PASS", "NEEDS_REVISION", "BLOCKED", "COMPLETED", "REGRESS"];
-    const status = validStatuses.includes(rawStatus) ? rawStatus : "IN_PROGRESS";
+    const validStatuses = [
+      'IN_PROGRESS',
+      'PASS',
+      'NEEDS_REVISION',
+      'BLOCKED',
+      'COMPLETED',
+      'REGRESS',
+    ];
+    const status = validStatuses.includes(rawStatus)
+      ? rawStatus
+      : 'IN_PROGRESS';
 
     // 3. Re-detect stack from filesystem
     const stack = await this.detectStack();
@@ -333,7 +378,7 @@ export class StateManager {
       topic: this.topic,
       mode,
       phase,
-      status: status as StateJson["status"],
+      status: status as StateJson['status'],
       stack,
       outputDir: this.outputDir,
       projectRoot: this.projectRoot,
@@ -342,7 +387,10 @@ export class StateManager {
     };
 
     // 5. Write state.json (no dirty flag — this is a fresh rebuild)
-    await this.atomicWrite(this.stateFilePath, JSON.stringify(rebuilt, null, 2));
+    await this.atomicWrite(
+      this.stateFilePath,
+      JSON.stringify(rebuilt, null, 2)
+    );
     this.state = rebuilt;
     return rebuilt;
   }
@@ -353,13 +401,13 @@ export class StateManager {
 
   /** Rename existing output dir to {dir}.bak.{timestamp}. Returns the backup path. */
   async backupExistingDir(): Promise<string> {
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = `${this.outputDir}.bak.${ts}`;
     try {
       await rename(this.outputDir, backupPath);
     } catch (err) {
       throw new Error(
-        `Failed to backup directory ${this.outputDir} to ${backupPath}: ${(err as Error).message}`,
+        `Failed to backup directory ${this.outputDir} to ${backupPath}: ${(err as Error).message}`
       );
     }
     return backupPath;
@@ -383,7 +431,7 @@ export class StateManager {
     if (!matchedStackFile) {
       throw new Error(
         `Could not detect tech stack in ${this.projectRoot}. ` +
-          "Expected one of: pom.xml, build.gradle, package.json, pyproject.toml, requirements.txt",
+          'Expected one of: pom.xml, build.gradle, package.json, pyproject.toml, requirements.txt'
       );
     }
 
@@ -392,7 +440,7 @@ export class StateManager {
     for (const dir of stackSearchPaths()) {
       const candidate = join(dir, matchedStackFile);
       try {
-        stackContent = await readFile(candidate, "utf-8");
+        stackContent = await readFile(candidate, 'utf-8');
         break;
       } catch {
         // try next path
@@ -402,23 +450,23 @@ export class StateManager {
     if (stackContent === undefined) {
       throw new Error(
         `Stack definition file ${matchedStackFile} not found in any stacks directory. ` +
-          `Searched: ${stackSearchPaths().join(", ")}`,
+          `Searched: ${stackSearchPaths().join(', ')}`
       );
     }
 
     // 3. Parse variables
     const vars = parseStackVariables(stackContent);
 
-    const language = vars["language"];
-    const buildCmd = vars["build_cmd"];
-    const testCmd = vars["test_cmd"];
-    const langChecklist = vars["lang_checklist"];
+    const language = vars['language'];
+    const buildCmd = vars['build_cmd'];
+    const testCmd = vars['test_cmd'];
+    const langChecklist = vars['lang_checklist'];
 
     if (!language || !buildCmd || !testCmd || !langChecklist) {
       throw new Error(
         `Stack file ${matchedStackFile} is missing required variables. ` +
           `Found: ${JSON.stringify(vars)}. ` +
-          "Required: language, build_cmd, test_cmd, lang_checklist",
+          'Required: language, build_cmd, test_cmd, lang_checklist'
       );
     }
 
@@ -430,7 +478,11 @@ export class StateManager {
   // -----------------------------------------------------------------------
 
   /** Create the output directory, write initial state.json (atomic) and progress-log header. */
-  async init(mode: "full" | "quick" | "turbo", stack: StackInfo, startPhase?: number): Promise<void> {
+  async init(
+    mode: 'full' | 'quick' | 'turbo',
+    stack: StackInfo,
+    startPhase?: number
+  ): Promise<void> {
     await mkdir(this.outputDir, { recursive: true });
 
     const now = new Date().toISOString();
@@ -438,7 +490,7 @@ export class StateManager {
       topic: this.topic,
       mode,
       phase: startPhase ?? 1,
-      status: "IN_PROGRESS",
+      status: 'IN_PROGRESS',
       stack,
       outputDir: this.outputDir,
       projectRoot: this.projectRoot,
@@ -446,7 +498,10 @@ export class StateManager {
       updatedAt: now,
     };
 
-    await this.atomicWrite(this.stateFilePath, JSON.stringify(initial, null, 2));
+    await this.atomicWrite(
+      this.stateFilePath,
+      JSON.stringify(initial, null, 2)
+    );
     this.state = initial;
 
     // Create progress-log.md header
@@ -469,10 +524,10 @@ export class StateManager {
   async atomicWrite(filePath: string, content: string): Promise<void> {
     const tmpPath = `${filePath}.tmp`;
     try {
-      await writeFile(tmpPath, content, "utf-8");
+      await writeFile(tmpPath, content, 'utf-8');
     } catch (err) {
       throw new Error(
-        `Failed to write temporary file ${tmpPath}: ${(err as Error).message}`,
+        `Failed to write temporary file ${tmpPath}: ${(err as Error).message}`
       );
     }
     try {
@@ -481,7 +536,7 @@ export class StateManager {
       // Leave .tmp in place for manual recovery
       throw new Error(
         `Atomic rename from ${tmpPath} to ${filePath} failed: ${(err as Error).message}. ` +
-          `The temporary file ${tmpPath} has been preserved for recovery.`,
+          `The temporary file ${tmpPath} has been preserved for recovery.`
       );
     }
   }
@@ -495,20 +550,29 @@ export class StateManager {
     // that may not be in the Zod schema but are written by orchestrator
     let rawState: Record<string, unknown> = {};
     try {
-      rawState = JSON.parse(await readFile(this.stateFilePath, "utf-8"));
+      rawState = JSON.parse(await readFile(this.stateFilePath, 'utf-8'));
     } catch (e: unknown) {
-      console.error(`[state] atomicUpdate read/parse failed, falling back to validated state: ${(e as Error).message}`);
+      console.error(
+        `[state] atomicUpdate read/parse failed, falling back to validated state: ${(e as Error).message}`
+      );
       // Fall back to validated state
       rawState = { ...(await this.loadAndValidate()) };
     }
 
-    const merged: Record<string, unknown> = { ...rawState, ...updates, updatedAt: new Date().toISOString() };
+    const merged: Record<string, unknown> = {
+      ...rawState,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
 
     // Deep merge stepEffort: merge per-key rather than whole-object overwrite
-    if (updates["stepEffort"] !== undefined || rawState["stepEffort"] !== undefined) {
-      merged["stepEffort"] = {
-        ...(rawState["stepEffort"] as Record<string, unknown> ?? {}),
-        ...(updates["stepEffort"] as Record<string, unknown> ?? {}),
+    if (
+      updates['stepEffort'] !== undefined ||
+      rawState['stepEffort'] !== undefined
+    ) {
+      merged['stepEffort'] = {
+        ...((rawState['stepEffort'] as Record<string, unknown>) ?? {}),
+        ...((updates['stepEffort'] as Record<string, unknown>) ?? {}),
       };
     }
 
@@ -517,7 +581,7 @@ export class StateManager {
     if (!result.success) {
       throw new Error(
         `Merged state failed schema validation: ${result.error.message}. ` +
-          `Updates: ${JSON.stringify(updates)}`,
+          `Updates: ${JSON.stringify(updates)}`
       );
     }
 
@@ -534,7 +598,7 @@ export class StateManager {
   getFullState(): StateJson {
     if (!this.state) {
       throw new Error(
-        "State not loaded. Call init() or loadAndValidate() before getFullState().",
+        'State not loaded. Call init() or loadAndValidate() before getFullState().'
       );
     }
     return this.state;
@@ -549,11 +613,11 @@ export class StateManager {
     phase: number,
     task: number | undefined,
     status: string,
-    summary?: string,
+    summary?: string
   ): string {
     const ts = new Date().toISOString();
-    const taskPart = task !== undefined ? ` task=${task}` : "";
-    const summaryPart = summary ? ` summary="${summary}"` : "";
+    const taskPart = task !== undefined ? ` task=${task}` : '';
+    const summaryPart = summary ? ` summary="${summary}"` : '';
     return `<!-- CHECKPOINT phase=${phase}${taskPart} status=${status}${summaryPart} timestamp=${ts} -->`;
   }
 
@@ -569,13 +633,13 @@ export class StateManager {
     phase: number,
     task: number | undefined,
     status: string,
-    summary?: string,
+    summary?: string
   ): Promise<boolean> {
     const TAIL_SIZE = 4096;
 
     let content: string;
     try {
-      const fh = await open(this.progressLogPath, "r");
+      const fh = await open(this.progressLogPath, 'r');
       try {
         const fileStat = await fh.stat();
         const fileSize = fileStat.size;
@@ -584,17 +648,17 @@ export class StateManager {
           // Read only the last 4KB
           const buffer = Buffer.alloc(TAIL_SIZE);
           await fh.read(buffer, 0, TAIL_SIZE, fileSize - TAIL_SIZE);
-          content = buffer.toString("utf-8");
+          content = buffer.toString('utf-8');
 
           // If tail doesn't contain a CHECKPOINT, fall back to full read
-          if (!content.includes("<!-- CHECKPOINT ")) {
-            content = await readFile(this.progressLogPath, "utf-8");
+          if (!content.includes('<!-- CHECKPOINT ')) {
+            content = await readFile(this.progressLogPath, 'utf-8');
           }
         } else {
           // Small file: read all
           const buffer = Buffer.alloc(fileSize);
           await fh.read(buffer, 0, fileSize, 0);
-          content = buffer.toString("utf-8");
+          content = buffer.toString('utf-8');
         }
       } finally {
         await fh.close();
@@ -612,7 +676,7 @@ export class StateManager {
     }
     if (!lastMatch) return false;
 
-    const attrs = lastMatch[1] ?? "";
+    const attrs = lastMatch[1] ?? '';
 
     // Parse attributes from the last checkpoint
     const phaseMatch = attrs.match(/phase=(\d+)/);
@@ -637,10 +701,10 @@ export class StateManager {
   async appendToProgressLog(content: string): Promise<void> {
     let existing: string;
     try {
-      existing = await readFile(this.progressLogPath, "utf-8");
+      existing = await readFile(this.progressLogPath, 'utf-8');
     } catch (err) {
       throw new Error(
-        `Failed to read progress-log at ${this.progressLogPath}: ${(err as Error).message}`,
+        `Failed to read progress-log at ${this.progressLogPath}: ${(err as Error).message}`
       );
     }
 
@@ -669,7 +733,7 @@ export async function internalCheckpoint(
   tokenEstimate?: number,
   opts?: {
     regressTo?: number;
-  },
+  }
 ): Promise<{
   ok: boolean;
   nextDirective: NextDirective;
@@ -681,34 +745,39 @@ export async function internalCheckpoint(
 
   // 1. Prepare state updates (computed in memory, not yet written)
   const stateUpdates: Record<string, unknown> = { phase, status };
-  if (task !== undefined) stateUpdates["task"] = task;
+  if (task !== undefined) stateUpdates['task'] = task;
 
-  if (status === "NEEDS_REVISION") {
-    stateUpdates["iteration"] = (state.iteration ?? 0) + 1;
-  } else if (status === "PASS" || status === "COMPLETED") {
-    stateUpdates["iteration"] = 0;
+  if (status === 'NEEDS_REVISION') {
+    stateUpdates['iteration'] = (state.iteration ?? 0) + 1;
+  } else if (status === 'PASS' || status === 'COMPLETED') {
+    stateUpdates['iteration'] = 0;
   }
 
-  if (status === "REGRESS") {
+  if (status === 'REGRESS') {
     const newRegressionCount = (state.regressionCount ?? 0) + 1;
-    stateUpdates["regressionCount"] = newRegressionCount;
-    stateUpdates["iteration"] = 0;
+    stateUpdates['regressionCount'] = newRegressionCount;
+    stateUpdates['iteration'] = 0;
   }
 
   // Phase timing
   const timings = { ...(state.phaseTimings ?? {}) };
   const phaseKey = String(phase);
-  if (status === "IN_PROGRESS") {
+  if (status === 'IN_PROGRESS') {
     timings[phaseKey] = { startedAt: new Date().toISOString() };
-  } else if (status === "PASS" || status === "BLOCKED" || status === "COMPLETED") {
+  } else if (
+    status === 'PASS' ||
+    status === 'BLOCKED' ||
+    status === 'COMPLETED'
+  ) {
     const existing = timings[phaseKey];
     if (existing?.startedAt) {
       const now = new Date();
       existing.completedAt = now.toISOString();
-      existing.durationMs = now.getTime() - new Date(existing.startedAt).getTime();
+      existing.durationMs =
+        now.getTime() - new Date(existing.startedAt).getTime();
     }
   }
-  stateUpdates["phaseTimings"] = timings;
+  stateUpdates['phaseTimings'] = timings;
 
   // Token usage
   if (tokenEstimate !== undefined) {
@@ -717,12 +786,12 @@ export async function internalCheckpoint(
     const pk = String(phase);
     usage.byPhase = { ...usage.byPhase };
     usage.byPhase[pk] = (usage.byPhase[pk] ?? 0) + tokenEstimate;
-    stateUpdates["tokenUsage"] = usage;
+    stateUpdates['tokenUsage'] = usage;
   }
 
   // 2. Write progress-log (first)
   const line = sm.getCheckpointLine(phase, task, status, summary);
-  await sm.appendToProgressLog("\n" + line + "\n");
+  await sm.appendToProgressLog('\n' + line + '\n');
 
   // 3. Write state.json (second)
   try {
@@ -730,63 +799,90 @@ export async function internalCheckpoint(
   } catch (err) {
     // progress-log written but state.json failed -> mark dirty
     try {
-      const current = JSON.parse(await readFile(sm.stateFilePath, "utf-8"));
+      const current = JSON.parse(await readFile(sm.stateFilePath, 'utf-8'));
       current.dirty = true;
       current.updatedAt = new Date().toISOString();
-      await writeFile(sm.stateFilePath, JSON.stringify(current, null, 2), "utf-8");
+      await writeFile(
+        sm.stateFilePath,
+        JSON.stringify(current, null, 2),
+        'utf-8'
+      );
     } catch (e2: unknown) {
-      console.error(`[state] internalCheckpoint last-resort write failed: ${(e2 as Error).message}. state.json.tmp preserved for manual recovery.`);
+      console.error(
+        `[state] internalCheckpoint last-resort write failed: ${(e2 as Error).message}. state.json.tmp preserved for manual recovery.`
+      );
     }
     // Return a failed result with directive pointing to current phase
-    const fallbackDirective = computeNextDirective(phase, "BLOCKED", state);
+    const fallbackDirective = computeNextDirective(phase, 'BLOCKED', state);
     return {
       ok: false,
       nextDirective: fallbackDirective,
       stateUpdates,
-      error: "STATE_UPDATE_FAILED",
+      error: 'STATE_UPDATE_FAILED',
       message: `Progress-log updated but state.json write failed: ${(err as Error).message}. State marked as dirty.`,
     };
   }
 
   // 4. Post-commit side effects (non-critical, failures don't rollback)
-  if (status === "BLOCKED") {
-    const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ""}**Summary**: ${summary ?? "No summary"}\n**Timestamp**: ${new Date().toISOString()}\n`;
-    await sm.atomicWrite(join(sm.outputDir, "BLOCKED.md"), blockedContent);
+  if (status === 'BLOCKED') {
+    const blockedContent = `# BLOCKED\n\n**Phase**: ${phase}\n${task !== undefined ? `**Task**: ${task}\n` : ''}**Summary**: ${summary ?? 'No summary'}\n**Timestamp**: ${new Date().toISOString()}\n`;
+    await sm.atomicWrite(join(sm.outputDir, 'BLOCKED.md'), blockedContent);
   }
 
   // 5. Turbo mode guard: if Phase 3 PASS in turbo mode, check actual diff size
   //    If actual changes exceed turbo threshold, auto-upgrade to quick mode
   let effectiveState = state;
-  if (phase === 3 && status === "PASS" && state.mode === "turbo" && state.startCommit) {
-    const { execFile: ef } = await import("node:child_process");
-    const diffStat = await new Promise<string>((resolve) => {
-      ef("git", ["diff", "--stat", state.startCommit!], {
-        cwd: state.projectRoot,
-        timeout: 10_000,
-      }, (_err, stdout) => resolve(stdout ?? ""));
+  if (
+    phase === 3 &&
+    status === 'PASS' &&
+    state.mode === 'turbo' &&
+    state.startCommit
+  ) {
+    const { execFile: ef } = await import('node:child_process');
+    const diffStat = await new Promise<string>(resolve => {
+      ef(
+        'git',
+        ['diff', '--stat', state.startCommit!],
+        {
+          cwd: state.projectRoot,
+          timeout: 10_000,
+        },
+        (_err, stdout) => resolve(stdout ?? '')
+      );
     });
-    const statLines = diffStat.trim().split("\n");
-    const summaryLine = statLines[statLines.length - 1] ?? "";
+    const statLines = diffStat.trim().split('\n');
+    const summaryLine = statLines[statLines.length - 1] ?? '';
     const insertMatch = summaryLine.match(/(\d+) insertion/);
     const deleteMatch = summaryLine.match(/(\d+) deletion/);
-    const actualLines = (parseInt(insertMatch?.[1] ?? "0") || 0) + (parseInt(deleteMatch?.[1] ?? "0") || 0);
+    const actualLines =
+      (parseInt(insertMatch?.[1] ?? '0') || 0) +
+      (parseInt(deleteMatch?.[1] ?? '0') || 0);
     const actualFiles = Math.max(0, statLines.length - 1);
 
     if (actualLines > 30 || actualFiles > 3) {
-      await sm.atomicUpdate({ mode: "quick" });
-      effectiveState = { ...state, mode: "quick" };
+      await sm.atomicUpdate({ mode: 'quick' });
+      effectiveState = { ...state, mode: 'quick' };
       await sm.appendToProgressLog(
-        `\n<!-- MODE_UPGRADE turbo→quick reason="actual diff: ${actualLines} lines, ${actualFiles} files exceeds turbo threshold" -->\n`,
+        `\n<!-- MODE_UPGRADE turbo→quick reason="actual diff: ${actualLines} lines, ${actualFiles} files exceeds turbo threshold" -->\n`
       );
     }
   }
 
   // 6. Compute next phase directive
   // [P1-3 fix] Pass updated regressionCount so limit check uses current value
-  const stateForDirective = status === "REGRESS"
-    ? { ...effectiveState, regressionCount: (effectiveState.regressionCount ?? 0) + 1 }
-    : effectiveState;
-  const nextDirective = computeNextDirective(phase, status, stateForDirective, regressTo);
+  const stateForDirective =
+    status === 'REGRESS'
+      ? {
+          ...effectiveState,
+          regressionCount: (effectiveState.regressionCount ?? 0) + 1,
+        }
+      : effectiveState;
+  const nextDirective = computeNextDirective(
+    phase,
+    status,
+    stateForDirective,
+    regressTo
+  );
 
   return { ok: true, nextDirective, stateUpdates };
 }
