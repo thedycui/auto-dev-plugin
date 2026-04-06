@@ -465,6 +465,73 @@ cd mcp && npm run dev
 - Zod v4 (运行时 schema 校验)
 - Node.js fs/promises (原子文件操作)
 
+## CI/CD Pipeline
+
+This project uses GitHub Actions for continuous integration and automated releases.
+
+### Status Badges
+
+[![CI](https://github.com/thedycui/auto-dev-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/thedycui/auto-dev-plugin/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/thedycui/auto-dev-plugin)](https://github.com/thedycui/auto-dev-plugin/releases)
+
+### Pipeline Features
+
+- ✅ Automated testing on Node.js 20.x and 22.x
+- ✅ ESLint and Prettier code quality checks
+- ✅ TypeScript type checking
+- ✅ Security vulnerability scanning
+- ✅ Automated releases via git tags
+
+### Development Workflow
+
+1. Create feature branch from `master`
+2. Make changes and commit
+3. Push to GitHub and create pull request
+4. CI pipeline runs automatically
+5. Merge after all checks pass
+
+### Creating Releases
+
+To create a new release:
+
+```bash
+# Update version numbers
+git add .
+git commit -m "chore: bump version to X.Y.Z"
+
+# Create and push tag
+git tag vX.Y.Z
+git push github vX.Y.Z
+```
+
+GitHub Actions will automatically:
+- Run full test suite
+- Build release artifacts
+- Create GitHub Release
+- Generate changelog from commits
+
+### Local Development
+
+Install dependencies:
+```bash
+npm install
+```
+
+Run tests:
+```bash
+npm test
+```
+
+Run linting:
+```bash
+npm run lint
+```
+
+Format code:
+```bash
+npm run format
+```
+
 ## 许可
 
 MIT
