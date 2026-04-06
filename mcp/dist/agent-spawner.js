@@ -11,8 +11,8 @@
  *  - spawnAgent(options)        — generic claude -p spawner
  *  - spawnAgentWithRetry()      — retry wrapper with backoff
  */
-import { execFile, exec } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { execFile, exec } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 // ---------------------------------------------------------------------------
 // Claude CLI Path Resolution
 // ---------------------------------------------------------------------------
@@ -32,19 +32,21 @@ export async function resolveClaudePath() {
     // Tier 2: command -v claude (POSIX, R2-4)
     try {
         const resolved = await new Promise((resolve, reject) => {
-            exec("command -v claude", (err, stdout) => {
+            exec('command -v claude', (err, stdout) => {
                 if (err || !stdout.trim())
-                    reject(new Error("not found"));
+                    reject(new Error('not found'));
                 else
                     resolve(stdout.trim());
             });
         });
         return resolved;
     }
-    catch { /* fall through */ }
+    catch {
+        /* fall through */
+    }
     // Tier 3: hardcoded candidate paths
     const candidates = [
-        "/usr/local/bin/claude",
+        '/usr/local/bin/claude',
         `${process.env.HOME}/.npm-global/bin/claude`,
         `${process.env.HOME}/.claude/local/claude`,
     ];
@@ -53,10 +55,12 @@ export async function resolveClaudePath() {
             await stat(p);
             return p;
         }
-        catch { /* try next */ }
+        catch {
+            /* try next */
+        }
     }
     // Tier 4: npx fallback (shell: true required)
-    return "npx --yes @anthropic-ai/claude-code";
+    return 'npx --yes @anthropic-ai/claude-code';
 }
 /**
  * Cached wrapper for resolveClaudePath.
@@ -81,18 +85,20 @@ export function resetClaudePathCache() {
  * Uses execFile for direct paths, exec with shell for npx paths.
  */
 export async function spawnAgent(options) {
-    const { prompt, model = "sonnet", timeout = 300_000, maxBuffer = 4 * 1024 * 1024, jsonSchema, cwd, } = options;
+    const { prompt, model = 'sonnet', timeout = 300_000, maxBuffer = 4 * 1024 * 1024, jsonSchema, cwd, } = options;
     const resolved = await getClaudePath();
-    const useShell = resolved.startsWith("npx");
+    const useShell = resolved.startsWith('npx');
     const args = [
-        "-p", prompt,
-        "--model", model,
-        "--dangerously-skip-permissions",
-        "--no-session-persistence",
+        '-p',
+        prompt,
+        '--model',
+        model,
+        '--dangerously-skip-permissions',
+        '--no-session-persistence',
     ];
     if (jsonSchema) {
-        args.push("--output-format", "json");
-        args.push("--json-schema", JSON.stringify(jsonSchema));
+        args.push('--output-format', 'json');
+        args.push('--json-schema', JSON.stringify(jsonSchema));
     }
     const spawnOpts = {
         timeout,
@@ -101,7 +107,7 @@ export async function spawnAgent(options) {
     if (cwd) {
         spawnOpts.cwd = cwd;
     }
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
         const callback = (err, stdout, stderr) => {
             const exitCode = err ? (err.code ?? 1) : 0;
             let parsed;
@@ -119,16 +125,16 @@ export async function spawnAgent(options) {
                 }
             }
             resolve({
-                stdout: stdout || "",
-                stderr: stderr || "",
-                exitCode: typeof exitCode === "number" ? exitCode : 1,
+                stdout: stdout || '',
+                stderr: stderr || '',
+                exitCode: typeof exitCode === 'number' ? exitCode : 1,
                 parsed,
                 crashed,
             });
         };
         if (useShell) {
-            const fullCmd = `${resolved} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(" ")}`;
-            exec(fullCmd, { ...spawnOpts, shell: "/bin/sh" }, (err, stdout, stderr) => {
+            const fullCmd = `${resolved} ${args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ')}`;
+            exec(fullCmd, { ...spawnOpts, shell: '/bin/sh' }, (err, stdout, stderr) => {
                 callback(err, stdout, stderr);
             });
         }
@@ -155,13 +161,13 @@ export async function spawnAgentWithRetry(options, maxRetries = 1, crashDetector
             return result;
         }
         if (attempt < maxRetries) {
-            await new Promise((r) => setTimeout(r, 3000));
+            await new Promise(r => setTimeout(r, 3000));
             continue;
         }
         // Exhausted retries, return last crash result
         return result;
     }
     // Unreachable
-    throw new Error("unreachable");
+    throw new Error('unreachable');
 }
 //# sourceMappingURL=agent-spawner.js.map

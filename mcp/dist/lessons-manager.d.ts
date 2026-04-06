@@ -1,4 +1,4 @@
-import type { LessonEntry } from "./types.js";
+import type { LessonEntry } from './types.js';
 export declare function applyDecay(entry: LessonEntry, now?: Date): number;
 export declare class LessonsManager {
     private readonly filePath;
@@ -13,7 +13,7 @@ export declare class LessonsManager {
     get(phase?: number, category?: string): Promise<LessonEntry[]>;
     feedback(feedbacks: Array<{
         id: string;
-        verdict: "helpful" | "not_applicable" | "incorrect";
+        verdict: 'helpful' | 'not_applicable' | 'incorrect';
     }>, meta: {
         phase: number;
         topic: string;

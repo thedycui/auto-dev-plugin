@@ -5,7 +5,7 @@
  * diff_check (plan vs actual file comparison) and rollback (precise file-level revert).
  * Simple git commands (status, branch, commit, stash) are left to Claude via bash.
  */
-import type { GitInfo, DiffCheckOutput } from "./types.js";
+import type { GitInfo, DiffCheckOutput } from './types.js';
 export declare class GitManager {
     private static COMMIT_REF_RE;
     private readonly cwd;

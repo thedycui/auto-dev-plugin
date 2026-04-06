@@ -7,8 +7,8 @@
  *  - Detect project tech stack from build files + stacks/*.md
  *  - Manage progress-log.md (append, checkpoint dedup)
  */
-import type { StateJson, StackInfo } from "./types.js";
-import type { NextDirective } from "./phase-enforcer.js";
+import type { StateJson, StackInfo } from './types.js';
+import type { NextDirective } from './phase-enforcer.js';
 export declare function extractDocSummary(content: string, maxLines: number): string;
 export declare function extractTaskList(content: string): string;
 /**
@@ -61,7 +61,7 @@ export declare class StateManager {
     /** Scan project root for build files and resolve stack info from stacks/*.md. */
     detectStack(): Promise<StackInfo>;
     /** Create the output directory, write initial state.json (atomic) and progress-log header. */
-    init(mode: "full" | "quick" | "turbo", stack: StackInfo, startPhase?: number): Promise<void>;
+    init(mode: 'full' | 'quick' | 'turbo', stack: StackInfo, startPhase?: number): Promise<void>;
     /**
      * Write content to a temporary file, then rename to the target path.
      * POSIX rename is atomic on the same filesystem.

@@ -7,19 +7,19 @@
  *
  * No agent spawning happens here — the orchestrator only computes prompts.
  */
-import { execFile } from "node:child_process";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve, dirname, relative } from "node:path";
-import { fileURLToPath } from "node:url";
-import { buildRevisionPrompt, buildPreviousAttemptSummary, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from "./orchestrator-prompts.js";
-import { StateManager, extractTaskList, effortKeyForStep, hashContent } from "./state-manager.js";
-import { validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, validateAcIntegrity, } from "./phase-enforcer.js";
-import { runStructuralAssertions } from "./ac-runner.js";
-import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests } from "./ac-test-binding.js";
-import { AcceptanceCriteriaSchema } from "./ac-schema.js";
-import { evaluateTribunal } from "./tribunal.js";
-import { TemplateRenderer } from "./template-renderer.js";
-import { EFFORT_LIMITS, StepEffortSchema } from "./types.js";
+import { execFile } from 'node:child_process';
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { join, resolve, dirname, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildRevisionPrompt, buildPreviousAttemptSummary, translateFailureToFeedback, containsFrameworkTerms, parseApproachPlan, extractOneLineReason, buildCircuitBreakPrompt, } from './orchestrator-prompts.js';
+import { StateManager, extractTaskList, effortKeyForStep, hashContent, } from './state-manager.js';
+import { validatePhase1ReviewArtifact, validatePhase2ReviewArtifact, isTddExemptTask, validateAcIntegrity, } from './phase-enforcer.js';
+import { runStructuralAssertions } from './ac-runner.js';
+import { discoverAcBindings, validateAcBindingCoverage, runAcBoundTests, } from './ac-test-binding.js';
+import { AcceptanceCriteriaSchema } from './ac-schema.js';
+import { evaluateTribunal } from './tribunal.js';
+import { TemplateRenderer } from './template-renderer.js';
+import { EFFORT_LIMITS, StepEffortSchema } from './types.js';
 // ---------------------------------------------------------------------------
 // Design Doc Compliance Check
 // ---------------------------------------------------------------------------
@@ -37,9 +37,10 @@ export function checkDesignDocCompliance(content) {
     }
     // Check solution comparison: look for "方案" with A/B/1/2 or comparison table
     const hasSolutionComparison = /方案\s*[A-Z12]|方案选型|方案对比|方案设计/.test(content) &&
-        (content.includes("|") && /\|.*方案.*\|/.test(content)); // table with "方案"
+        content.includes('|') &&
+        /\|.*方案.*\|/.test(content); // table with "方案"
     if (!hasSolutionComparison) {
-        missing.push("缺少方案对比（需要 ≥2 个方案的对比表格）");
+        missing.push('缺少方案对比（需要 ≥2 个方案的对比表格）');
     }
     return { compliant: missing.length === 0, missing };
 }
@@ -54,49 +55,64 @@ export const PHASE_SEQUENCE = {
     turbo: [3],
 };
 const STEP_AGENTS = {
-    "1a": "auto-dev:auto-dev-architect",
-    "1b": "auto-dev:auto-dev-reviewer",
-    "1c": "auto-dev:auto-dev-architect",
-    "2a": "auto-dev:auto-dev-architect",
-    "2b": "auto-dev:auto-dev-reviewer",
-    "2c": "auto-dev:auto-dev-architect",
-    "3": "auto-dev:auto-dev-developer",
-    "4a": "auto-dev:auto-dev-developer",
-    "5a": "auto-dev:auto-dev-test-architect",
-    "5b": "auto-dev:auto-dev-developer",
-    "5c": "auto-dev:auto-dev-developer",
-    "6": "auto-dev:auto-dev-acceptance-validator",
-    "7": "auto-dev:auto-dev-reviewer",
-    "8a": "auto-dev:auto-dev-developer",
-    "8b": "auto-dev:auto-dev-developer",
-    "8c": "auto-dev:auto-dev-developer",
-    "8d": "auto-dev:auto-dev-developer",
+    '1a': 'auto-dev:auto-dev-architect',
+    '1b': 'auto-dev:auto-dev-reviewer',
+    '1c': 'auto-dev:auto-dev-architect',
+    '2a': 'auto-dev:auto-dev-architect',
+    '2b': 'auto-dev:auto-dev-reviewer',
+    '2c': 'auto-dev:auto-dev-architect',
+    '3': 'auto-dev:auto-dev-developer',
+    '4a': 'auto-dev:auto-dev-developer',
+    '5a': 'auto-dev:auto-dev-test-architect',
+    '5b': 'auto-dev:auto-dev-developer',
+    '5c': 'auto-dev:auto-dev-developer',
+    '6': 'auto-dev:auto-dev-acceptance-validator',
+    '7': 'auto-dev:auto-dev-reviewer',
+    '8a': 'auto-dev:auto-dev-developer',
+    '8b': 'auto-dev:auto-dev-developer',
+    '8c': 'auto-dev:auto-dev-developer',
+    '8d': 'auto-dev:auto-dev-developer',
 };
 /** Ordered step transitions (happy path) */
-const STEP_ORDER = ["1a", "1b", "2a", "2b", "3", "4a", "5a", "5b", "6", "7", "8a", "8b", "8c", "8d"];
+const STEP_ORDER = [
+    '1a',
+    '1b',
+    '2a',
+    '2b',
+    '3',
+    '4a',
+    '5a',
+    '5b',
+    '6',
+    '7',
+    '8a',
+    '8b',
+    '8c',
+    '8d',
+];
 /** Map revision steps back to their review counterparts for step progression */
 const REVISION_TO_REVIEW = {
-    "1c": "1b",
-    "2c": "2b",
-    "5c": "5b",
+    '1c': '1b',
+    '2c': '2b',
+    '5c': '5b',
 };
-const ISOLATION_FOOTER = "\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n";
-const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills", "auto-dev");
+const ISOLATION_FOOTER = '\n\n---\n完成后不需要做其他操作。直接完成任务即可。\n';
+const SKILLS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'auto-dev');
 // ---------------------------------------------------------------------------
 // Step Prerequisites (P1-3)
 // ---------------------------------------------------------------------------
 /** Map of step → required artifact files (relative to outputDir) */
 export const STEP_PREREQUISITES = {
-    "1b": ["design.md"],
-    "1c": ["design.md", "design-review.md"],
-    "2a": ["design.md"],
-    "2b": ["plan.md"],
-    "2c": ["plan.md", "plan-review.md"],
-    "3": ["plan.md"],
-    "4a": [],
-    "5a": [],
-    "5b": ["e2e-test-cases.md"],
-    "5c": ["e2e-test-cases.md"],
+    '1b': ['design.md'],
+    '1c': ['design.md', 'design-review.md'],
+    '2a': ['design.md'],
+    '2b': ['plan.md'],
+    '2c': ['plan.md', 'plan-review.md'],
+    '3': ['plan.md'],
+    '4a': [],
+    '5a': [],
+    '5b': ['e2e-test-cases.md'],
+    '5c': ['e2e-test-cases.md'],
 };
 /**
  * Check if required prerequisites exist for the given step.
@@ -120,18 +136,18 @@ export async function checkPrerequisites(step, outputDir) {
  * Returns an error string if validation fails, or null if valid.
  */
 export function validateResetRequest(state, targetPhase, reason) {
-    if (state.status === "COMPLETED") {
-        return "Cannot reset a COMPLETED project.";
+    if (state.status === 'COMPLETED') {
+        return 'Cannot reset a COMPLETED project.';
     }
     if (targetPhase > state.phase) {
         return `targetPhase (${targetPhase}) must not exceed current phase (${state.phase}). Forward jumps are forbidden.`;
     }
-    if (!reason || reason.trim() === "") {
-        return "reason must be a non-empty string.";
+    if (!reason || reason.trim() === '') {
+        return 'reason must be a non-empty string.';
     }
     const validPhases = PHASE_SEQUENCE[state.mode] ?? [];
     if (!validPhases.includes(targetPhase)) {
-        return `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(", ")}).`;
+        return `targetPhase (${targetPhase}) is not in PHASE_SEQUENCE for mode "${state.mode}" (${validPhases.join(', ')}).`;
     }
     return null;
 }
@@ -139,11 +155,11 @@ export function validateResetRequest(state, targetPhase, reason) {
 // Model Routing
 // ---------------------------------------------------------------------------
 export function getModel(phase, costMode) {
-    if (costMode === "beast")
-        return "opus";
+    if (costMode === 'beast')
+        return 'opus';
     if ([1, 3, 4].includes(phase))
-        return "opus"; // critical phases
-    return "sonnet";
+        return 'opus'; // critical phases
+    return 'sonnet';
 }
 // ---------------------------------------------------------------------------
 // File Helpers
@@ -159,7 +175,7 @@ export async function fileExists(path) {
 }
 export async function readFileSafe(path) {
     try {
-        return await readFile(path, "utf-8");
+        return await readFile(path, 'utf-8');
     }
     catch {
         return null;
@@ -172,32 +188,34 @@ export async function readFileSafe(path) {
 async function computeTestFilesHash(projectRoot) {
     try {
         const result = await shell("git ls-files | grep -E '\\.(test|spec)\\.(ts|js|tsx|jsx)$|__tests__/' | sort", projectRoot, 10_000);
-        const testFiles = result.stdout.trim().split("\n").filter(Boolean);
+        const testFiles = result.stdout.trim().split('\n').filter(Boolean);
         if (testFiles.length === 0)
-            return "";
+            return '';
         const contents = await Promise.all(testFiles.map(f => readFileSafe(join(projectRoot, f))));
-        const combined = testFiles.map((f, i) => `${f}:${contents[i] ?? ""}`).join("\n");
+        const combined = testFiles
+            .map((f, i) => `${f}:${contents[i] ?? ''}`)
+            .join('\n');
         return hashContent(combined);
     }
     catch {
-        return "";
+        return '';
     }
 }
 // ---------------------------------------------------------------------------
 // Shell Helper
 // ---------------------------------------------------------------------------
 export function shell(cmd, cwd, timeout = 300_000) {
-    return new Promise((resolve) => {
-        execFile("sh", ["-c", cmd], {
+    return new Promise(resolve => {
+        execFile('sh', ['-c', cmd], {
             cwd,
             timeout,
             maxBuffer: 5 * 1024 * 1024,
         }, (err, stdout, stderr) => {
             const exitCode = err ? (err.code ?? 1) : 0;
             resolve({
-                stdout: stdout || "",
-                stderr: stderr || "",
-                exitCode: typeof exitCode === "number" ? exitCode : 1,
+                stdout: stdout || '',
+                stderr: stderr || '',
+                exitCode: typeof exitCode === 'number' ? exitCode : 1,
             });
         });
     });
@@ -217,34 +235,37 @@ export async function renderPrompt(promptFile, variables, extraContext) {
 export function parseTribunalResult(toolResult) {
     const text = toolResult.content[0]?.text;
     if (!text) {
-        return { passed: false, feedback: "Tribunal returned empty result." };
+        return { passed: false, feedback: 'Tribunal returned empty result.' };
     }
     let parsed;
     try {
         parsed = JSON.parse(text);
     }
     catch {
-        return { passed: false, feedback: "Failed to parse tribunal result." };
+        return { passed: false, feedback: 'Failed to parse tribunal result.' };
     }
-    if (parsed.status === "TRIBUNAL_PASS") {
-        return { passed: true, feedback: "" };
+    if (parsed.status === 'TRIBUNAL_PASS') {
+        return { passed: true, feedback: '' };
     }
-    if (parsed.status === "TRIBUNAL_FAIL" || parsed.status === "TRIBUNAL_OVERRIDDEN") {
+    if (parsed.status === 'TRIBUNAL_FAIL' ||
+        parsed.status === 'TRIBUNAL_OVERRIDDEN') {
         const detail = parsed.issues
             ? JSON.stringify(parsed.issues)
-            : (parsed.message ?? "Tribunal failed.");
-        const feedback = translateFailureToFeedback(parsed.status === "TRIBUNAL_FAIL" ? "TRIBUNAL_FAIL" : "TRIBUNAL_OVERRIDDEN", detail);
+            : (parsed.message ?? 'Tribunal failed.');
+        const feedback = translateFailureToFeedback(parsed.status === 'TRIBUNAL_FAIL'
+            ? 'TRIBUNAL_FAIL'
+            : 'TRIBUNAL_OVERRIDDEN', detail);
         return { passed: false, feedback };
     }
     // TRIBUNAL_PENDING (crash)
     return {
         passed: false,
-        feedback: translateFailureToFeedback("TRIBUNAL_FAIL", parsed.message ?? "Tribunal process crashed."),
+        feedback: translateFailureToFeedback('TRIBUNAL_FAIL', parsed.message ?? 'Tribunal process crashed.'),
     };
 }
 async function readStepState(stateFilePath) {
     try {
-        const raw = JSON.parse(await readFile(stateFilePath, "utf-8"));
+        const raw = JSON.parse(await readFile(stateFilePath, 'utf-8'));
         return {
             step: raw.step ?? null,
             stepIteration: raw.stepIteration ?? 0,
@@ -253,7 +274,12 @@ async function readStepState(stateFilePath) {
         };
     }
     catch {
-        return { step: null, stepIteration: 0, lastValidation: null, approachState: null };
+        return {
+            step: null,
+            stepIteration: 0,
+            lastValidation: null,
+            approachState: null,
+        };
     }
 }
 // ---------------------------------------------------------------------------
@@ -261,19 +287,33 @@ async function readStepState(stateFilePath) {
 // ---------------------------------------------------------------------------
 /** Extract the phase number from a step string (e.g. "1a" -> 1, "3" -> 3) */
 export function phaseForStep(step) {
-    return parseInt(step.replace(/[a-z]/g, ""), 10);
+    return parseInt(step.replace(/[a-z]/g, ''), 10);
 }
 /** Return the first sub-step for a given phase */
 export function firstStepForPhase(phase) {
     const map = {
-        1: "1a", 2: "2a", 3: "3", 4: "4a", 5: "5a", 6: "6", 7: "7", 8: "8a",
+        1: '1a',
+        2: '2a',
+        3: '3',
+        4: '4a',
+        5: '5a',
+        6: '6',
+        7: '7',
+        8: '8a',
     };
     return map[phase] ?? String(phase);
 }
 /** Return the last sub-step for a given phase (used to advance past a completed phase) */
 export function lastStepForPhase(phase) {
     const map = {
-        1: "1b", 2: "2b", 3: "3", 4: "4a", 5: "5b", 6: "6", 7: "7", 8: "8d",
+        1: '1b',
+        2: '2b',
+        3: '3',
+        4: '4a',
+        5: '5b',
+        6: '6',
+        7: '7',
+        8: '8d',
     };
     return map[phase] ?? String(phase);
 }
@@ -304,18 +344,21 @@ export function computeNextStep(currentStep, phases, skipSteps) {
 // ---------------------------------------------------------------------------
 /** Extract the goal for a given step from plan.md */
 async function getStepGoal(step, outputDir) {
-    const planPath = join(outputDir, "plan.md");
+    const planPath = join(outputDir, 'plan.md');
     const content = await readFileSafe(planPath);
     if (!content)
         return `完成步骤 ${step} 的任务`;
     // Try to find a task section matching the step number
-    const phase = parseInt(step.replace(/[a-z]/g, ""), 10);
+    const phase = parseInt(step.replace(/[a-z]/g, ''), 10);
     // Look for "## Task N:" or similar patterns
-    const taskRegex = new RegExp(`## Task\\s+${phase}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`, "i");
+    const taskRegex = new RegExp(`## Task\\s+${phase}[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)`, 'i');
     const match = content.match(taskRegex);
     if (match) {
         // Extract the description line (first line after heading)
-        const descLine = match[1].split("\n").map((l) => l.trim()).filter((l) => l.length > 0)[0];
+        const descLine = match[1]
+            .split('\n')
+            .map(l => l.trim())
+            .filter(l => l.length > 0)[0];
         if (descLine)
             return descLine;
     }
@@ -325,16 +368,16 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
     let approachState = stepState.approachState;
     // First failure with no approach state: try to parse approach-plan.md
     if (!approachState) {
-        const planPath = join(outputDir, "approach-plan.md");
+        const planPath = join(outputDir, 'approach-plan.md');
         const planContent = await readFileSafe(planPath);
         if (!planContent) {
-            return { action: "CONTINUE" };
+            return { action: 'CONTINUE' };
         }
         const approaches = parseApproachPlan(planContent);
         if (!approaches) {
             return {
-                action: "CONTINUE",
-                planFeedback: "你的 approach-plan.md 缺少备选方案。请补充至少 1 个与主方案技术路径有本质区别的备选方案（换参数/换 flag 不算，换工具/换思路才算）。",
+                action: 'CONTINUE',
+                planFeedback: '你的 approach-plan.md 缺少备选方案。请补充至少 1 个与主方案技术路径有本质区别的备选方案（换参数/换 flag 不算，换工具/换思路才算）。',
             };
         }
         approachState = {
@@ -347,12 +390,12 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
     // Increment current approach failCount
     const current = approachState.approaches[approachState.currentIndex];
     if (!current) {
-        return { action: "ALL_EXHAUSTED" };
+        return { action: 'ALL_EXHAUSTED' };
     }
     current.failCount++;
     // Below threshold: continue with revision
     if (current.failCount < MAX_APPROACH_FAILURES) {
-        return { action: "CONTINUE", approachState };
+        return { action: 'CONTINUE', approachState };
     }
     // Threshold reached: circuit break current approach
     approachState.failedApproaches.push({
@@ -363,7 +406,7 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
     approachState.currentIndex++;
     // Check if there are more approaches
     if (approachState.currentIndex >= approachState.approaches.length) {
-        return { action: "ALL_EXHAUSTED" };
+        return { action: 'ALL_EXHAUSTED' };
     }
     const next = approachState.approaches[approachState.currentIndex];
     const goal = await getStepGoal(step, outputDir);
@@ -375,7 +418,7 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
         outputDir,
     });
     return {
-        action: "CIRCUIT_BREAK",
+        action: 'CIRCUIT_BREAK',
         prompt,
         approachState,
         failedApproach: current.summary,
@@ -391,7 +434,7 @@ export async function handleApproachFailure(stepState, step, outputDir, feedback
  * it's a pre-existing issue — returns null (pass through).
  * If it's a new failure introduced by our changes, returns the failure result.
  */
-async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = "BUILD_FAILED", worktreeRoot) {
+async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = 'BUILD_FAILED', worktreeRoot) {
     const result = await shell(cmd, projectRoot);
     if (result.exitCode === 0)
         return null; // Success, no issue
@@ -416,7 +459,7 @@ async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = 
         }
         else {
             // Non-worktree mode: use git stash (legacy behavior)
-            const stashResult = await shell("git stash --include-untracked -q", projectRoot, 10_000);
+            const stashResult = await shell('git stash --include-untracked -q', projectRoot, 10_000);
             if (stashResult.exitCode === 0) {
                 try {
                     const baselineResult = await shell(cmd, projectRoot, 300_000);
@@ -426,7 +469,7 @@ async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = 
                     }
                 }
                 finally {
-                    await shell("git stash pop -q", projectRoot, 10_000);
+                    await shell('git stash pop -q', projectRoot, 10_000);
                 }
             }
             // git stash failed (no git repo, nothing to stash, etc.) — skip baseline check
@@ -434,7 +477,7 @@ async function checkBuildWithBaseline(cmd, projectRoot, startCommit, failType = 
     }
     return {
         passed: false,
-        feedback: translateFailureToFeedback(failType, result.stdout + "\n" + result.stderr),
+        feedback: translateFailureToFeedback(failType, result.stdout + '\n' + result.stderr),
     };
 }
 // ---------------------------------------------------------------------------
@@ -455,7 +498,7 @@ async function handleTribunalCrash(ctx, crashRaw) {
             if (parsed.crashInfo) {
                 const ci = parsed.crashInfo;
                 const timestamp = new Date().toISOString();
-                crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} category="${ci.errorCategory}" exitCode="${ci.exitCode ?? "N/A"}" retryable="${ci.isRetryable}" timestamp="${timestamp}" -->`;
+                crashEvent = `<!-- TRIBUNAL_CRASH phase=${state.phase} category="${ci.errorCategory}" exitCode="${ci.exitCode ?? 'N/A'}" retryable="${ci.isRetryable}" timestamp="${timestamp}" -->`;
                 if (ci.stderrSnippet) {
                     const safeSnippet = ci.stderrSnippet
                         .replace(/"/g, '&quot;')
@@ -465,14 +508,16 @@ async function handleTribunalCrash(ctx, crashRaw) {
                 }
                 if (ci.stderrFull) {
                     const crashLogPath = join(outputDir, `.tribunal-crash-phase${state.phase}.log`);
-                    await writeFile(crashLogPath, `[${timestamp}] TRIBUNAL_CRASH category=${ci.errorCategory} exitCode=${ci.exitCode ?? "N/A"}\n\nSTDERR:\n${ci.stderrFull}\n\nERROR: ${ci.errMessage}\n`, "utf-8");
+                    await writeFile(crashLogPath, `[${timestamp}] TRIBUNAL_CRASH category=${ci.errorCategory} exitCode=${ci.exitCode ?? 'N/A'}\n\nSTDERR:\n${ci.stderrFull}\n\nERROR: ${ci.errMessage}\n`, 'utf-8');
                     crashEvent += `\n<!-- TRIBUNAL_CRASH_LOG path="${crashLogPath}" -->`;
                 }
             }
         }
         await sm.appendToProgressLog(crashEvent);
     }
-    catch { /* best-effort */ }
+    catch {
+        /* best-effort */
+    }
 }
 /**
  * Handle tribunal subagent request — delegate to subagent for tribunal execution.
@@ -488,8 +533,8 @@ async function handleTribunalSubagent(ctx, phaseKey, count, currentStep, tribuna
         agent: null,
         prompt: null,
         escalation: {
-            reason: "tribunal_subagent",
-            lastFeedback: "裁决已委托给 subagent，请读取 digestPath 文件执行裁决后调用 auto_dev_tribunal_verdict 提交。",
+            reason: 'tribunal_subagent',
+            lastFeedback: '裁决已委托给 subagent，请读取 digestPath 文件执行裁决后调用 auto_dev_tribunal_verdict 提交。',
             digest: tribunalResult.digest,
             digestHash: tribunalResult.digestHash,
             digestPath: tribunalResult.digestPath,
@@ -503,10 +548,10 @@ async function handleTribunalSubagent(ctx, phaseKey, count, currentStep, tribuna
 async function handleTribunalParseFailure(ctx, phaseKey, count, currentStep, tribunalResult) {
     const { sm, state, outputDir } = ctx;
     // [FIX-4] Write rawOutput to file instead of returning inline (can be 2MB+, causes MCP overflow).
-    let rawOutputRef = "";
+    let rawOutputRef = '';
     if (tribunalResult.rawOutput) {
         const rawOutputPath = join(outputDir, `tribunal-raw-phase${phaseKey}.txt`);
-        await writeFile(rawOutputPath, tribunalResult.rawOutput, "utf-8");
+        await writeFile(rawOutputPath, tribunalResult.rawOutput, 'utf-8');
         rawOutputRef = ` 原始输出已保存到 ${rawOutputPath}，请读取后提取 verdict 和 issues。`;
     }
     await sm.atomicUpdate({
@@ -518,7 +563,7 @@ async function handleTribunalParseFailure(ctx, phaseKey, count, currentStep, tri
         agent: null,
         prompt: null,
         escalation: {
-            reason: "tribunal_parse_failure",
+            reason: 'tribunal_parse_failure',
             lastFeedback: `Tribunal 返回了裁决内容但 JSON 格式不合法。${rawOutputRef}然后调用 auto_dev_tribunal_verdict 提交。`,
             digestHash: tribunalResult.digestHash,
         },
@@ -532,10 +577,10 @@ async function handleTribunalCrashEscalation(ctx, phaseKey, count, currentStep, 
     const { sm, state, outputDir } = ctx;
     await handleTribunalCrash(ctx, tribunalResult.crashRaw);
     // [FIX-4b] Write digest to file to avoid MCP overflow
-    let digestRef = "";
+    let digestRef = '';
     if (tribunalResult.digest) {
         const digestPath = join(outputDir, `tribunal-digest-phase${phaseKey}.txt`);
-        await writeFile(digestPath, tribunalResult.digest, "utf-8");
+        await writeFile(digestPath, tribunalResult.digest, 'utf-8');
         digestRef = ` Digest 已保存到 ${digestPath}`;
     }
     await sm.atomicUpdate({
@@ -547,7 +592,7 @@ async function handleTribunalCrashEscalation(ctx, phaseKey, count, currentStep, 
         agent: null,
         prompt: null,
         escalation: {
-            reason: "tribunal_crashed",
+            reason: 'tribunal_crashed',
             lastFeedback: `Tribunal 进程崩溃，需要 fallback 裁决。${digestRef}`,
             digestHash: tribunalResult.digestHash,
         },
@@ -562,11 +607,14 @@ async function handleTribunalEscalation(ctx, phaseKey, currentStep, feedback) {
     const escCount = state.phaseEscalateCount?.[phaseKey] ?? 0;
     if (escCount >= 2) {
         console.error(`[orchestrator] tribunal escalation BLOCKED: step=${currentStep} phase=${phaseKey} escCount=${escCount + 1}`);
-        await sm.atomicUpdate({ status: "BLOCKED" });
+        await sm.atomicUpdate({ status: 'BLOCKED' });
         return {
-            done: false, step: currentStep, agent: null, prompt: null,
+            done: false,
+            step: currentStep,
+            agent: null,
+            prompt: null,
             escalation: {
-                reason: "tribunal_max_escalations",
+                reason: 'tribunal_max_escalations',
                 lastFeedback: `Phase ${phaseKey} 已 ${escCount + 1} 次 ESCALATE，需要人工介入。`,
             },
             message: `Phase ${phaseKey} 多次 ESCALATE，BLOCKED。`,
@@ -574,18 +622,25 @@ async function handleTribunalEscalation(ctx, phaseKey, currentStep, feedback) {
     }
     console.error(`[orchestrator] tribunal escalation regress: step=${currentStep} phase=${phaseKey} escCount=${escCount + 1}`);
     await sm.atomicUpdate({
-        phase: 3, status: "IN_PROGRESS",
-        step: "3", stepIteration: 0, lastValidation: "ESCALATE_REGRESS", approachState: null,
+        phase: 3,
+        status: 'IN_PROGRESS',
+        step: '3',
+        stepIteration: 0,
+        lastValidation: 'ESCALATE_REGRESS',
+        approachState: null,
         tribunalSubmits: {},
-        phaseEscalateCount: { ...(state.phaseEscalateCount ?? {}), [phaseKey]: escCount + 1 },
+        phaseEscalateCount: {
+            ...(state.phaseEscalateCount ?? {}),
+            [phaseKey]: escCount + 1,
+        },
     });
-    const prompt = await buildTaskForStep("3", outputDir, projectRoot, topic, buildCmd, testCmd, feedback, ctx.getExtraVars("3"));
-    const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    const prompt = await buildTaskForStep('3', outputDir, projectRoot, topic, buildCmd, testCmd, feedback, ctx.getExtraVars('3'));
+    const planContent = await readFileSafe(join(outputDir, 'plan.md'));
     const tasks = parseTaskList(planContent);
     return {
         done: false,
-        step: "3",
-        agent: STEP_AGENTS["3"] ?? null,
+        step: '3',
+        agent: STEP_AGENTS['3'] ?? null,
         prompt,
         tasks,
         message: `Phase ${phaseKey} tribunal 3 次未通过，回退到 Phase 3 修复。`,
@@ -593,214 +648,267 @@ async function handleTribunalEscalation(ctx, phaseKey, currentStep, feedback) {
 }
 export async function validateStep(step, outputDir, projectRoot, buildCmd, testCmd, sm, state, topic, worktreeRoot) {
     switch (step) {
-        case "1a": {
-            const designPath = join(outputDir, "design.md");
+        case '1a': {
+            const designPath = join(outputDir, 'design.md');
             const content = await readFileSafe(designPath);
             if (!content || content.length < 100) {
                 return {
                     passed: false,
-                    feedback: "design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。",
+                    feedback: 'design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。',
                 };
             }
             // Record design.md hash for 1c change detection
             await sm.atomicUpdate({
-                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "design.md": hashContent(content) },
+                lastArtifactHashes: {
+                    ...(state.lastArtifactHashes ?? {}),
+                    'design.md': hashContent(content),
+                },
             });
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "1b": {
-            const reviewPath = join(outputDir, "design-review.md");
+        case '1b': {
+            const reviewPath = join(outputDir, 'design-review.md');
             const content = await readFileSafe(reviewPath);
             const validation = validatePhase1ReviewArtifact(content);
             if (!validation.valid) {
-                return { passed: false, feedback: validation.errors.join(" ") };
+                return { passed: false, feedback: validation.errors.join(' ') };
             }
             if (content) {
                 // Extract only the 结论 section to avoid false positives from historical/example text
                 const conclusionMatch = content.match(/##\s*结论\s*\n([\s\S]*?)(?=\n##|$)/i);
-                const conclusionText = conclusionMatch?.[1]?.trim() ?? "";
+                const conclusionText = conclusionMatch?.[1]?.trim() ?? '';
                 if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(conclusionText)) {
                     const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues|P0|P1)\s*\n([\s\S]*?)(?=\n##|$)/i);
-                    const feedback = feedbackMatch?.[1]?.trim() ?? `设计审查未通过（结论：${conclusionText || "NEEDS_REVISION"}），请根据审查意见修订设计方案。`;
+                    const feedback = feedbackMatch?.[1]?.trim() ??
+                        `设计审查未通过（结论：${conclusionText || 'NEEDS_REVISION'}），请根据审查意见修订设计方案。`;
                     return { passed: false, feedback };
                 }
                 if (!conclusionMatch) {
                     // No 结论 section found — fall back to full-text scan but warn
                     if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
-                        return { passed: false, feedback: "design-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。" };
+                        return {
+                            passed: false,
+                            feedback: "design-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。",
+                        };
                     }
                 }
             }
             // Record design.md hash at 1b validation point for 1c change detection
-            const designContent1b = await readFileSafe(join(outputDir, "design.md"));
+            const designContent1b = await readFileSafe(join(outputDir, 'design.md'));
             await sm.atomicUpdate({
-                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "design.md": hashContent(designContent1b) },
+                lastArtifactHashes: {
+                    ...(state.lastArtifactHashes ?? {}),
+                    'design.md': hashContent(designContent1b),
+                },
             });
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "1c": {
-            const designPath1c = join(outputDir, "design.md");
+        case '1c': {
+            const designPath1c = join(outputDir, 'design.md');
             const content1c = await readFileSafe(designPath1c);
             if (!content1c || content1c.length < 100) {
-                return { passed: false, feedback: "design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。" };
+                return {
+                    passed: false,
+                    feedback: 'design.md 不存在或内容不足（< 100 字符），请补充完整的设计方案。',
+                };
             }
-            const previousHash1c = (state.lastArtifactHashes ?? {})["design.md"] ?? "";
+            const previousHash1c = (state.lastArtifactHashes ?? {})['design.md'] ?? '';
             const currentHash1c = hashContent(content1c);
             if (previousHash1c && currentHash1c === previousHash1c) {
-                return { passed: false, feedback: "design.md 内容未发生变化（hash 未改变），请根据审查反馈修订设计方案。" };
+                return {
+                    passed: false,
+                    feedback: 'design.md 内容未发生变化（hash 未改变），请根据审查反馈修订设计方案。',
+                };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "2a": {
-            const planPath = join(outputDir, "plan.md");
+        case '2a': {
+            const planPath = join(outputDir, 'plan.md');
             const planContent2a = await readFileSafe(planPath);
             if (!planContent2a) {
-                return { passed: false, feedback: "plan.md 不存在，请生成完整的实施计划。" };
+                return {
+                    passed: false,
+                    feedback: 'plan.md 不存在，请生成完整的实施计划。',
+                };
             }
             // Record plan.md hash for 2c change detection
             await sm.atomicUpdate({
-                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "plan.md": hashContent(planContent2a) },
+                lastArtifactHashes: {
+                    ...(state.lastArtifactHashes ?? {}),
+                    'plan.md': hashContent(planContent2a),
+                },
             });
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "2b": {
-            const reviewPath = join(outputDir, "plan-review.md");
+        case '2b': {
+            const reviewPath = join(outputDir, 'plan-review.md');
             const content = await readFileSafe(reviewPath);
             const validation = validatePhase2ReviewArtifact(content);
             if (!validation.valid) {
-                return { passed: false, feedback: validation.errors.join(" ") };
+                return { passed: false, feedback: validation.errors.join(' ') };
             }
             if (content) {
                 // Extract only the 结论 section to avoid false positives from historical/example text
                 const conclusionMatch = content.match(/##\s*结论\s*\n([\s\S]*?)(?=\n##|$)/i);
-                const conclusionText = conclusionMatch?.[1]?.trim() ?? "";
+                const conclusionText = conclusionMatch?.[1]?.trim() ?? '';
                 if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(conclusionText)) {
                     const feedbackMatch = content.match(/##\s*(?:反馈|Feedback|问题|Issues|P0|P1)\s*\n([\s\S]*?)(?=\n##|$)/i);
-                    const feedback = feedbackMatch?.[1]?.trim() ?? `计划审查未通过（结论：${conclusionText || "NEEDS_REVISION"}），请根据审查意见修订实施计划。`;
+                    const feedback = feedbackMatch?.[1]?.trim() ??
+                        `计划审查未通过（结论：${conclusionText || 'NEEDS_REVISION'}），请根据审查意见修订实施计划。`;
                     return { passed: false, feedback };
                 }
                 if (!conclusionMatch) {
                     // No 结论 section found — fall back to full-text scan but warn
                     if (/\b(?:REJECT|NEEDS_REVISION)\b/i.test(content)) {
-                        return { passed: false, feedback: "plan-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。" };
+                        return {
+                            passed: false,
+                            feedback: "plan-review.md 缺少 ## 结论 段落，且正文包含 REJECT/NEEDS_REVISION 关键词。请确保 review 文件末尾有 '## 结论\\nPASS' 或 '## 结论\\nNEEDS_REVISION'。",
+                        };
                     }
                 }
             }
             // Record plan.md hash at 2b validation point for 2c change detection
-            const planContent2b = await readFileSafe(join(outputDir, "plan.md"));
+            const planContent2b = await readFileSafe(join(outputDir, 'plan.md'));
             await sm.atomicUpdate({
-                lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "plan.md": hashContent(planContent2b) },
+                lastArtifactHashes: {
+                    ...(state.lastArtifactHashes ?? {}),
+                    'plan.md': hashContent(planContent2b),
+                },
             });
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "2c": {
-            const planContent2c = await readFileSafe(join(outputDir, "plan.md"));
+        case '2c': {
+            const planContent2c = await readFileSafe(join(outputDir, 'plan.md'));
             if (!planContent2c) {
-                return { passed: false, feedback: "plan.md 不存在，请生成完整的实施计划。" };
+                return {
+                    passed: false,
+                    feedback: 'plan.md 不存在，请生成完整的实施计划。',
+                };
             }
-            const previousHash2c = (state.lastArtifactHashes ?? {})["plan.md"] ?? "";
+            const previousHash2c = (state.lastArtifactHashes ?? {})['plan.md'] ?? '';
             const currentHash2c = hashContent(planContent2c);
             if (previousHash2c && currentHash2c === previousHash2c) {
-                return { passed: false, feedback: "plan.md 内容未发生变化（hash 未改变），请根据审查反馈修订实施计划。" };
+                return {
+                    passed: false,
+                    feedback: 'plan.md 内容未发生变化（hash 未改变），请根据审查反馈修订实施计划。',
+                };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "3": {
+        case '3': {
             // Idling detection (P1-1): if startCommit exists, check for actual code changes
             if (state.startCommit) {
                 const diffResult3 = await shell(`git diff --stat ${state.startCommit} -- . ':!docs/'`, projectRoot, 10_000);
-                if (diffResult3.exitCode === 0 && diffResult3.stdout.trim() === "") {
-                    return { passed: false, feedback: "未检测到代码变更（git diff 为空）。Phase 3 要求提交实际代码实现，不能只写文档。" };
+                if (diffResult3.exitCode === 0 && diffResult3.stdout.trim() === '') {
+                    return {
+                        passed: false,
+                        feedback: '未检测到代码变更（git diff 为空）。Phase 3 要求提交实际代码实现，不能只写文档。',
+                    };
                 }
             }
             // Build + test (with pre-existing failure detection)
-            const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, "BUILD_FAILED", worktreeRoot);
+            const buildFail3 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, 'BUILD_FAILED', worktreeRoot);
             if (buildFail3)
                 return buildFail3;
-            const testFail3 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED", worktreeRoot);
+            const testFail3 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, 'TEST_FAILED', worktreeRoot);
             if (testFail3)
                 return testFail3;
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "4a": {
+        case '4a': {
             // Build + test first (with pre-existing failure detection)
-            const buildFail4 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, "BUILD_FAILED", worktreeRoot);
+            const buildFail4 = await checkBuildWithBaseline(buildCmd, projectRoot, state.startCommit, 'BUILD_FAILED', worktreeRoot);
             if (buildFail4)
                 return buildFail4;
-            const testFail4 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, "TEST_FAILED", worktreeRoot);
+            const testFail4 = await checkBuildWithBaseline(testCmd, projectRoot, state.startCommit, 'TEST_FAILED', worktreeRoot);
             if (testFail4)
                 return testFail4;
             // Tribunal (pure evaluation — no state side effects)
-            const eval4 = await evaluateTribunal(projectRoot, outputDir, 4, topic, "Phase 4 verify", state.startCommit);
+            const eval4 = await evaluateTribunal(projectRoot, outputDir, 4, topic, 'Phase 4 verify', state.startCommit);
             return {
-                passed: eval4.verdict === "PASS",
-                feedback: eval4.verdict === "FAIL"
-                    ? eval4.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
-                    : "",
+                passed: eval4.verdict === 'PASS',
+                feedback: eval4.verdict === 'FAIL'
+                    ? eval4.issues
+                        .map(i => `[${i.severity}] ${i.description}`)
+                        .join('\n')
+                    : '',
                 tribunalResult: eval4,
             };
         }
-        case "5a": {
-            const hasTestCases = await fileExists(join(outputDir, "e2e-test-cases.md"));
+        case '5a': {
+            const hasTestCases = await fileExists(join(outputDir, 'e2e-test-cases.md'));
             if (!hasTestCases) {
-                return { passed: false, feedback: "e2e-test-cases.md 不存在。Phase 5a 要求输出测试用例设计文件。" };
+                return {
+                    passed: false,
+                    feedback: 'e2e-test-cases.md 不存在。Phase 5a 要求输出测试用例设计文件。',
+                };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "5b": {
+        case '5b': {
             // Run tests first
             const testResult5 = await shell(testCmd, projectRoot);
             if (testResult5.exitCode !== 0) {
                 return {
                     passed: false,
-                    feedback: translateFailureToFeedback("TEST_FAILED", testResult5.stdout + "\n" + testResult5.stderr),
+                    feedback: translateFailureToFeedback('TEST_FAILED', testResult5.stdout + '\n' + testResult5.stderr),
                 };
             }
-            const eval5 = await evaluateTribunal(projectRoot, outputDir, 5, topic, "Phase 5 E2E test", state.startCommit);
-            if (eval5.verdict === "PASS") {
+            const eval5 = await evaluateTribunal(projectRoot, outputDir, 5, topic, 'Phase 5 E2E test', state.startCommit);
+            if (eval5.verdict === 'PASS') {
                 // Record aggregate test-files hash for 5c change detection
                 const testFilesHash5b = await computeTestFilesHash(projectRoot);
                 await sm.atomicUpdate({
-                    lastArtifactHashes: { ...(state.lastArtifactHashes ?? {}), "test-files": testFilesHash5b },
+                    lastArtifactHashes: {
+                        ...(state.lastArtifactHashes ?? {}),
+                        'test-files': testFilesHash5b,
+                    },
                 });
             }
             return {
-                passed: eval5.verdict === "PASS",
-                feedback: eval5.verdict === "FAIL"
-                    ? eval5.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
-                    : "",
+                passed: eval5.verdict === 'PASS',
+                feedback: eval5.verdict === 'FAIL'
+                    ? eval5.issues
+                        .map(i => `[${i.severity}] ${i.description}`)
+                        .join('\n')
+                    : '',
                 tribunalResult: eval5,
             };
         }
-        case "5c": {
+        case '5c': {
             // Check test files changed since 5b
-            const previousTestHash5c = (state.lastArtifactHashes ?? {})["test-files"] ?? "";
+            const previousTestHash5c = (state.lastArtifactHashes ?? {})['test-files'] ?? '';
             const currentTestHash5c = await computeTestFilesHash(projectRoot);
             if (previousTestHash5c && currentTestHash5c === previousTestHash5c) {
-                return { passed: false, feedback: "测试文件内容未发生变化（hash 未改变），请根据审查反馈修订测试实现。" };
+                return {
+                    passed: false,
+                    feedback: '测试文件内容未发生变化（hash 未改变），请根据审查反馈修订测试实现。',
+                };
             }
             // Run tests
             const testResult5c = await shell(testCmd, projectRoot);
             if (testResult5c.exitCode !== 0) {
                 return {
                     passed: false,
-                    feedback: translateFailureToFeedback("TEST_FAILED", testResult5c.stdout + "\n" + testResult5c.stderr),
+                    feedback: translateFailureToFeedback('TEST_FAILED', testResult5c.stdout + '\n' + testResult5c.stderr),
                 };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "6": {
+        case '6': {
             // AC framework execution — runs before Tribunal
-            const acJsonPath = join(outputDir, "acceptance-criteria.json");
+            const acJsonPath = join(outputDir, 'acceptance-criteria.json');
             const effectiveCodeRoot = state.codeRoot ?? projectRoot;
             let acContent = null;
             try {
                 acContent = await readFileSafe(acJsonPath);
             }
-            catch { /* no AC JSON → legacy flow */ }
+            catch {
+                /* no AC JSON → legacy flow */
+            }
             if (acContent) {
                 // 1. Hash integrity check (tamper detection)
-                const progressLog = await readFileSafe(join(outputDir, "progress-log.md")) ?? "";
+                const progressLog = (await readFileSafe(join(outputDir, 'progress-log.md'))) ?? '';
                 const integrityResult = validateAcIntegrity(acContent, progressLog);
                 if (!integrityResult.valid) {
                     return {
@@ -816,7 +924,7 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                 if (coverage.missing.length > 0) {
                     return {
                         passed: false,
-                        feedback: `[BLOCKED] Test-bound AC missing bindings: ${coverage.missing.join(", ")}. ` +
+                        feedback: `[BLOCKED] Test-bound AC missing bindings: ${coverage.missing.join(', ')}. ` +
                             `Please go back to Phase 5 and add [AC-N] annotations to test code, ` +
                             `or downgrade these ACs to manual in acceptance-criteria.json (requires Phase 1 re-approval).`,
                     };
@@ -831,116 +939,138 @@ export async function validateStep(step, outputDir, projectRoot, buildCmd, testC
                     structural: structuralResults,
                     testBound: Object.fromEntries(testResults),
                     pendingManual: acData.criteria
-                        .filter((c) => c.layer === "manual")
-                        .map((c) => c.id),
+                        .filter(c => c.layer === 'manual')
+                        .map(c => c.id),
                     timestamp: new Date().toISOString(),
                 };
-                await writeFile(join(outputDir, "framework-ac-results.json"), JSON.stringify(frameworkResults, null, 2));
+                await writeFile(join(outputDir, 'framework-ac-results.json'), JSON.stringify(frameworkResults, null, 2));
                 // 7. Check for failures — short-circuit if structural or test-bound FAIL
                 const structuralFails = Object.entries(structuralResults)
-                    .filter(([, v]) => !v.passed).map(([id]) => id);
+                    .filter(([, v]) => !v.passed)
+                    .map(([id]) => id);
                 const testFails = [...testResults.entries()]
-                    .filter(([, v]) => !v.passed).map(([id]) => id);
+                    .filter(([, v]) => !v.passed)
+                    .map(([id]) => id);
                 if (structuralFails.length > 0 || testFails.length > 0) {
                     return {
                         passed: false,
                         feedback: [
-                            structuralFails.length > 0 ? `Structural AC FAIL: ${structuralFails.join(", ")}` : "",
-                            testFails.length > 0 ? `Test-bound AC FAIL: ${testFails.join(", ")}` : "",
-                            "See framework-ac-results.json for details.",
-                        ].filter(Boolean).join("\n"),
+                            structuralFails.length > 0
+                                ? `Structural AC FAIL: ${structuralFails.join(', ')}`
+                                : '',
+                            testFails.length > 0
+                                ? `Test-bound AC FAIL: ${testFails.join(', ')}`
+                                : '',
+                            'See framework-ac-results.json for details.',
+                        ]
+                            .filter(Boolean)
+                            .join('\n'),
                     };
                 }
             }
             // Proceed to Tribunal (handles manual AC + overall acceptance)
-            const eval6 = await evaluateTribunal(projectRoot, outputDir, 6, topic, "Phase 6 acceptance", state.startCommit);
+            const eval6 = await evaluateTribunal(projectRoot, outputDir, 6, topic, 'Phase 6 acceptance', state.startCommit);
             return {
-                passed: eval6.verdict === "PASS",
-                feedback: eval6.verdict === "FAIL"
-                    ? eval6.issues.map(i => `[${i.severity}] ${i.description}`).join("\n")
-                    : "",
+                passed: eval6.verdict === 'PASS',
+                feedback: eval6.verdict === 'FAIL'
+                    ? eval6.issues
+                        .map(i => `[${i.severity}] ${i.description}`)
+                        .join('\n')
+                    : '',
                 tribunalResult: eval6,
             };
         }
-        case "7": {
+        case '7': {
             // Phase 7 (retrospective) — no tribunal, just check retrospective.md exists
-            const retroContent = await readFileSafe(join(outputDir, "retrospective.md"));
-            if (!retroContent || retroContent.split("\n").length < 30) {
+            const retroContent = await readFileSafe(join(outputDir, 'retrospective.md'));
+            if (!retroContent || retroContent.split('\n').length < 30) {
                 return {
                     passed: false,
-                    feedback: "retrospective.md 不存在或内容不足（< 30 行），请补充完整的复盘报告。",
+                    feedback: 'retrospective.md 不存在或内容不足（< 30 行），请补充完整的复盘报告。',
                 };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
         // Phase 8: Ship (delivery verification) — no tribunal
-        case "8a": {
+        case '8a': {
             // Worktree guard (AC-16): must complete merge before shipping
             if (worktreeRoot) {
                 return {
                     passed: false,
-                    feedback: "请先调用 auto_dev_complete 完成合并，再执行 Phase 8",
+                    feedback: '请先调用 auto_dev_complete 完成合并，再执行 Phase 8',
                 };
             }
             // Check all commits are pushed
             try {
-                const gitResult = await shell("git log --oneline --branches --not --remotes", projectRoot, 10_000);
+                const gitResult = await shell('git log --oneline --branches --not --remotes', projectRoot, 10_000);
                 if (gitResult.exitCode !== 0) {
-                    return { passed: false, feedback: `git 命令执行失败: ${gitResult.stderr}` };
+                    return {
+                        passed: false,
+                        feedback: `git 命令执行失败: ${gitResult.stderr}`,
+                    };
                 }
                 const unpushed = gitResult.stdout.trim();
                 if (unpushed.length > 0) {
-                    return { passed: false, feedback: `存在未 push 的 commit:\n${unpushed}\n请执行 git push 推送所有变更。` };
+                    return {
+                        passed: false,
+                        feedback: `存在未 push 的 commit:\n${unpushed}\n请执行 git push 推送所有变更。`,
+                    };
                 }
             }
             catch (err) {
-                return { passed: false, feedback: `git 命令执行异常: ${err.message}` };
+                return {
+                    passed: false,
+                    feedback: `git 命令执行异常: ${err.message}`,
+                };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "8b": {
-            const buildResultContent = await readFileSafe(join(outputDir, "ship-build-result.md"));
-            if (!buildResultContent || !buildResultContent.includes("SUCCEED")) {
+        case '8b': {
+            const buildResultContent = await readFileSafe(join(outputDir, 'ship-build-result.md'));
+            if (!buildResultContent || !buildResultContent.includes('SUCCEED')) {
                 return {
                     passed: false,
                     feedback: "ship-build-result.md 不存在或不含 'SUCCEED'，请确认构建成功后写入结果。",
                 };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "8c": {
-            const deployResultContent = await readFileSafe(join(outputDir, "ship-deploy-result.md"));
-            if (!deployResultContent || !deployResultContent.includes("SUCCEED")) {
+        case '8c': {
+            const deployResultContent = await readFileSafe(join(outputDir, 'ship-deploy-result.md'));
+            if (!deployResultContent || !deployResultContent.includes('SUCCEED')) {
                 return {
                     passed: false,
                     feedback: "ship-deploy-result.md 不存在或不含 'SUCCEED'，请确认部署成功后写入结果。",
                 };
             }
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
         }
-        case "8d": {
-            const verifyContent = await readFileSafe(join(outputDir, "ship-verify-result.md"));
+        case '8d': {
+            const verifyContent = await readFileSafe(join(outputDir, 'ship-verify-result.md'));
             if (!verifyContent) {
-                return { passed: false, feedback: "ship-verify-result.md 不存在，请完成远程验证后写入结果。" };
-            }
-            if (verifyContent.includes("PASS")) {
-                return { passed: true, feedback: "" };
-            }
-            if (verifyContent.includes("CODE_BUG")) {
                 return {
                     passed: false,
-                    feedback: "远程验证发现代码问题（CODE_BUG），需要回退到 Phase 3 修复。",
+                    feedback: 'ship-verify-result.md 不存在，请完成远程验证后写入结果。',
+                };
+            }
+            if (verifyContent.includes('PASS')) {
+                return { passed: true, feedback: '' };
+            }
+            if (verifyContent.includes('CODE_BUG')) {
+                return {
+                    passed: false,
+                    feedback: '远程验证发现代码问题（CODE_BUG），需要回退到 Phase 3 修复。',
                     regressToPhase: 3,
                 };
             }
             // ENV_ISSUE or other failure — no regress, escalate
             return {
                 passed: false,
-                feedback: "远程验证失败（ENV_ISSUE 或其他环境问题），需要人工介入排查环境。",
+                feedback: '远程验证失败（ENV_ISSUE 或其他环境问题），需要人工介入排查环境。',
             };
         }
         default:
-            return { passed: true, feedback: "" };
+            return { passed: true, feedback: '' };
     }
 }
 // ---------------------------------------------------------------------------
@@ -957,9 +1087,9 @@ function extractTaskDetails(planContent) {
     if (!matches || matches.length === 0) {
         // Fallback to simple task list
         const taskList = extractTaskList(planContent);
-        return taskList || "实现 plan.md 中描述的所有功能";
+        return taskList || '实现 plan.md 中描述的所有功能';
     }
-    return matches.join("\n\n");
+    return matches.join('\n\n');
 }
 export async function buildTaskForStep(step, outputDir, projectRoot, topic, buildCmd, testCmd, feedback, extraVars, previousAttemptSummary) {
     const variables = {
@@ -971,99 +1101,105 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
         ...extraVars,
     };
     // Revision steps (1c, 2c, 5c) — build revision prompt
-    if (step === "1c" && feedback) {
-        return buildRevisionPrompt({
+    if (step === '1c' && feedback) {
+        return (buildRevisionPrompt({
             originalTask: `设计方案：${topic}`,
             feedback,
-            artifacts: [join(outputDir, "design.md")],
+            artifacts: [join(outputDir, 'design.md')],
             previousAttemptSummary,
-        }) + ISOLATION_FOOTER;
+        }) + ISOLATION_FOOTER);
     }
-    if (step === "2c" && feedback) {
-        return buildRevisionPrompt({
+    if (step === '2c' && feedback) {
+        return (buildRevisionPrompt({
             originalTask: `实施计划：${topic}`,
             feedback,
-            artifacts: [join(outputDir, "plan.md")],
+            artifacts: [join(outputDir, 'plan.md')],
             previousAttemptSummary,
-        }) + ISOLATION_FOOTER;
+        }) + ISOLATION_FOOTER);
     }
-    if (step === "5c" && feedback) {
-        return buildRevisionPrompt({
+    if (step === '5c' && feedback) {
+        return (buildRevisionPrompt({
             originalTask: `测试实现：${topic}`,
             feedback,
             artifacts: [],
             previousAttemptSummary,
-        }) + ISOLATION_FOOTER;
+        }) + ISOLATION_FOOTER);
     }
     // Approach plan instruction for steps that may need circuit breaker
-    const APPROACH_PLAN_STEPS = ["3", "4a", "5b"];
+    const APPROACH_PLAN_STEPS = ['3', '4a', '5b'];
     const approachPlanInstruction = APPROACH_PLAN_STEPS.includes(step)
         ? `\n\n## 执行前：方案计划\n\n在开始编码/测试之前，先输出方案计划到 ${outputDir}/approach-plan.md：\n\n1. 主方案 + 1~2 个备选方案\n2. 每个方案标注方法、核心工具、风险\n3. 备选方案应与主方案在技术路径上有本质区别\n   （换参数/换 flag 不算，换工具/换思路才算）\n`
-        : "";
+        : '';
     // Map steps to prompt templates
     const stepToTemplate = {
-        "1a": "phase1-architect",
-        "1b": "phase1-design-reviewer",
-        "2a": "phase2-planner",
-        "2b": "phase2-plan-reviewer",
-        "5a": "phase5-test-architect",
-        "5b": "phase5-test-developer",
-        "6": "phase6-acceptance",
-        "7": "phase7-retrospective",
-        "8a": "phase8-ship",
-        "8b": "phase8-ship",
-        "8c": "phase8-ship",
-        "8d": "phase8-ship",
+        '1a': 'phase1-architect',
+        '1b': 'phase1-design-reviewer',
+        '2a': 'phase2-planner',
+        '2b': 'phase2-plan-reviewer',
+        '5a': 'phase5-test-architect',
+        '5b': 'phase5-test-developer',
+        '6': 'phase6-acceptance',
+        '7': 'phase7-retrospective',
+        '8a': 'phase8-ship',
+        '8b': 'phase8-ship',
+        '8c': 'phase8-ship',
+        '8d': 'phase8-ship',
     };
     // Step 3: implementation — special handling
-    if (step === "3") {
-        const planPath = join(outputDir, "plan.md");
+    if (step === '3') {
+        const planPath = join(outputDir, 'plan.md');
         const planContent = await readFileSafe(planPath);
         if (!planContent) {
             // Turbo mode without plan.md — use topic directly
-            return `请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` + approachPlanInstruction + ISOLATION_FOOTER;
+            return (`请实现以下功能：${topic}\n\n项目根目录: ${projectRoot}` +
+                approachPlanInstruction +
+                ISOLATION_FOOTER);
         }
         // Extract task details with completion criteria (task-level contract)
         const taskDetails = extractTaskDetails(planContent);
         // Include P0/P1 issues from plan-review.md so developer doesn't miss critical feedback
-        let reviewSection = "";
-        const planReviewContent = await readFileSafe(join(outputDir, "plan-review.md"));
+        let reviewSection = '';
+        const planReviewContent = await readFileSafe(join(outputDir, 'plan-review.md'));
         if (planReviewContent) {
             const p0p1Lines = planReviewContent
-                .split("\n")
+                .split('\n')
                 .filter(line => /\b(P0|P1)\b/.test(line))
                 .map(line => line.trim())
                 .filter(Boolean);
             if (p0p1Lines.length > 0) {
-                reviewSection = `\n\n**⚠ 计划审查 P0/P1 修订要求（必须在实现中落实）：**\n${p0p1Lines.map(l => `- ${l}`).join("\n")}\n`;
+                reviewSection = `\n\n**⚠ 计划审查 P0/P1 修订要求（必须在实现中落实）：**\n${p0p1Lines.map(l => `- ${l}`).join('\n')}\n`;
             }
         }
         // AC-15: embed design.md summary to avoid redundant file reads
-        let designSummary = "";
-        const designContent3 = await readFileSafe(join(outputDir, "design.md"));
+        let designSummary = '';
+        const designContent3 = await readFileSafe(join(outputDir, 'design.md'));
         if (designContent3) {
             const summaryMatch = designContent3.match(/## (?:概述|Summary)\s*\n([\s\S]*?)(?=\n## |$)/);
-            const snippet = summaryMatch?.[1]?.trim() ?? designContent3.split("\n").slice(0, 10).join("\n").trim();
+            const snippet = summaryMatch?.[1]?.trim() ??
+                designContent3.split('\n').slice(0, 10).join('\n').trim();
             if (snippet) {
                 designSummary = `\n\n**设计目标摘要（不需要再读 plan.md 或 design.md — 以下已摘录）：**\n${snippet}\n`;
             }
         }
-        return `请完成以下任务：\n\n${taskDetails}${reviewSection}${designSummary}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
+        return (`请完成以下任务：\n\n${taskDetails}${reviewSection}${designSummary}\n\n项目根目录: ${projectRoot}\n输出目录: ${outputDir}\n\n` +
             `**重要：每完成一个 task，先验证其完成标准是否满足，再开始下一个。**` +
-            approachPlanInstruction + ISOLATION_FOOTER;
+            approachPlanInstruction +
+            ISOLATION_FOOTER);
     }
     // Step 4a: implementation fix/verify
     // AC-13: return null when feedback is empty (no issues to fix → skip dispatch)
-    if (step === "4a") {
-        if (!feedback || feedback.trim() === "") {
+    if (step === '4a') {
+        if (!feedback || feedback.trim() === '') {
             return null;
         }
-        return buildRevisionPrompt({
+        return (buildRevisionPrompt({
             originalTask: `代码验证：${topic}`,
             feedback,
             artifacts: [],
             previousAttemptSummary,
-        }) + approachPlanInstruction + ISOLATION_FOOTER;
+        }) +
+            approachPlanInstruction +
+            ISOLATION_FOOTER);
     }
     const template = stepToTemplate[step];
     if (template) {
@@ -1071,7 +1207,8 @@ export async function buildTaskForStep(step, outputDir, projectRoot, topic, buil
         return rendered + approachPlanInstruction;
     }
     // Fallback
-    return `请完成步骤 ${step} 的任务。\n\n主题: ${topic}\n项目根目录: ${projectRoot}` + ISOLATION_FOOTER;
+    return (`请完成步骤 ${step} 的任务。\n\n主题: ${topic}\n项目根目录: ${projectRoot}` +
+        ISOLATION_FOOTER);
 }
 // ---------------------------------------------------------------------------
 // parseTaskList — parse plan.md task blocks for step "3" injection
@@ -1087,23 +1224,25 @@ export function parseTaskList(planContent) {
         return [];
     try {
         // Split on ## Task N headers
-        const blocks = planContent.split(/(?=^## Task\s+\d+)/m).filter(b => b.trim().length > 0);
+        const blocks = planContent
+            .split(/(?=^## Task\s+\d+)/m)
+            .filter(b => b.trim().length > 0);
         const tasks = [];
         for (const block of blocks) {
             const headerMatch = block.match(/^## Task\s+(\d+)[:\s]*(.*)/m);
             if (!headerMatch)
                 continue;
             const taskNumber = parseInt(headerMatch[1], 10);
-            const title = headerMatch[2]?.trim() ?? "";
+            const title = headerMatch[2]?.trim() ?? '';
             // Description: lines after the header line, before the first sub-section (###) or until end
-            const bodyLines = block.split("\n").slice(1); // skip header line
+            const bodyLines = block.split('\n').slice(1); // skip header line
             const descLines = [];
             for (const line of bodyLines) {
                 if (/^###/.test(line))
                     break;
                 descLines.push(line);
             }
-            const description = descLines.join("\n").trim();
+            const description = descLines.join('\n').trim();
             // Files: lines matching "新建:" or "修改:" — extract paths
             const files = [];
             const fileRegex = /(?:新建|修改)[:：]\s*(.+)/g;
@@ -1112,7 +1251,7 @@ export function parseTaskList(planContent) {
                 // May be a comma-separated list or single path
                 const raw = fileMatch[1].trim();
                 for (const part of raw.split(/[,，]/)) {
-                    const p = part.trim().replace(/`/g, "");
+                    const p = part.trim().replace(/`/g, '');
                     if (p.length > 0)
                         files.push(p);
                 }
@@ -1145,27 +1284,36 @@ export function parseTaskList(planContent) {
  * Handle the "no step" scenario: PASS advancement, design doc compliance skip, or normal startup.
  */
 async function resolveInitialStep(ctx, stepState) {
-    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars, } = ctx;
     // When status === "PASS", the current phase was completed (e.g. by tribunal_verdict)
     // and we need to advance to the NEXT phase — not restart the current one.
-    if (state.status === "PASS" && state.phase && phases.includes(state.phase)) {
+    if (state.status === 'PASS' && state.phase && phases.includes(state.phase)) {
         const completedPhase = state.phase;
         const lastStepOfCompleted = lastStepForPhase(completedPhase);
         const nextStep = computeNextStep(lastStepOfCompleted, phases, skipSteps);
         if (!nextStep) {
             await sm.atomicUpdate({
-                step: null, stepIteration: 0, lastValidation: "DONE",
-                status: "COMPLETED",
+                step: null,
+                stepIteration: 0,
+                lastValidation: 'DONE',
+                status: 'COMPLETED',
             });
             return {
-                done: true, step: null, agent: null, prompt: null,
-                message: "All phases completed successfully.",
+                done: true,
+                step: null,
+                agent: null,
+                prompt: null,
+                message: 'All phases completed successfully.',
             };
         }
         const nextPhase = phaseForStep(nextStep);
         await sm.atomicUpdate({
-            step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
-            phase: nextPhase, status: "IN_PROGRESS",
+            step: nextStep,
+            stepIteration: 0,
+            lastValidation: null,
+            approachState: null,
+            phase: nextPhase,
+            status: 'IN_PROGRESS',
         });
         const prompt = await buildTaskForStep(nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep));
         const result = {
@@ -1175,25 +1323,28 @@ async function resolveInitialStep(ctx, stepState) {
             prompt,
             message: `Phase ${completedPhase} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
         };
-        if (nextStep === "3") {
-            const planContent = await readFileSafe(join(outputDir, "plan.md"));
+        if (nextStep === '3') {
+            const planContent = await readFileSafe(join(outputDir, 'plan.md'));
             result.tasks = parseTaskList(planContent);
         }
         return result;
     }
     // Normal startup: use state.phase if already mid-flow, otherwise the mode's first phase.
-    const firstPhase = (state.phase && phases.includes(state.phase)) ? state.phase : phases[0];
+    const firstPhase = state.phase && phases.includes(state.phase) ? state.phase : phases[0];
     let firstStep = firstStepForPhase(firstPhase);
     // Skip Phase 1a if design doc already exists and is compliant
-    if (firstStep === "1a" && state.designDocBound) {
-        const designContent = await readFileSafe(join(outputDir, "design.md"));
+    if (firstStep === '1a' && state.designDocBound) {
+        const designContent = await readFileSafe(join(outputDir, 'design.md'));
         if (designContent && designContent.length >= 100) {
             const { compliant } = checkDesignDocCompliance(designContent);
             if (compliant) {
-                firstStep = "1b";
+                firstStep = '1b';
                 await sm.atomicUpdate({
-                    step: firstStep, stepIteration: 0, lastValidation: null,
-                    phase: firstPhase, status: "IN_PROGRESS",
+                    step: firstStep,
+                    stepIteration: 0,
+                    lastValidation: null,
+                    phase: firstPhase,
+                    status: 'IN_PROGRESS',
                 });
                 const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
                 return {
@@ -1208,8 +1359,11 @@ async function resolveInitialStep(ctx, stepState) {
     }
     // Single atomicUpdate: step + phase
     await sm.atomicUpdate({
-        step: firstStep, stepIteration: 0, lastValidation: null,
-        phase: firstPhase, status: "IN_PROGRESS",
+        step: firstStep,
+        stepIteration: 0,
+        lastValidation: null,
+        phase: firstPhase,
+        status: 'IN_PROGRESS',
     });
     const prompt = await buildTaskForStep(firstStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(firstStep));
     const startupResult = {
@@ -1219,8 +1373,8 @@ async function resolveInitialStep(ctx, stepState) {
         prompt,
         message: `Starting step ${firstStep} (phase ${firstPhase}).`,
     };
-    if (firstStep === "3") {
-        const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    if (firstStep === '3') {
+        const planContent = await readFileSafe(join(outputDir, 'plan.md'));
         startupResult.tasks = parseTaskList(planContent);
     }
     return startupResult;
@@ -1233,11 +1387,14 @@ async function handlePhaseRegress(ctx, currentStep, validation) {
     const currentShipRound = (state.shipRound ?? 0) + 1;
     const maxRounds = state.shipMaxRounds ?? 5;
     if (currentShipRound >= maxRounds) {
-        await sm.atomicUpdate({ status: "BLOCKED" });
+        await sm.atomicUpdate({ status: 'BLOCKED' });
         return {
-            done: false, step: currentStep, agent: null, prompt: null,
+            done: false,
+            step: currentStep,
+            agent: null,
+            prompt: null,
             escalation: {
-                reason: "ship_max_rounds",
+                reason: 'ship_max_rounds',
                 lastFeedback: validation.feedback,
             },
             message: `Ship 已达最大轮次 (${currentShipRound}/${maxRounds})，需要人工介入。`,
@@ -1250,9 +1407,9 @@ async function handlePhaseRegress(ctx, currentStep, validation) {
         step: regressStep,
         stepIteration: 0,
         shipRound: currentShipRound,
-        lastValidation: "SHIP_REGRESS",
+        lastValidation: 'SHIP_REGRESS',
         approachState: null,
-        status: "IN_PROGRESS",
+        status: 'IN_PROGRESS',
         lastFailureDetail: validation.feedback,
     });
     const prompt = await buildTaskForStep(regressStep, outputDir, projectRoot, topic, buildCmd, testCmd, validation.feedback);
@@ -1271,10 +1428,11 @@ async function handlePhaseRegress(ctx, currentStep, validation) {
 async function handleCircuitBreaker(ctx, stepState, currentStep, validation) {
     const { sm, outputDir } = ctx;
     const approachResult = await handleApproachFailure(stepState, currentStep, outputDir, validation.feedback);
-    if (approachResult.action === "CIRCUIT_BREAK") {
+    if (approachResult.action === 'CIRCUIT_BREAK') {
         console.error(`[orchestrator] circuit breaker: step=${currentStep} phase=${phaseForStep(currentStep)}`);
         await sm.atomicUpdate({
-            stepIteration: 0, lastValidation: "CIRCUIT_BREAK",
+            stepIteration: 0,
+            lastValidation: 'CIRCUIT_BREAK',
             approachState: approachResult.approachState,
             lastFailureDetail: validation.feedback,
         });
@@ -1291,16 +1449,20 @@ async function handleCircuitBreaker(ctx, stepState, currentStep, validation) {
             approachAction: approachResult,
         };
     }
-    if (approachResult.action === "ALL_EXHAUSTED") {
+    if (approachResult.action === 'ALL_EXHAUSTED') {
         await sm.atomicUpdate({
-            lastValidation: "ALL_APPROACHES_EXHAUSTED", status: "BLOCKED",
+            lastValidation: 'ALL_APPROACHES_EXHAUSTED',
+            status: 'BLOCKED',
             lastFailureDetail: validation.feedback,
         });
         return {
             result: {
-                done: false, step: currentStep, agent: null, prompt: null,
+                done: false,
+                step: currentStep,
+                agent: null,
+                prompt: null,
                 escalation: {
-                    reason: "all_approaches_exhausted",
+                    reason: 'all_approaches_exhausted',
                     lastFeedback: validation.feedback,
                 },
                 lastFailureDetail: validation.feedback,
@@ -1319,7 +1481,7 @@ async function handleCircuitBreaker(ctx, stepState, currentStep, validation) {
  * Handle all validation failure branches: tribunal, phase regress, circuit breaker, iteration limit, revision.
  */
 async function handleValidationFailure(ctx, stepState, validation) {
-    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, getExtraVars } = ctx;
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, getExtraVars, } = ctx;
     const currentStep = stepState.step;
     const currentIteration = stepState.stepIteration;
     // --- Effort budget pre-check ---
@@ -1327,11 +1489,14 @@ async function handleValidationFailure(ctx, stepState, validation) {
     const rawEffort = (state.stepEffort ?? {})[effortKey];
     const effort = StepEffortSchema.parse(rawEffort ?? {});
     if (effort.totalAttempts >= EFFORT_LIMITS.maxTotalAttempts) {
-        await sm.atomicUpdate({ lastValidation: "ESCALATED", status: "BLOCKED" });
+        await sm.atomicUpdate({ lastValidation: 'ESCALATED', status: 'BLOCKED' });
         return {
-            done: false, step: currentStep, agent: null, prompt: null,
+            done: false,
+            step: currentStep,
+            agent: null,
+            prompt: null,
             escalation: {
-                reason: "effort_exhausted",
+                reason: 'effort_exhausted',
                 lastFeedback: validation.feedback,
             },
             message: `Step ${currentStep} effort exhausted (${effort.totalAttempts}/${EFFORT_LIMITS.maxTotalAttempts} total attempts). Escalating.`,
@@ -1345,7 +1510,8 @@ async function handleValidationFailure(ctx, stepState, validation) {
         if (validation.tribunalResult.subagentRequested) {
             return handleTribunalSubagent(ctx, phaseKey, count, currentStep, validation.tribunalResult);
         }
-        if (validation.tribunalResult.rawParseFailure && validation.tribunalResult.rawOutput) {
+        if (validation.tribunalResult.rawParseFailure &&
+            validation.tribunalResult.rawOutput) {
             return handleTribunalParseFailure(ctx, phaseKey, count, currentStep, validation.tribunalResult);
         }
         if (validation.tribunalResult.crashed) {
@@ -1363,7 +1529,8 @@ async function handleValidationFailure(ctx, stepState, validation) {
             tribunalAttempts: effort.tribunalAttempts + 1,
         };
         await sm.atomicUpdate({
-            stepIteration: currentIteration + 1, lastValidation: "FAILED",
+            stepIteration: currentIteration + 1,
+            lastValidation: 'FAILED',
             tribunalSubmits: { ...submits, [phaseKey]: count },
             lastFailureDetail: validation.feedback,
             stepEffort: { [effortKey]: updatedEffortTribunal },
@@ -1380,22 +1547,30 @@ async function handleValidationFailure(ctx, stepState, validation) {
     }
     // --- regressToPhase handling (Phase 8 CODE_BUG -> regress to Phase 3) ---
     if (validation.regressToPhase !== undefined) {
-        return handlePhaseRegress(ctx, currentStep, { feedback: validation.feedback, regressToPhase: validation.regressToPhase });
+        return handlePhaseRegress(ctx, currentStep, {
+            feedback: validation.feedback,
+            regressToPhase: validation.regressToPhase,
+        });
     }
     // --- Non-tribunal failure: circuit breaker + iteration logic ---
     const { result: circuitResult, approachAction: approachResult } = await handleCircuitBreaker(ctx, stepState, currentStep, validation);
     if (circuitResult)
         return circuitResult;
     // Check iteration limit (skip if approachState exists)
-    const hasApproachState = !!((approachResult.action === "CONTINUE" && approachResult.approachState) || stepState.approachState);
+    const hasApproachState = !!((approachResult.action === 'CONTINUE' && approachResult.approachState) ||
+        stepState.approachState);
     if (!hasApproachState && currentIteration >= MAX_STEP_ITERATIONS) {
         await sm.atomicUpdate({
-            lastValidation: "ESCALATED", status: "BLOCKED",
+            lastValidation: 'ESCALATED',
+            status: 'BLOCKED',
         });
         return {
-            done: false, step: currentStep, agent: null, prompt: null,
+            done: false,
+            step: currentStep,
+            agent: null,
+            prompt: null,
             escalation: {
-                reason: "iteration_limit_exceeded",
+                reason: 'iteration_limit_exceeded',
                 lastFeedback: validation.feedback,
             },
             message: `Step ${currentStep} exceeded maximum iterations (${MAX_STEP_ITERATIONS}). Escalating.`,
@@ -1405,21 +1580,26 @@ async function handleValidationFailure(ctx, stepState, validation) {
     const newIteration = currentIteration + 1;
     // Determine revision step (1b fail -> 1c, 2b fail -> 2c, etc)
     let revisionStep = currentStep;
-    if (currentStep === "1b")
-        revisionStep = "1c";
-    if (currentStep === "2b")
-        revisionStep = "2c";
-    if (currentStep === "5b")
-        revisionStep = "5c";
+    if (currentStep === '1b')
+        revisionStep = '1c';
+    if (currentStep === '2b')
+        revisionStep = '2c';
+    if (currentStep === '5b')
+        revisionStep = '5c';
     const effectiveStep = revisionStep !== currentStep ? revisionStep : currentStep;
-    const updatedEffortRetry = { ...effort, totalAttempts: effort.totalAttempts + 1 };
+    const updatedEffortRetry = {
+        ...effort,
+        totalAttempts: effort.totalAttempts + 1,
+    };
     await sm.atomicUpdate({
-        step: effectiveStep, stepIteration: newIteration, lastValidation: "FAILED",
+        step: effectiveStep,
+        stepIteration: newIteration,
+        lastValidation: 'FAILED',
         lastFailureDetail: validation.feedback,
         stepEffort: { [effortKey]: updatedEffortRetry },
     });
     let combinedFeedback = validation.feedback;
-    if (approachResult.action === "CONTINUE" && approachResult.planFeedback) {
+    if (approachResult.action === 'CONTINUE' && approachResult.planFeedback) {
         combinedFeedback += `\n\n${approachResult.planFeedback}`;
     }
     const attemptSummary = buildPreviousAttemptSummary(effortKey, updatedEffortRetry, validation.feedback);
@@ -1437,12 +1617,16 @@ async function handleValidationFailure(ctx, stepState, validation) {
  * Handle validation passed: progress log, TDD gate, step advancement or completion.
  */
 async function advanceToNextStep(ctx, currentStep, validation) {
-    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars } = ctx;
+    const { sm, state, outputDir, projectRoot, topic, buildCmd, testCmd, phases, skipSteps, getExtraVars, } = ctx;
     const currentPhase = phaseForStep(currentStep);
     // [FIX-1] Revision steps (1c/2c/5c) are not in STEP_ORDER.
     // When a revision step passes, go back to the parent step for re-validation.
     // Guard against infinite revision loops by counting revisionCycles.
-    const REVISION_TO_PARENT = { "1c": "1b", "2c": "2b", "5c": "5b" };
+    const REVISION_TO_PARENT = {
+        '1c': '1b',
+        '2c': '2b',
+        '5c': '5b',
+    };
     const parentStep = REVISION_TO_PARENT[currentStep];
     if (parentStep) {
         const parentEffortKey = effortKeyForStep(parentStep);
@@ -1456,22 +1640,33 @@ async function advanceToNextStep(ctx, currentStep, validation) {
         };
         if (newRevisionCycles >= EFFORT_LIMITS.maxRevisionCycles) {
             await sm.atomicUpdate({
-                lastValidation: "ESCALATED", status: "BLOCKED",
+                lastValidation: 'ESCALATED',
+                status: 'BLOCKED',
                 stepEffort: { [parentEffortKey]: newParentEffort },
             });
-            await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "BLOCKED", `Revision cycles exhausted for ${parentStep} (${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) + "\n");
+            await sm.appendToProgressLog('\n' +
+                sm.getCheckpointLine(currentPhase, undefined, 'BLOCKED', `Revision cycles exhausted for ${parentStep} (${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) +
+                '\n');
             return {
-                done: false, step: parentStep, agent: null, prompt: null,
+                done: false,
+                step: parentStep,
+                agent: null,
+                prompt: null,
                 escalation: {
-                    reason: "revision_cycles_exhausted",
+                    reason: 'revision_cycles_exhausted',
                     lastFeedback: `Revision step ${currentStep} passed but parent ${parentStep} has exceeded max revision cycles (${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`,
                 },
                 message: `Revision cycles exhausted for ${parentStep}. Escalating.`,
             };
         }
-        await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Revision step ${currentStep} passed. Re-validating ${parentStep} (revision cycle ${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) + "\n");
+        await sm.appendToProgressLog('\n' +
+            sm.getCheckpointLine(currentPhase, undefined, 'PASS', `Revision step ${currentStep} passed. Re-validating ${parentStep} (revision cycle ${newRevisionCycles}/${EFFORT_LIMITS.maxRevisionCycles}).`) +
+            '\n');
         await sm.atomicUpdate({
-            step: parentStep, stepIteration: 0, lastValidation: null, approachState: null,
+            step: parentStep,
+            stepIteration: 0,
+            lastValidation: null,
+            approachState: null,
             stepEffort: { [parentEffortKey]: newParentEffort },
         });
         return {
@@ -1483,27 +1678,35 @@ async function advanceToNextStep(ctx, currentStep, validation) {
         };
     }
     // Write progress-log checkpoint (audit only)
-    await sm.appendToProgressLog("\n" + sm.getCheckpointLine(currentPhase, undefined, "PASS", `Step ${currentStep} passed.`) + "\n");
+    await sm.appendToProgressLog('\n' +
+        sm.getCheckpointLine(currentPhase, undefined, 'PASS', `Step ${currentStep} passed.`) +
+        '\n');
     // Reset tribunal counter on PASS
     const tribunalUpdates = {};
     if (validation.tribunalResult) {
         const phaseKey = String(currentPhase);
-        tribunalUpdates.tribunalSubmits = { ...(state.tribunalSubmits ?? {}), [phaseKey]: 0 };
+        tribunalUpdates.tribunalSubmits = {
+            ...(state.tribunalSubmits ?? {}),
+            [phaseKey]: 0,
+        };
     }
     const nextStep = computeNextStep(currentStep, phases, skipSteps);
     // TDD global gate: block Phase 3 -> Phase 4 transition if not all tasks are GREEN_CONFIRMED
-    if (nextStep && state.tdd === true && phaseForStep(currentStep) === 3 && phaseForStep(nextStep) >= 4) {
-        const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    if (nextStep &&
+        state.tdd === true &&
+        phaseForStep(currentStep) === 3 &&
+        phaseForStep(nextStep) >= 4) {
+        const planContent = await readFileSafe(join(outputDir, 'plan.md'));
         if (planContent) {
             const taskMatches = planContent.match(/^## Task\s+(\d+)/gm) ?? [];
-            const taskNums = taskMatches.map(m => parseInt(m.replace(/^## Task\s+/, ""), 10));
+            const taskNums = taskMatches.map(m => parseInt(m.replace(/^## Task\s+/, ''), 10));
             let nonExemptCount = 0;
             let greenCount = 0;
             for (const t of taskNums) {
                 const exempt = await isTddExemptTask(outputDir, t);
                 if (!exempt) {
                     nonExemptCount++;
-                    if (state.tddTaskStates?.[String(t)]?.status === "GREEN_CONFIRMED") {
+                    if (state.tddTaskStates?.[String(t)]?.status === 'GREEN_CONFIRMED') {
                         greenCount++;
                     }
                 }
@@ -1522,8 +1725,10 @@ async function advanceToNextStep(ctx, currentStep, validation) {
     if (!nextStep) {
         // All steps done — single atomicUpdate
         await sm.atomicUpdate({
-            step: null, stepIteration: 0, lastValidation: "DONE",
-            status: "COMPLETED",
+            step: null,
+            stepIteration: 0,
+            lastValidation: 'DONE',
+            status: 'COMPLETED',
             ...tribunalUpdates,
         });
         return {
@@ -1531,15 +1736,19 @@ async function advanceToNextStep(ctx, currentStep, validation) {
             step: null,
             agent: null,
             prompt: null,
-            message: "All phases completed successfully.",
+            message: 'All phases completed successfully.',
         };
     }
     // Advance to next step — single atomicUpdate
     const nextPhase = phaseForStep(nextStep);
     await sm.atomicUpdate({
-        step: nextStep, stepIteration: 0, lastValidation: null, approachState: null,
+        step: nextStep,
+        stepIteration: 0,
+        lastValidation: null,
+        approachState: null,
         lastFailureDetail: null,
-        phase: nextPhase, status: "IN_PROGRESS",
+        phase: nextPhase,
+        status: 'IN_PROGRESS',
         ...tribunalUpdates,
     });
     const prompt = await buildTaskForStep(nextStep, outputDir, projectRoot, topic, buildCmd, testCmd, undefined, getExtraVars(nextStep));
@@ -1560,8 +1769,8 @@ async function advanceToNextStep(ctx, currentStep, validation) {
         prompt,
         message: `Step ${currentStep} passed. Advancing to step ${nextStep} (phase ${nextPhase}).`,
     };
-    if (nextStep === "3") {
-        const planContent = await readFileSafe(join(outputDir, "plan.md"));
+    if (nextStep === '3') {
+        const planContent = await readFileSafe(join(outputDir, 'plan.md'));
         advanceResult.tasks = parseTaskList(planContent);
     }
     return advanceResult;
@@ -1589,36 +1798,46 @@ export async function computeNextTask(projectRoot, topic) {
     const effectiveRoot = state.worktreeRoot ?? projectRoot;
     // codeRoot: actual directory where code lives (may differ from projectRoot for skill projects)
     const effectiveCodeRoot = state.worktreeRoot
-        ? (state.codeRoot
+        ? state.codeRoot
             ? join(state.worktreeRoot, relative(projectRoot, state.codeRoot))
-            : state.worktreeRoot)
+            : state.worktreeRoot
         : (state.codeRoot ?? projectRoot);
     // Ship extra variables for Phase 8 prompt rendering
     const shipExtraVars = state.ship === true
         ? {
-            substep: "", // will be overridden per call
-            deployTarget: state.deployTarget ?? "",
-            deployBranch: state.deployBranch ?? "",
-            deployEnv: state.deployEnv ?? "green",
-            verifyMethod: state.verifyMethod ?? "",
-            verifyEndpoint: state.verifyConfig?.endpoint ?? "",
-            verifyExpectedPattern: state.verifyConfig?.expectedPattern ?? "",
-            verifyLogPath: state.verifyConfig?.logPath ?? "",
-            verifyLogKeyword: state.verifyConfig?.logKeyword ?? "",
-            verifySshHost: state.verifyConfig?.sshHost ?? "",
+            substep: '', // will be overridden per call
+            deployTarget: state.deployTarget ?? '',
+            deployBranch: state.deployBranch ?? '',
+            deployEnv: state.deployEnv ?? 'green',
+            verifyMethod: state.verifyMethod ?? '',
+            verifyEndpoint: state.verifyConfig?.endpoint ?? '',
+            verifyExpectedPattern: state.verifyConfig?.expectedPattern ?? '',
+            verifyLogPath: state.verifyConfig?.logPath ?? '',
+            verifyLogKeyword: state.verifyConfig?.logKeyword ?? '',
+            verifySshHost: state.verifyConfig?.sshHost ?? '',
         }
         : undefined;
     /** Build extraVars for a specific step, adding substep for Phase 8 */
     function getExtraVars(step) {
-        if (shipExtraVars && step.startsWith("8")) {
+        if (shipExtraVars && step.startsWith('8')) {
             return { ...shipExtraVars, substep: step };
         }
         return undefined;
     }
     // Build orchestrator context for extracted sub-functions
     const ctx = {
-        sm, state, outputDir, projectRoot, effectiveRoot, effectiveCodeRoot,
-        topic, buildCmd, testCmd, phases, skipSteps, getExtraVars,
+        sm,
+        state,
+        outputDir,
+        projectRoot,
+        effectiveRoot,
+        effectiveCodeRoot,
+        topic,
+        buildCmd,
+        testCmd,
+        phases,
+        skipSteps,
+        getExtraVars,
     };
     // 2. Read step state
     const stepState = await readStepState(sm.stateFilePath);
@@ -1637,10 +1856,10 @@ export async function computeNextTask(projectRoot, topic) {
             agent: null,
             prompt: null,
             escalation: {
-                reason: "prerequisite_missing",
-                lastFeedback: `Step ${currentStep} requires the following artifacts that are missing: ${prereqCheck.missing.join(", ")}`,
+                reason: 'prerequisite_missing',
+                lastFeedback: `Step ${currentStep} requires the following artifacts that are missing: ${prereqCheck.missing.join(', ')}`,
             },
-            message: `Step ${currentStep} prerequisite check failed: missing ${prereqCheck.missing.join(", ")}.`,
+            message: `Step ${currentStep} prerequisite check failed: missing ${prereqCheck.missing.join(', ')}.`,
         };
     }
     const validation = await validateStep(currentStep, outputDir, effectiveCodeRoot, buildCmd, testCmd, sm, state, topic, state.worktreeRoot);

@@ -4,8 +4,8 @@
  * All runtime schemas are defined with Zod v4.
  * TypeScript interfaces are inferred from schemas via `z.infer<>`.
  */
-import { z } from "zod/v4";
-export type { AcceptanceCriterion, AcceptanceCriteria, AssertionType, } from "./ac-schema.js";
+import { z } from 'zod/v4';
+export type { AcceptanceCriterion, AcceptanceCriteria, AssertionType, } from './ac-schema.js';
 export declare const ModeSchema: z.ZodEnum<{
     full: "full";
     quick: "quick";
@@ -236,16 +236,17 @@ export declare const StateJsonSchema: z.ZodObject<{
     worktreeRoot: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     worktreeBranch: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     sourceBranch: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    lockFile: z.ZodOptional<z.ZodString>;
     startedAt: z.ZodString;
     updatedAt: z.ZodString;
 }, z.core.$strip>;
 export type StateJson = z.infer<typeof StateJsonSchema>;
 /** TDD task state for a single task */
 export interface TddTaskState {
-    status: "PENDING" | "RED_CONFIRMED" | "GREEN_CONFIRMED";
+    status: 'PENDING' | 'RED_CONFIRMED' | 'GREEN_CONFIRMED';
     redTestFiles?: string[];
     redExitCode?: number;
-    redFailType?: "compilation_error" | "test_failure";
+    redFailType?: 'compilation_error' | 'test_failure';
 }
 export declare const InitInputSchema: z.ZodObject<{
     projectRoot: z.ZodString;
@@ -360,9 +361,9 @@ export declare const PreflightOutputSchema: z.ZodObject<{
 export type PreflightOutput = z.infer<typeof PreflightOutputSchema>;
 /** Tribunal verdict returned by independent judge agent */
 export interface TribunalVerdict {
-    verdict: "PASS" | "FAIL";
+    verdict: 'PASS' | 'FAIL';
     issues: Array<{
-        severity: "P0" | "P1" | "P2";
+        severity: 'P0' | 'P1' | 'P2';
         description: string;
         file?: string;
         suggestion?: string;
@@ -374,7 +375,7 @@ export interface TribunalVerdict {
     }>;
     traces?: Array<{
         source: string;
-        status: "FIXED" | "NOT_FIXED" | "PARTIAL";
+        status: 'FIXED' | 'NOT_FIXED' | 'PARTIAL';
         evidence?: string;
     }>;
     passEvidence?: string[];

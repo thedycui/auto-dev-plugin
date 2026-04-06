@@ -6,9 +6,9 @@
  * 2. validateAcBindingCoverage() — checks all test-bound ACs have bindings
  * 3. runAcBoundTests() — executes bound tests and collects results
  */
-import { readFile, readdir } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { join, relative } from "node:path";
+import { readFile, readdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { join, relative } from 'node:path';
 // ---------------------------------------------------------------------------
 // Regex Patterns per Language
 // ---------------------------------------------------------------------------
@@ -32,22 +32,26 @@ const TEST_FILE_PATTERNS = {
     python: /test_.*\.py$|_test\.py$/,
 };
 const TEST_DIRS = {
-    java: ["src/test"],
-    node: ["__tests__", "src/__tests__", "test", "tests"],
-    python: ["tests", "test"],
+    java: ['src/test'],
+    node: ['__tests__', 'src/__tests__', 'test', 'tests'],
+    python: ['tests', 'test'],
 };
 // ---------------------------------------------------------------------------
 // Language Normalization
 // ---------------------------------------------------------------------------
 function normalizeLanguage(language) {
     const lower = language.toLowerCase();
-    if (lower.includes("typescript") || lower.includes("javascript") || lower === "ts" || lower === "js" || lower === "node") {
-        return "node";
+    if (lower.includes('typescript') ||
+        lower.includes('javascript') ||
+        lower === 'ts' ||
+        lower === 'js' ||
+        lower === 'node') {
+        return 'node';
     }
-    if (lower.includes("java") && !lower.includes("script"))
-        return "java";
-    if (lower.includes("python") || lower === "py")
-        return "python";
+    if (lower.includes('java') && !lower.includes('script'))
+        return 'java';
+    if (lower.includes('python') || lower === 'py')
+        return 'python';
     return language;
 }
 // ---------------------------------------------------------------------------
@@ -60,7 +64,7 @@ async function findTestFiles(root, language) {
         return [];
     const dirs = TEST_DIRS[normalized] ?? [];
     const results = [];
-    const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git"]);
+    const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git']);
     async function walk(dir) {
         let entries;
         try {
@@ -71,7 +75,9 @@ async function findTestFiles(root, language) {
         }
         for (const entry of entries) {
             const fullPath = join(dir, entry.name);
-            if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
+            if (entry.isDirectory() &&
+                !entry.name.startsWith('.') &&
+                !SKIP_DIRS.has(entry.name)) {
                 await walk(fullPath);
             }
             else if (entry.isFile() && pattern.test(entry.name)) {
@@ -106,31 +112,31 @@ export async function discoverAcBindings(projectRoot, language) {
     for (const filePath of testFiles) {
         let content;
         try {
-            content = await readFile(filePath, "utf-8");
+            content = await readFile(filePath, 'utf-8');
         }
         catch {
             continue;
         }
         const relPath = relative(projectRoot, filePath);
-        const lines = content.split("\n");
+        const lines = content.split('\n');
         for (const line of lines) {
             for (const pattern of patterns) {
                 const match = pattern.exec(line);
                 if (match) {
                     let acNum;
                     let testName;
-                    if (language === "java") {
-                        if (match[0].includes("@DisplayName")) {
+                    if (language === 'java') {
+                        if (match[0].includes('@DisplayName')) {
                             acNum = match[1];
                             testName = match[2]?.trim() || `AC-${acNum}`;
                         }
                         else {
                             acNum = match[1];
-                            testName = `AC${acNum}_${match[2] ?? ""}`;
+                            testName = `AC${acNum}_${match[2] ?? ''}`;
                         }
                     }
-                    else if (language === "python") {
-                        if (match[0].includes("def ")) {
+                    else if (language === 'python') {
+                        if (match[0].includes('def ')) {
                             acNum = match[2];
                             testName = match[1];
                         }
@@ -164,37 +170,37 @@ export async function discoverAcBindings(projectRoot, language) {
  */
 export function validateAcBindingCoverage(criteria, bindings) {
     const testBoundAcs = criteria
-        .filter((c) => c.layer === "test-bound")
-        .map((c) => c.id);
-    const boundAcIds = new Set(bindings.map((b) => b.acId));
-    const covered = testBoundAcs.filter((id) => boundAcIds.has(id));
-    const missing = testBoundAcs.filter((id) => !boundAcIds.has(id));
-    const allAcIds = new Set(criteria.map((c) => c.id));
-    const extraBindings = [...boundAcIds].filter((id) => !allAcIds.has(id));
+        .filter(c => c.layer === 'test-bound')
+        .map(c => c.id);
+    const boundAcIds = new Set(bindings.map(b => b.acId));
+    const covered = testBoundAcs.filter(id => boundAcIds.has(id));
+    const missing = testBoundAcs.filter(id => !boundAcIds.has(id));
+    const allAcIds = new Set(criteria.map(c => c.id));
+    const extraBindings = [...boundAcIds].filter(id => !allAcIds.has(id));
     return { covered, missing, extraBindings };
 }
 // ---------------------------------------------------------------------------
 // Test Command Building
 // ---------------------------------------------------------------------------
 function escapeRegex(str) {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 /**
  * Build a targeted test command for a specific AC binding.
  */
 export function buildTargetedTestCommand(language, testFile, bindings, projectRoot) {
     switch (normalizeLanguage(language)) {
-        case "java": {
-            const className = testFile.replace(/.*\//, "").replace(".java", "");
-            const methods = bindings.map((b) => b.testName).join("+");
+        case 'java': {
+            const className = testFile.replace(/.*\//, '').replace('.java', '');
+            const methods = bindings.map(b => b.testName).join('+');
             return `cd ${projectRoot} && mvn test -Dtest=${className}#${methods} -pl . -q`;
         }
-        case "node": {
-            const namePattern = bindings.map((b) => escapeRegex(b.testName)).join("|");
+        case 'node': {
+            const namePattern = bindings.map(b => escapeRegex(b.testName)).join('|');
             return `cd ${projectRoot} && npx vitest run ${testFile} -t "${namePattern}"`;
         }
-        case "python": {
-            const kPattern = bindings.map((b) => b.testName).join(" or ");
+        case 'python': {
+            const kPattern = bindings.map(b => b.testName).join(' or ');
             return `cd ${projectRoot} && python -m pytest ${testFile} -k "${kPattern}" -v`;
         }
         default:
@@ -205,12 +211,12 @@ export function buildTargetedTestCommand(language, testFile, bindings, projectRo
 // Exec Helper
 // ---------------------------------------------------------------------------
 function execWithTimeout(cmd, options) {
-    return new Promise((resolve) => {
-        execFile("sh", ["-c", cmd], { cwd: options.cwd, timeout: options.timeout }, (err, stdout, stderr) => {
+    return new Promise(resolve => {
+        execFile('sh', ['-c', cmd], { cwd: options.cwd, timeout: options.timeout }, (err, stdout, stderr) => {
             resolve({
                 exitCode: err ? 1 : 0,
-                stdout: typeof stdout === "string" ? stdout : "",
-                stderr: typeof stderr === "string" ? stderr : "",
+                stdout: typeof stdout === 'string' ? stdout : '',
+                stderr: typeof stderr === 'string' ? stderr : '',
             });
         });
     });
@@ -242,7 +248,7 @@ function groupBy(items, keyFn) {
 export async function runAcBoundTests(bindings, projectRoot, language, testCmd) {
     const results = new Map();
     // Group bindings by AC id
-    const grouped = groupBy(bindings, (b) => b.acId);
+    const grouped = groupBy(bindings, b => b.acId);
     for (const [acId, acBindings] of grouped) {
         // Use the first binding's test file (typically one file per AC)
         const testFile = acBindings[0].testFile;

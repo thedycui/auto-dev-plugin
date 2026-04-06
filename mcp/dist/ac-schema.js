@@ -2,41 +2,41 @@
  * AC Schema — Zod schema definitions for acceptance-criteria.json
  * and hash computation for tamper detection.
  */
-import { z } from "zod/v4";
-import { createHash } from "node:crypto";
+import { z } from 'zod/v4';
+import { createHash } from 'node:crypto';
 // ---------------------------------------------------------------------------
 // Assertion Type Schema (discriminated union)
 // ---------------------------------------------------------------------------
-export const AssertionTypeSchema = z.discriminatedUnion("type", [
+export const AssertionTypeSchema = z.discriminatedUnion('type', [
     z.object({
-        type: z.literal("file_exists"),
+        type: z.literal('file_exists'),
         path: z.string(),
     }),
     z.object({
-        type: z.literal("file_not_exists"),
+        type: z.literal('file_not_exists'),
         path: z.string(),
     }),
     z.object({
-        type: z.literal("file_contains"),
-        path: z.string(),
-        pattern: z.string(),
-    }),
-    z.object({
-        type: z.literal("file_not_contains"),
+        type: z.literal('file_contains'),
         path: z.string(),
         pattern: z.string(),
     }),
     z.object({
-        type: z.literal("config_value"),
+        type: z.literal('file_not_contains'),
+        path: z.string(),
+        pattern: z.string(),
+    }),
+    z.object({
+        type: z.literal('config_value'),
         path: z.string(),
         key: z.string(),
         expectedValue: z.string(),
     }),
     z.object({
-        type: z.literal("build_succeeds"),
+        type: z.literal('build_succeeds'),
     }),
     z.object({
-        type: z.literal("test_passes"),
+        type: z.literal('test_passes'),
         testFile: z.string().optional(),
         testName: z.string().optional(),
     }),
@@ -47,7 +47,7 @@ export const AssertionTypeSchema = z.discriminatedUnion("type", [
 export const AcceptanceCriterionSchema = z.object({
     id: z.string(),
     description: z.string(),
-    layer: z.enum(["structural", "test-bound", "manual"]),
+    layer: z.enum(['structural', 'test-bound', 'manual']),
     structuralAssertions: z.array(AssertionTypeSchema).nullable().optional(),
     note: z.string().optional(),
 });
@@ -67,14 +67,14 @@ export const AcceptanceCriteriaSchema = z.object({
  * Used for tamper detection between Phase 1 lock and Phase 6 verification.
  */
 export function computeAcHash(criteria) {
-    const payload = criteria.map((c) => ({
+    const payload = criteria.map(c => ({
         id: c.id,
         layer: c.layer,
         structuralAssertions: c.structuralAssertions ?? null,
     }));
-    return createHash("sha256")
+    return createHash('sha256')
         .update(JSON.stringify(payload))
-        .digest("hex")
+        .digest('hex')
         .slice(0, 32);
 }
 //# sourceMappingURL=ac-schema.js.map

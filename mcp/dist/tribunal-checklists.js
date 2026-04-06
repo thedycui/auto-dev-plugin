@@ -2,7 +2,7 @@
  * Tribunal checklists for each phase.
  * Used by the tribunal agent to evaluate phase deliverables.
  */
-const ANTI_LENIENCY = "默认立场是 FAIL。PASS 必须逐条举证。";
+const ANTI_LENIENCY = '默认立场是 FAIL。PASS 必须逐条举证。';
 const PHASE_4_CHECKLIST = `## 裁决检查清单（Phase 4: Code Review + Phase 1/2 回溯验证）
 
 > ${ANTI_LENIENCY}

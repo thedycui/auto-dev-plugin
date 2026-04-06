@@ -4,20 +4,20 @@
  * 1. computeNextDirective: checkpoint 返回值中带下一步指令
  * 2. validateCompletion: 完成门禁，检查所有必需 Phase 是否已通过
  */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { isTestFile } from "./tdd-gate.js";
-import { AcceptanceCriteriaSchema, computeAcHash } from "./ac-schema.js";
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { isTestFile } from './tdd-gate.js';
+import { AcceptanceCriteriaSchema, computeAcHash } from './ac-schema.js';
 /** Phase 元数据 */
 const PHASE_META = {
-    1: { name: "DESIGN", description: "设计审查" },
-    2: { name: "PLAN", description: "实施计划" },
-    3: { name: "EXECUTE", description: "代码实施" },
-    4: { name: "VERIFY", description: "编译测试验证" },
-    5: { name: "E2E_TEST", description: "端到端测试" },
-    6: { name: "ACCEPTANCE", description: "验收" },
-    7: { name: "RETROSPECTIVE", description: "经验萃取" },
-    8: { name: "SHIP", description: "交付验证" },
+    1: { name: 'DESIGN', description: '设计审查' },
+    2: { name: 'PLAN', description: '实施计划' },
+    3: { name: 'EXECUTE', description: '代码实施' },
+    4: { name: 'VERIFY', description: '编译测试验证' },
+    5: { name: 'E2E_TEST', description: '端到端测试' },
+    6: { name: 'ACCEPTANCE', description: '验收' },
+    7: { name: 'RETROSPECTIVE', description: '经验萃取' },
+    8: { name: 'SHIP', description: '交付验证' },
 };
 /** full 模式的必需 Phase */
 const REQUIRED_PHASES_FULL = [1, 2, 3, 4, 5, 6, 7];
@@ -26,7 +26,11 @@ const REQUIRED_PHASES_QUICK = [3, 4, 5, 7];
 /** turbo 模式的必需 Phase（无 tribunal，只要 build+test 通过） */
 const REQUIRED_PHASES_TURBO = [3];
 const MAX_ITERATIONS_PER_PHASE = {
-    1: 3, 2: 3, 3: 2, 4: 3, 5: 3,
+    1: 3,
+    2: 3,
+    3: 2,
+    4: 3,
+    5: 3,
 };
 export function checkIterationLimit(phase, currentIteration, isInteractive) {
     const maxIteration = MAX_ITERATIONS_PER_PHASE[phase];
@@ -36,7 +40,7 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
             exceeded: false,
             currentIteration,
             maxIteration: Infinity,
-            action: "CONTINUE",
+            action: 'CONTINUE',
             message: `Phase ${phase} has no iteration limit.`,
         };
     }
@@ -46,7 +50,7 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
             exceeded: false,
             currentIteration,
             maxIteration,
-            action: "CONTINUE",
+            action: 'CONTINUE',
             message: `Iteration ${currentIteration}/${maxIteration} for Phase ${phase}.`,
         };
     }
@@ -55,11 +59,11 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
         exceeded: true,
         currentIteration,
         maxIteration,
-        action: "BLOCK",
+        action: 'BLOCK',
         message: `Phase ${phase} 已达最大迭代次数 (${currentIteration}/${maxIteration})。` +
             (isInteractive
-                ? " 请人工决定是否继续。"
-                : " 自动模式下不强制通过，需人工介入。建议：调整任务范围或使用 --interactive 模式。"),
+                ? ' 请人工决定是否继续。'
+                : ' 自动模式下不强制通过，需人工介入。建议：调整任务范围或使用 --interactive 模式。'),
     };
 }
 /**
@@ -68,9 +72,15 @@ export function checkIterationLimit(phase, currentIteration, isInteractive) {
 export function computeNextDirective(currentPhase, status, state, regressTo) {
     const mode = state.mode;
     const isDryRun = state.dryRun === true;
-    const maxPhase = isDryRun ? 2 : mode === "turbo" ? 3 : state.ship === true ? 8 : 7;
+    const maxPhase = isDryRun
+        ? 2
+        : mode === 'turbo'
+            ? 3
+            : state.ship === true
+                ? 8
+                : 7;
     // REGRESS 分支必须在守卫之前
-    if (status === "REGRESS") {
+    if (status === 'REGRESS') {
         if (!regressTo || regressTo >= currentPhase) {
             return {
                 phaseCompleted: false,
@@ -85,7 +95,7 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
                 phaseCompleted: false,
                 nextPhase: currentPhase,
                 nextPhaseName: PHASE_META[currentPhase]?.name ?? `Phase ${currentPhase}`,
-                mandate: "[BLOCKED] 已达最大回退次数(2)。需要人工介入决定后续步骤。",
+                mandate: '[BLOCKED] 已达最大回退次数(2)。需要人工介入决定后续步骤。',
                 canDeclareComplete: false,
             };
         }
@@ -93,13 +103,13 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
             phaseCompleted: false,
             nextPhase: regressTo,
             nextPhaseName: PHASE_META[regressTo]?.name ?? `Phase ${regressTo}`,
-            mandate: `[REGRESS] Phase ${currentPhase} 要求回退到 Phase ${regressTo} (${PHASE_META[regressTo]?.description ?? ""})。` +
+            mandate: `[REGRESS] Phase ${currentPhase} 要求回退到 Phase ${regressTo} (${PHASE_META[regressTo]?.description ?? ''})。` +
                 ` 调用 auto_dev_preflight(phase=${regressTo}) 重新开始。`,
             canDeclareComplete: false,
         };
     }
     // 非 PASS 状态不推进
-    if (status !== "PASS" && status !== "COMPLETED") {
+    if (status !== 'PASS' && status !== 'COMPLETED') {
         return {
             phaseCompleted: false,
             nextPhase: currentPhase,
@@ -127,7 +137,7 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
         phaseCompleted: true,
         nextPhase,
         nextPhaseName: nextMeta?.name ?? `Phase ${nextPhase}`,
-        mandate: `[MANDATORY] Phase ${currentPhase} 已通过。现在立即调用 auto_dev_next(projectRoot, topic) 进入 Phase ${nextPhase} (${nextMeta?.description ?? ""})。` +
+        mandate: `[MANDATORY] Phase ${currentPhase} 已通过。现在立即调用 auto_dev_next(projectRoot, topic) 进入 Phase ${nextPhase} (${nextMeta?.description ?? ''})。` +
             ` 禁止做其他任何操作（禁止 git push、禁止部署、禁止向用户宣称完成）。` +
             ` 你是调度器，必须通过 Agent tool 派发子 agent 执行任务，禁止自己执行。`,
         canDeclareComplete: false,
@@ -140,14 +150,12 @@ export function computeNextDirective(currentPhase, status, state, regressTo) {
 export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e = false, ship = false) {
     const basePhases = isDryRun
         ? [1, 2]
-        : mode === "turbo"
+        : mode === 'turbo'
             ? REQUIRED_PHASES_TURBO
-            : mode === "quick"
+            : mode === 'quick'
                 ? REQUIRED_PHASES_QUICK
                 : REQUIRED_PHASES_FULL;
-    let requiredPhases = skipE2e
-        ? basePhases.filter((p) => p !== 5)
-        : basePhases;
+    let requiredPhases = skipE2e ? basePhases.filter(p => p !== 5) : basePhases;
     if (ship) {
         requiredPhases = [...requiredPhases, 8];
     }
@@ -158,18 +166,18 @@ export function validateCompletion(progressLogContent, mode, isDryRun, skipE2e =
     while ((match = checkpointRegex.exec(progressLogContent)) !== null) {
         passedPhases.add(parseInt(match[1], 10));
     }
-    const missingPhases = requiredPhases.filter((p) => !passedPhases.has(p));
+    const missingPhases = requiredPhases.filter(p => !passedPhases.has(p));
     if (missingPhases.length === 0) {
         return {
             canComplete: true,
             passedPhases: Array.from(passedPhases).sort(),
             missingPhases: [],
-            message: "所有必需 Phase 已通过，可以完成。",
+            message: '所有必需 Phase 已通过，可以完成。',
         };
     }
     const missingNames = missingPhases
-        .map((p) => `Phase ${p} (${PHASE_META[p]?.name ?? "unknown"})`)
-        .join(", ");
+        .map(p => `Phase ${p} (${PHASE_META[p]?.name ?? 'unknown'})`)
+        .join(', ');
     return {
         canComplete: false,
         passedPhases: Array.from(passedPhases).sort(),
@@ -192,28 +200,28 @@ export async function validatePhase5Artifacts(outputDir, testFileCount, resultsC
     const warnings = [];
     // 1. 检查测试文件（新增或修改均算）
     if (testFileCount === 0) {
-        errors.push("未检测到新增或修改的测试文件。必须调用 test-architect agent 设计用例，" +
-            "再调用 developer agent 实现或修改测试代码。不能只写测试计划文档。" +
-            "即使项目缺少集成测试基础设施，核心业务逻辑也可以用 Mockito/jest.mock 编写单元测试。" +
-            "\"项目没有测试基础设施\"不是跳过所有自动化测试的理由。");
+        errors.push('未检测到新增或修改的测试文件。必须调用 test-architect agent 设计用例，' +
+            '再调用 developer agent 实现或修改测试代码。不能只写测试计划文档。' +
+            '即使项目缺少集成测试基础设施，核心业务逻辑也可以用 Mockito/jest.mock 编写单元测试。' +
+            '"项目没有测试基础设施"不是跳过所有自动化测试的理由。');
     }
     // 2. 新增实现文件 vs 新增测试文件比例检查（防止 DEFERRED 大法）
     if (implFileCount !== undefined && implFileCount > 0 && testFileCount === 0) {
         errors.push(`检测到 ${implFileCount} 个新增实现文件但 0 个新增测试文件。` +
-            "不允许只写 markdown 测试计划而不写任何可执行的测试代码。" +
-            "至少为核心逻辑（校验、计算、转换、权限判断）编写 Mockito/jest 单元测试。");
+            '不允许只写 markdown 测试计划而不写任何可执行的测试代码。' +
+            '至少为核心逻辑（校验、计算、转换、权限判断）编写 Mockito/jest 单元测试。');
     }
     // 3. 检查测试结果文件
     if (!resultsContent) {
-        errors.push("e2e-test-results.md 不存在。");
+        errors.push('e2e-test-results.md 不存在。');
     }
     else {
         const hasExecutionResult = /(?:test|测试|用例|case|spec|it\b).*?(?:PASS|FAIL|passed|failed|✅|❌|SUCCESS|ERROR)|(?:PASS|FAIL|✅|❌)\s*[:\-|]/i.test(resultsContent);
         const hasPendingOnly = /⏳|待执行|待部署|待验证|pending/i.test(resultsContent);
         if (!hasExecutionResult && hasPendingOnly) {
             errors.push("e2e-test-results.md 中只有'待执行'标记，没有实际测试执行结果（PASS/FAIL）。" +
-                "必须执行测试命令并记录结果。如果部分测试需要远程环境，" +
-                "仍然必须写测试代码并标注哪些本地通过、哪些需要部署后验证。");
+                '必须执行测试命令并记录结果。如果部分测试需要远程环境，' +
+                '仍然必须写测试代码并标注哪些本地通过、哪些需要部署后验证。');
         }
         // 4. DEFERRED 比例检查
         const deferredMatches = resultsContent.match(/DEFERRED|待部署|待验证|需要部署后/gi);
@@ -222,19 +230,19 @@ export async function validatePhase5Artifacts(outputDir, testFileCount, resultsC
         const executedCount = passFailMatches ? passFailMatches.length : 0;
         const totalCount = deferredCount + executedCount;
         if (totalCount > 0 && deferredCount / totalCount > 0.8) {
-            warnings.push(`⚠️ ${deferredCount}/${totalCount} 测试标记为 DEFERRED（${Math.round(deferredCount / totalCount * 100)}%）。` +
-                "大部分测试未在本地验证，质量保障不充分。" +
-                "请确认是否有更多测试可以用 UNIT 方式（Mockito/jest.mock）在本地覆盖。");
+            warnings.push(`⚠️ ${deferredCount}/${totalCount} 测试标记为 DEFERRED（${Math.round((deferredCount / totalCount) * 100)}%）。` +
+                '大部分测试未在本地验证，质量保障不充分。' +
+                '请确认是否有更多测试可以用 UNIT 方式（Mockito/jest.mock）在本地覆盖。');
         }
     }
     if (errors.length > 0) {
         return {
             valid: false,
             errors,
-            mandate: "[BLOCKED] Phase 5 PASS 被拒绝：" + errors.join(" "),
+            mandate: '[BLOCKED] Phase 5 PASS 被拒绝：' + errors.join(' '),
         };
     }
-    const warningText = warnings.length > 0 ? " " + warnings.join(" ") : "";
+    const warningText = warnings.length > 0 ? ' ' + warnings.join(' ') : '';
     return { valid: true, errors: [], mandate: warningText };
 }
 /**
@@ -248,24 +256,24 @@ export async function validatePhase5Artifacts(outputDir, testFileCount, resultsC
 export function validatePhase6Artifacts(reportContent) {
     const errors = [];
     if (!reportContent) {
-        errors.push("acceptance-report.md 不存在。必须调用 acceptance-validator agent 生成验收报告。" +
-            "即使 design.md 没有显式 AC-N 条目，也必须从设计目标和改动清单中自动提取验收标准。");
+        errors.push('acceptance-report.md 不存在。必须调用 acceptance-validator agent 生成验收报告。' +
+            '即使 design.md 没有显式 AC-N 条目，也必须从设计目标和改动清单中自动提取验收标准。');
     }
     else {
         const hasVerification = /\b(PASS|FAIL|SKIP|VERIFIED|通过|失败|跳过)\b/i.test(reportContent);
         if (!hasVerification) {
-            errors.push("acceptance-report.md 中没有验证结果（PASS/FAIL/SKIP）。" +
-                "报告必须包含逐条验证的结果，不能只有描述性文字。");
+            errors.push('acceptance-report.md 中没有验证结果（PASS/FAIL/SKIP）。' +
+                '报告必须包含逐条验证的结果，不能只有描述性文字。');
         }
     }
     if (errors.length > 0) {
         return {
             valid: false,
             errors,
-            mandate: "[BLOCKED] Phase 6 PASS 被拒绝：" + errors.join(" "),
+            mandate: '[BLOCKED] Phase 6 PASS 被拒绝：' + errors.join(' '),
         };
     }
-    return { valid: true, errors: [], mandate: "" };
+    return { valid: true, errors: [], mandate: '' };
 }
 /**
  * 检测新增的测试文件数量。
@@ -280,8 +288,12 @@ export function countTestFiles(diffFileNames) {
  * 防止 agent 跳过中间阶段直接标记后续阶段为 PASS。
  */
 export function validatePredecessor(targetPhase, progressLogContent, mode, skipE2e) {
-    const basePhases = mode === "turbo" ? REQUIRED_PHASES_TURBO : mode === "quick" ? REQUIRED_PHASES_QUICK : REQUIRED_PHASES_FULL;
-    const requiredPhases = skipE2e ? basePhases.filter((p) => p !== 5) : basePhases;
+    const basePhases = mode === 'turbo'
+        ? REQUIRED_PHASES_TURBO
+        : mode === 'quick'
+            ? REQUIRED_PHASES_QUICK
+            : REQUIRED_PHASES_FULL;
+    const requiredPhases = skipE2e ? basePhases.filter(p => p !== 5) : basePhases;
     const targetIndex = requiredPhases.indexOf(targetPhase);
     // Phase not in required list (e.g., Phase 0 brainstorm) → allow
     if (targetIndex < 0) {
@@ -319,7 +331,7 @@ export function parseInitMarker(progressLogContent) {
     return {
         buildCmd: match[1],
         testCmd: match[2],
-        skipE2e: match[3] === "true",
+        skipE2e: match[3] === 'true',
         mode: match[4],
         integrity: match[5],
         disabledTestCount: match[6] !== undefined ? parseInt(match[6], 10) : undefined,
@@ -335,16 +347,20 @@ export function parseInitMarker(progressLogContent) {
 export function validatePhase1ReviewArtifact(reviewContent) {
     const errors = [];
     if (!reviewContent) {
-        errors.push("design-review.md 不存在。Phase 1 PASS 要求必须调用 design-reviewer agent 进行审查。" +
-            "禁止跳过审查直接 checkpoint PASS。");
+        errors.push('design-review.md 不存在。Phase 1 PASS 要求必须调用 design-reviewer agent 进行审查。' +
+            '禁止跳过审查直接 checkpoint PASS。');
     }
     else if (reviewContent.trim().length < 100) {
-        errors.push("design-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。");
+        errors.push('design-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。');
     }
     if (errors.length > 0) {
-        return { valid: false, errors, mandate: "[BLOCKED] Phase 1 PASS 被拒绝：" + errors.join(" ") };
+        return {
+            valid: false,
+            errors,
+            mandate: '[BLOCKED] Phase 1 PASS 被拒绝：' + errors.join(' '),
+        };
     }
-    return { valid: true, errors: [], mandate: "" };
+    return { valid: true, errors: [], mandate: '' };
 }
 /**
  * Phase 2 PASS 要求 plan-review.md 存在且有实质内容。
@@ -353,16 +369,20 @@ export function validatePhase1ReviewArtifact(reviewContent) {
 export function validatePhase2ReviewArtifact(reviewContent) {
     const errors = [];
     if (!reviewContent) {
-        errors.push("plan-review.md 不存在。Phase 2 PASS 要求必须调用 plan-reviewer agent 进行审查。" +
-            "禁止跳过审查直接 checkpoint PASS。");
+        errors.push('plan-review.md 不存在。Phase 2 PASS 要求必须调用 plan-reviewer agent 进行审查。' +
+            '禁止跳过审查直接 checkpoint PASS。');
     }
     else if (reviewContent.trim().length < 100) {
-        errors.push("plan-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。");
+        errors.push('plan-review.md 内容过短（<100 字符），疑似伪造。必须包含实际审查结果。');
     }
     if (errors.length > 0) {
-        return { valid: false, errors, mandate: "[BLOCKED] Phase 2 PASS 被拒绝：" + errors.join(" ") };
+        return {
+            valid: false,
+            errors,
+            mandate: '[BLOCKED] Phase 2 PASS 被拒绝：' + errors.join(' '),
+        };
     }
-    return { valid: true, errors: [], mandate: "" };
+    return { valid: true, errors: [], mandate: '' };
 }
 /**
  * Phase 7 PASS 要求 retrospective.md 存在且有实质内容。
@@ -376,26 +396,30 @@ export function validatePhase2ReviewArtifact(reviewContent) {
 export function validatePhase7Artifacts(retroContent) {
     const errors = [];
     if (!retroContent) {
-        errors.push("retrospective.md 不存在。Phase 7 PASS 要求必须调用 reviewer agent 生成深度复盘报告。" +
-            "禁止主 agent 自己调用 lessons_add 后直接 checkpoint PASS。");
+        errors.push('retrospective.md 不存在。Phase 7 PASS 要求必须调用 reviewer agent 生成深度复盘报告。' +
+            '禁止主 agent 自己调用 lessons_add 后直接 checkpoint PASS。');
     }
     else {
-        const lines = retroContent.trim().split("\n").length;
+        const lines = retroContent.trim().split('\n').length;
         if (lines < 50) {
             errors.push(`retrospective.md 内容过短（${lines} 行，要求 >= 50 行），疑似敷衍。` +
-                "必须包含完整的诚实度审计、踩坑清单、亮点和改进建议。");
+                '必须包含完整的诚实度审计、踩坑清单、亮点和改进建议。');
         }
         const hasIntegrityAudit = /诚实度审计|integrity.*audit/i.test(retroContent);
         const hasAuditVerdict = /\b(PASS|FAIL|PARTIAL)\b/.test(retroContent);
         if (!hasIntegrityAudit || !hasAuditVerdict) {
-            errors.push("retrospective.md 缺少诚实度审计章节或审计结论（PASS/FAIL/PARTIAL）。" +
-                "复盘报告必须包含：是否跳过阶段、是否被框架拦截、review/测试是否真实、TDD 合规性、是否有作弊行为。");
+            errors.push('retrospective.md 缺少诚实度审计章节或审计结论（PASS/FAIL/PARTIAL）。' +
+                '复盘报告必须包含：是否跳过阶段、是否被框架拦截、review/测试是否真实、TDD 合规性、是否有作弊行为。');
         }
     }
     if (errors.length > 0) {
-        return { valid: false, errors, mandate: "[BLOCKED] Phase 7 PASS 被拒绝：" + errors.join(" ") };
+        return {
+            valid: false,
+            errors,
+            mandate: '[BLOCKED] Phase 7 PASS 被拒绝：' + errors.join(' '),
+        };
     }
-    return { valid: true, errors: [], mandate: "" };
+    return { valid: true, errors: [], mandate: '' };
 }
 // ---------------------------------------------------------------------------
 // TDD Exempt Task Detection
@@ -409,7 +433,7 @@ export function validatePhase7Artifacts(retroContent) {
 export async function isTddExemptTask(outputDir, task) {
     let content;
     try {
-        content = await readFile(join(outputDir, "plan.md"), "utf-8");
+        content = await readFile(join(outputDir, 'plan.md'), 'utf-8');
     }
     catch {
         return false;
@@ -432,7 +456,10 @@ export function validateAcJson(acContent) {
         parsed = JSON.parse(acContent);
     }
     catch (err) {
-        return { valid: false, error: `AC JSON parse error: ${err.message}` };
+        return {
+            valid: false,
+            error: `AC JSON parse error: ${err.message}`,
+        };
     }
     const parseResult = AcceptanceCriteriaSchema.safeParse(parsed);
     if (!parseResult.success) {
@@ -442,7 +469,7 @@ export function validateAcJson(acContent) {
         };
     }
     const criteria = parseResult.data.criteria;
-    const manualCount = criteria.filter((c) => c.layer === "manual").length;
+    const manualCount = criteria.filter(c => c.layer === 'manual').length;
     const manualRatio = criteria.length > 0 ? manualCount / criteria.length : 0;
     if (manualRatio > 0.4) {
         return {
@@ -451,13 +478,18 @@ export function validateAcJson(acContent) {
         };
     }
     const hash = computeAcHash(criteria);
-    const structuralCount = criteria.filter((c) => c.layer === "structural").length;
-    const testBoundCount = criteria.filter((c) => c.layer === "test-bound").length;
+    const structuralCount = criteria.filter(c => c.layer === 'structural').length;
+    const testBoundCount = criteria.filter(c => c.layer === 'test-bound').length;
     return {
         valid: true,
         data: parseResult.data,
         hash,
-        stats: { total: criteria.length, structural: structuralCount, testBound: testBoundCount, manual: manualCount },
+        stats: {
+            total: criteria.length,
+            structural: structuralCount,
+            testBound: testBoundCount,
+            manual: manualCount,
+        },
     };
 }
 /**
@@ -477,11 +509,17 @@ export function validateAcIntegrity(acContent, progressLogContent) {
         parsed = JSON.parse(acContent);
     }
     catch {
-        return { valid: false, error: "AC JSON parse error during integrity check" };
+        return {
+            valid: false,
+            error: 'AC JSON parse error during integrity check',
+        };
     }
     const parseResult = AcceptanceCriteriaSchema.safeParse(parsed);
     if (!parseResult.success) {
-        return { valid: false, error: "AC JSON schema invalid during integrity check" };
+        return {
+            valid: false,
+            error: 'AC JSON schema invalid during integrity check',
+        };
     }
     const currentHash = computeAcHash(parseResult.data.criteria);
     if (currentHash !== storedHash) {

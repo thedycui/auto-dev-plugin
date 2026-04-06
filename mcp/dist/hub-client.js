@@ -15,7 +15,7 @@ export class HubClient {
     _agentId = null;
     constructor(baseUrl, token) {
         // Strip trailing slash
-        this.baseUrl = baseUrl.replace(/\/+$/, "");
+        this.baseUrl = baseUrl.replace(/\/+$/, '');
         this.token = token;
     }
     // -------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export class HubClient {
             const timeout = setTimeout(() => controller.abort(), 1000);
             try {
                 const res = await fetch(`${this.baseUrl}/agents`, {
-                    method: "GET",
+                    method: 'GET',
                     headers: this.authHeaders(),
                     signal: controller.signal,
                 });
@@ -55,15 +55,15 @@ export class HubClient {
             return true;
         try {
             const res = await fetch(`${this.baseUrl}/agents/register`, {
-                method: "POST",
-                headers: { ...this.authHeaders(), "Content-Type": "application/json" },
+                method: 'POST',
+                headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name: "auto-dev-tribunal-client",
-                    capabilities: ["tribunal-client"],
+                    name: 'auto-dev-tribunal-client',
+                    capabilities: ['tribunal-client'],
                 }),
             });
             if (res.ok) {
-                const data = await res.json();
+                const data = (await res.json());
                 this._agentId = data.id ?? data.agentId ?? null;
                 this._registered = true;
                 return true;
@@ -81,14 +81,14 @@ export class HubClient {
      * Returns the agent object or null if not found.
      */
     async findTribunalWorker() {
-        const workerName = process.env.TRIBUNAL_HUB_WORKER || "tribunal-worker";
+        const workerName = process.env.TRIBUNAL_HUB_WORKER || 'tribunal-worker';
         try {
             const res = await fetch(`${this.baseUrl}/agents?name=${encodeURIComponent(workerName)}`, { headers: this.authHeaders() });
             if (!res.ok)
                 return null;
-            const agents = await res.json();
+            const agents = (await res.json());
             // Find first online agent
-            return agents.find((a) => a.status === "online") ?? null;
+            return agents.find(a => a.status === 'online') ?? null;
         }
         catch (e) {
             console.error(`[hub] findTribunalWorker failed: ${e.message}`);
@@ -106,17 +106,17 @@ export class HubClient {
         try {
             // 1. Send command
             const createRes = await fetch(`${this.baseUrl}/commands`, {
-                method: "POST",
-                headers: { ...this.authHeaders(), "Content-Type": "application/json" },
+                method: 'POST',
+                headers: { ...this.authHeaders(), 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     targetAgentId,
-                    action: "execute_prompt",
+                    action: 'execute_prompt',
                     payload: { prompt },
                 }),
             });
             if (!createRes.ok)
                 return null;
-            const cmd = await createRes.json();
+            const cmd = (await createRes.json());
             const commandId = cmd.id;
             // 2. Poll for completion
             const intervals = [2000, 3000, 5000]; // then stabilize at 5000
@@ -124,17 +124,20 @@ export class HubClient {
             let pollIndex = 0;
             while (elapsed < timeoutMs) {
                 const interval = intervals[Math.min(pollIndex, intervals.length - 1)];
-                await new Promise((r) => setTimeout(r, interval));
+                await new Promise(r => setTimeout(r, interval));
                 elapsed += interval;
                 pollIndex++;
-                const statusRes = await fetch(`${this.baseUrl}/commands/${commandId}`, { headers: this.authHeaders() });
+                const statusRes = await fetch(`${this.baseUrl}/commands/${commandId}`, {
+                    headers: this.authHeaders(),
+                });
                 if (!statusRes.ok)
                     continue;
-                const statusData = await statusRes.json();
-                if (statusData.status === "completed") {
+                const statusData = (await statusRes.json());
+                if (statusData.status === 'completed') {
                     return statusData.result;
                 }
-                if (statusData.status === "rejected" || statusData.status === "expired") {
+                if (statusData.status === 'rejected' ||
+                    statusData.status === 'expired') {
                     return null;
                 }
                 // pending / assigned / in_progress — continue polling
@@ -169,7 +172,7 @@ export function getHubClient() {
     if (!hubUrl)
         return null;
     if (!_hubClient) {
-        const token = process.env.TRIBUNAL_HUB_TOKEN ?? "";
+        const token = process.env.TRIBUNAL_HUB_TOKEN ?? '';
         _hubClient = new HubClient(hubUrl, token);
     }
     return _hubClient;

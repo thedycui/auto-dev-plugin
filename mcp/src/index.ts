@@ -415,6 +415,45 @@ server.tool(
           }
         }
 
+        // Worktree resume: rebuild missing worktree dir if branch still exists
+        if (state.worktreeRoot && state.worktreeBranch) {
+          const wtRoot = state.worktreeRoot;
+          const wtBranch = state.worktreeBranch;
+          try {
+            const { execFile: execFileGit } =
+              await import('node:child_process');
+            let worktreeDirExists = false;
+            try {
+              await stat(wtRoot);
+              worktreeDirExists = true;
+            } catch {
+              /* dir missing */
+            }
+            if (!worktreeDirExists) {
+              const branchOutput = await new Promise<string>(resolve => {
+                execFileGit(
+                  'git',
+                  ['branch', '--list', wtBranch],
+                  { cwd: projectRoot, timeout: 10_000 },
+                  (err, stdout) => resolve(err ? '' : stdout || '')
+                );
+              });
+              if (branchOutput.trim()) {
+                await new Promise<void>((resolve, reject) => {
+                  execFileGit(
+                    'git',
+                    ['worktree', 'add', wtRoot, wtBranch],
+                    { cwd: projectRoot, timeout: 30_000 },
+                    (err: Error | null) => (err ? reject(err) : resolve())
+                  );
+                });
+              }
+            }
+          } catch {
+            /* worktree rebuild is non-fatal */
+          }
+        }
+
         // Parse progress-log for last Phase 3 task (for task-level resume)
         let resumeTask: number | undefined;
         let resumeTaskStatus: string | undefined;
@@ -2397,6 +2436,75 @@ server.tool(
       await sm.atomicWrite(join(sm.outputDir, 'summary.md'), summaryContent);
     } catch {
       /* summary.md generation failed — non-fatal */
+    }
+
+    // === Worktree cleanup: merge and remove worktree if present ===
+    if (state.worktreeRoot && state.worktreeBranch && state.sourceBranch) {
+      const wtRoot = state.worktreeRoot;
+      const wtBranch = state.worktreeBranch;
+      try {
+        const { execFile: execFileGit } = await import('node:child_process');
+
+        // Check if worktree is dirty
+        const statusOutput = await new Promise<string>(resolve => {
+          execFileGit(
+            'git',
+            ['status', '--porcelain'],
+            { cwd: wtRoot, timeout: 10_000 },
+            (err, stdout) => resolve(err ? '' : stdout || '')
+          );
+        });
+
+        // Commit if dirty
+        if (statusOutput.trim()) {
+          await new Promise<void>((resolve, reject) => {
+            execFileGit(
+              'git',
+              ['add', '-A'],
+              { cwd: wtRoot, timeout: 10_000 },
+              (err: Error | null) => (err ? reject(err) : resolve())
+            );
+          });
+
+          await new Promise<void>((resolve, reject) => {
+            execFileGit(
+              'git',
+              ['commit', '-m', 'auto-dev: commit changes before merge'],
+              { cwd: wtRoot, timeout: 10_000 },
+              (err: Error | null) => (err ? reject(err) : resolve())
+            );
+          });
+        }
+
+        // Merge worktree branch to source branch
+        await new Promise<void>((resolve, reject) => {
+          execFileGit(
+            'git',
+            ['merge', wtBranch],
+            { cwd: projectRoot, timeout: 30_000 },
+            (err: Error | null) => (err ? reject(err) : resolve())
+          );
+        });
+
+        // Remove worktree
+        await new Promise<void>((resolve, reject) => {
+          execFileGit(
+            'git',
+            ['worktree', 'remove', wtRoot],
+            { cwd: projectRoot, timeout: 30_000 },
+            (err: Error | null) => (err ? reject(err) : resolve())
+          );
+        });
+
+        // Clear worktree fields from state
+        await sm.atomicUpdate({
+          worktreeRoot: null,
+          worktreeBranch: null,
+        });
+      } catch (error) {
+        // Log but don't fail completion
+        console.error('Worktree cleanup failed:', error);
+      }
     }
 
     return textResult({

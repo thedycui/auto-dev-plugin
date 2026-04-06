@@ -48,44 +48,46 @@ export function isImplFile(filePath) {
  */
 export function buildTestCommand(language, testFiles, projectRoot) {
     if (testFiles.length === 0)
-        return "";
+        return '';
     switch (language) {
-        case "Java":
-        case "Java 8": {
-            const entries = testFiles.map(f => {
+        case 'Java':
+        case 'Java 8': {
+            const entries = testFiles
+                .map(f => {
                 const classMatch = f.match(/([^/]+)\.java$/);
                 const moduleMatch = f.match(/^([^/]+?)\/src\//);
                 return {
                     className: classMatch ? classMatch[1] : null,
                     module: moduleMatch ? moduleMatch[1] : null,
                 };
-            }).filter(e => e.className);
+            })
+                .filter(e => e.className);
             // 按模块分组
             const byModule = new Map();
             for (const e of entries) {
-                const key = e.module || "__root__";
+                const key = e.module || '__root__';
                 if (!byModule.has(key))
                     byModule.set(key, []);
                 byModule.get(key).push(e.className);
             }
             const commands = [...byModule.entries()].map(([mod, classes]) => {
-                const plFlag = mod !== "__root__" ? ` -pl ${mod}` : "";
-                return `mvn test -Dtest="${classes.join(",")}"${plFlag} -DfailIfNoTests=false`;
+                const plFlag = mod !== '__root__' ? ` -pl ${mod}` : '';
+                return `mvn test -Dtest="${classes.join(',')}"${plFlag} -DfailIfNoTests=false`;
             });
-            return commands.join(" && ");
+            return commands.join(' && ');
         }
-        case "TypeScript/JavaScript":
-        case "TypeScript":
-        case "JavaScript": {
-            const files = testFiles.join(" ");
+        case 'TypeScript/JavaScript':
+        case 'TypeScript':
+        case 'JavaScript': {
+            const files = testFiles.join(' ');
             return `npx vitest run ${files} --reporter=verbose`;
         }
-        case "Python": {
-            const files = testFiles.join(" ");
+        case 'Python': {
+            const files = testFiles.join(' ');
             return `pytest ${files} -v`;
         }
         default:
-            return "";
+            return '';
     }
 }
 // ---------------------------------------------------------------------------
@@ -102,7 +104,7 @@ export function validateRedPhase(changedFiles, testFiles) {
     if (implFiles.length > 0) {
         return {
             valid: false,
-            error: `RED 阶段禁止修改实现文件。检测到以下实现文件被修改：${implFiles.join(", ")}`,
+            error: `RED 阶段禁止修改实现文件。检测到以下实现文件被修改：${implFiles.join(', ')}`,
         };
     }
     // 检查是否至少有一个测试文件被修改
@@ -111,7 +113,7 @@ export function validateRedPhase(changedFiles, testFiles) {
     if (changedTestFiles.length === 0) {
         return {
             valid: false,
-            error: "RED 阶段要求至少修改一个测试文件，但 changedFiles 中没有找到 testFiles 中的文件。",
+            error: 'RED 阶段要求至少修改一个测试文件，但 changedFiles 中没有找到 testFiles 中的文件。',
         };
     }
     return { valid: true };
