@@ -2,6 +2,10 @@
 
 > Claude Code 插件 — 自治开发循环，从设计到验收的全自动闭环。
 
+## CI/CD Pipeline Status
+
+[![CI](https://github.com/thedycui/auto-dev-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/thedycui/auto-dev-plugin/actions/workflows/ci.yml)
+
 ## 简介
 
 auto-dev 是一个 Claude Code Plugin，将「自治开发循环」从纯 Skill 指令升级为 **MCP 工具 + Agent 定义 + Skill 编排 + Hook 自动化** 的组合架构。Claude 是主控方，Plugin 提供确定性工具保障流程可靠执行。
